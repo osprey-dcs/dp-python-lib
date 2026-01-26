@@ -3,6 +3,7 @@ from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.grpc import ingestion_pb2_grpc
 from dp_python_lib.grpc import ingestion_pb2
 from dp_python_lib.grpc import common_pb2
+import grpc
 
 
 class RegisterProviderRequestParams:
@@ -75,12 +76,47 @@ class IngestionClient(ServiceApiClientBase):
 
     def _send_register_provider(self, request):
         """
-        Invokes the registerProvider() API method will the supplied request object.
+        Invokes the registerProvider() API method with the supplied request object.
         :param request: RegisgerProviderRequest object with parameters for call to registerProvider().
         :return: Returns a RegisterProviderApiResult with the method response and status information.
         """
         ingestion_stub = ingestion_pb2_grpc.DpIngestionServiceStub(self._channel)
-        # TODO: call registerProvider API method with supplied request object, return RegisterProviderApiResult
+        
+        try:
+            response = ingestion_stub.registerProvider(request)
+            
+            # Check if response contains an exceptional result (error)
+            if response.HasField('exceptionalResult'):
+                return RegisterProviderApiResult(
+                    is_error=True, 
+                    message=response.exceptionalResult.message
+                )
+            
+            # Check if response contains registration result (success)
+            elif response.HasField('registrationResult'):
+                return RegisterProviderApiResult(
+                    is_error=False, 
+                    message=None, 
+                    response=response
+                )
+            
+            # Unexpected response structure
+            else:
+                return RegisterProviderApiResult(
+                    is_error=True, 
+                    message="Unexpected response format: neither exceptionalResult nor registrationResult found"
+                )
+                
+        except grpc.RpcError as e:
+            return RegisterProviderApiResult(
+                is_error=True, 
+                message=f"gRPC error: {e.details()}"
+            )
+        except Exception as e:
+            return RegisterProviderApiResult(
+                is_error=True, 
+                message=f"Unexpected error: {str(e)}"
+            )
 
     def register_provider(self, request_params):
         """

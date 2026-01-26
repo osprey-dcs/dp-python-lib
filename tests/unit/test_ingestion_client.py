@@ -1,12 +1,13 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 import sys
 import os
+import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
 
-from dp_python_lib.client.ingestion_client import IngestionClient, RegisterProviderRequestParams
+from dp_python_lib.client.ingestion_client import IngestionClient, RegisterProviderRequestParams, RegisterProviderApiResult
 from dp_python_lib.grpc import ingestion_pb2
 from dp_python_lib.grpc import common_pb2
 
@@ -155,6 +156,132 @@ class TestIngestionClient(unittest.TestCase):
         # Verify all are Attribute objects
         for attr in request.attributes:
             self.assertIsInstance(attr, common_pb2.Attribute)
+
+    @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
+    def test_send_register_provider_success(self, mock_stub_class):
+        """Test _send_register_provider with successful response."""
+        # Create mock response with registrationResult
+        mock_response = Mock()
+        mock_response.HasField = Mock()
+        mock_response.HasField.side_effect = lambda field: field == 'registrationResult'
+        
+        # Setup mock stub
+        mock_stub = Mock()
+        mock_stub.registerProvider.return_value = mock_response
+        mock_stub_class.return_value = mock_stub
+        
+        # Create test request
+        request = ingestion_pb2.RegisterProviderRequest()
+        request.providerName = "test_provider"
+        
+        # Call method
+        result = self.client._send_register_provider(request)
+        
+        # Verify results
+        self.assertIsInstance(result, RegisterProviderApiResult)
+        self.assertFalse(result.is_error)
+        self.assertIsNone(result.message)
+        self.assertEqual(result.response, mock_response)
+        
+        # Verify stub was called correctly
+        mock_stub_class.assert_called_once_with(self.mock_channel)
+        mock_stub.registerProvider.assert_called_once_with(request)
+    
+    @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
+    def test_send_register_provider_exceptional_result(self, mock_stub_class):
+        """Test _send_register_provider with exceptionalResult (business error)."""
+        # Create mock response with exceptionalResult
+        mock_response = Mock()
+        mock_response.HasField = Mock()
+        mock_response.HasField.side_effect = lambda field: field == 'exceptionalResult'
+        mock_response.exceptionalResult.message = "Provider name already exists"
+        
+        # Setup mock stub
+        mock_stub = Mock()
+        mock_stub.registerProvider.return_value = mock_response
+        mock_stub_class.return_value = mock_stub
+        
+        # Create test request
+        request = ingestion_pb2.RegisterProviderRequest()
+        request.providerName = "duplicate_provider"
+        
+        # Call method
+        result = self.client._send_register_provider(request)
+        
+        # Verify results
+        self.assertIsInstance(result, RegisterProviderApiResult)
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.message, "Provider name already exists")
+        self.assertIsNone(result.response)
+    
+    @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
+    def test_send_register_provider_unexpected_response(self, mock_stub_class):
+        """Test _send_register_provider with unexpected response format."""
+        # Create mock response with neither field
+        mock_response = Mock()
+        mock_response.HasField = Mock(return_value=False)
+        
+        # Setup mock stub
+        mock_stub = Mock()
+        mock_stub.registerProvider.return_value = mock_response
+        mock_stub_class.return_value = mock_stub
+        
+        # Create test request
+        request = ingestion_pb2.RegisterProviderRequest()
+        request.providerName = "test_provider"
+        
+        # Call method
+        result = self.client._send_register_provider(request)
+        
+        # Verify results
+        self.assertIsInstance(result, RegisterProviderApiResult)
+        self.assertTrue(result.is_error)
+        self.assertIn("Unexpected response format", result.message)
+        self.assertIsNone(result.response)
+    
+    @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
+    def test_send_register_provider_grpc_error(self, mock_stub_class):
+        """Test _send_register_provider with gRPC RpcError."""
+        # Setup mock stub to raise gRPC error
+        mock_stub = Mock()
+        mock_grpc_error = grpc.RpcError()
+        mock_grpc_error.details = Mock(return_value="Connection timeout")
+        mock_stub.registerProvider.side_effect = mock_grpc_error
+        mock_stub_class.return_value = mock_stub
+        
+        # Create test request
+        request = ingestion_pb2.RegisterProviderRequest()
+        request.providerName = "test_provider"
+        
+        # Call method
+        result = self.client._send_register_provider(request)
+        
+        # Verify results
+        self.assertIsInstance(result, RegisterProviderApiResult)
+        self.assertTrue(result.is_error)
+        self.assertIn("gRPC error: Connection timeout", result.message)
+        self.assertIsNone(result.response)
+    
+    @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
+    def test_send_register_provider_general_exception(self, mock_stub_class):
+        """Test _send_register_provider with general exception."""
+        # Setup mock stub to raise general exception
+        mock_stub = Mock()
+        mock_stub.registerProvider.side_effect = ValueError("Invalid parameter")
+        mock_stub_class.return_value = mock_stub
+        
+        # Create test request
+        request = ingestion_pb2.RegisterProviderRequest()
+        request.providerName = "test_provider"
+        
+        # Call method
+        result = self.client._send_register_provider(request)
+        
+        # Verify results
+        self.assertIsInstance(result, RegisterProviderApiResult)
+        self.assertTrue(result.is_error)
+        self.assertIn("Unexpected error: Invalid parameter", result.message)
+        self.assertIsNone(result.response)
 
 
 if __name__ == '__main__':

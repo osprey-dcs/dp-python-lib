@@ -12,3 +12,26 @@ The IngestionClient class provides wrapper methods for calling gRPC API methods 
 
 1.0.1 Please add unit test coverage for the new _build_register_provider_request() method.
 
+2.0 Next we will implement IngestionClient._send_register_provider.  The method exists but only creates a stub.  Please fully implement the method to call the registerProvider() API method with the supplied RegisterProviderRequest object, and return a RegisterProviderApiResult object.  The result isError flag should be set if the API call fails along with the corresponding error message in the result object's status object.  If the API call succeeds, the RegisterProviderResponse object should be added to the result object. In Java, the implementation of this method looks as follows:
+```
+        final DpIngestionServiceGrpc.DpIngestionServiceStub asyncStub =
+                DpIngestionServiceGrpc.newStub(channel);
+
+        final RegisterProviderResponseObserver responseObserver =
+                new RegisterProviderResponseObserver();
+
+        // send request in separate thread to better simulate out of process grpc,
+        // otherwise service handles request in this thread
+        new Thread(() -> {
+            asyncStub.registerProvider(request, responseObserver);
+        }).start();
+
+        responseObserver.await();
+
+        if (responseObserver.isError()) {
+            return new RegisterProviderApiResult(true, responseObserver.getErrorMessage());
+        } else {
+            return new RegisterProviderApiResult(responseObserver.getResponseList().get(0));
+        }
+```
+
