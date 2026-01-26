@@ -1,5 +1,6 @@
 from abc import ABC
 import grpc
+import logging
 
 
 class ServiceApiClientBase(ABC):
@@ -12,5 +13,7 @@ class ServiceApiClientBase(ABC):
         """
         :param channel: gRPC communication channel for the client's backend Service.
         """
+        self.logger = logging.getLogger(__name__)
         self._channel = channel
+        self.logger.debug("Initialized service client with channel: %s", channel)
 

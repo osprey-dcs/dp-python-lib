@@ -34,6 +34,8 @@ Core dependencies are managed in `pyproject.toml`:
 - `grpcio` - gRPC runtime
 - `grpcio-tools` - gRPC development tools  
 - `protobuf` - Protocol Buffers runtime
+- `pydantic-settings` - Type-safe configuration with environment variable support
+- `PyYAML` - YAML file parsing
 
 ## Architecture Notes
 
@@ -43,6 +45,8 @@ Core dependencies are managed in `pyproject.toml`:
 - The main client entry point is `MldpClient` in `src/dp_python_lib/client/mldp_client.py`
 - Client classes like `IngestionClient` provide user-friendly wrappers around gRPC service calls
 - The library follows standard Python packaging conventions with `pyproject.toml`
+- **Type Hints**: All framework classes use comprehensive type annotations for better IDE support and error detection
+- **Logging**: Built-in logging throughout the framework using Python's standard `logging` module
 
 ## Key Files
 
@@ -78,6 +82,56 @@ Core dependencies are managed in `pyproject.toml`:
 - Mock the response behavior with `side_effect` for conditional logic (e.g., `HasField`)
 - Always verify mocks were called correctly with `assert_called_once_with()`
 - Test all error scenarios: success, business errors, gRPC exceptions, and unexpected cases
+
+### Type Hints and Modern Python
+- **All framework classes use comprehensive type hints** with Python 3.5+ syntax
+- Parameter types: `str`, `bool`, `Optional[str]`, `List[str]`, `Dict[str, str]`
+- gRPC-specific types: `grpc.Channel`, `ingestion_pb2.RegisterProviderRequest`
+- Return type annotations: `-> None`, `-> RegisterProviderApiResult`
+- Import required types: `from typing import Optional, Dict, List`
+
+### Logging System
+**Architecture**: Uses Python's standard `logging` module with hierarchical logger names
+
+**Implementation Pattern**:
+```python
+import logging
+
+class MyClient:
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        
+    def my_method(self):
+        self.logger.info("Starting operation")
+        self.logger.debug("Technical details: %s", details)
+        self.logger.warning("Recoverable issue: %s", issue)
+        self.logger.error("Serious problem: %s", error, exc_info=True)
+```
+
+**Logger Hierarchy**:
+- `dp_python_lib.client.mldp_client` - Main client initialization and configuration
+- `dp_python_lib.client.ingestion_client` - API operations with detailed request/response logging
+- `dp_python_lib.config.config` - Configuration loading and YAML processing
+- `dp_python_lib.config.loader` - Config file discovery and priority handling
+
+**Log Levels Used**:
+- `DEBUG` - Technical details (request building, parameter processing)
+- `INFO` - Business events (API calls, successful operations)  
+- `WARNING` - Recoverable issues (business logic errors from API)
+- `ERROR` - Serious problems (gRPC errors, unexpected exceptions with stack traces)
+
+**Application Usage**:
+```python
+import logging
+
+# Configure logging in your application (not the library!)
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Library will log useful operational information
+client = MldpClient(config_file="config.yaml")
+result = client.ingestion_client.register_provider(params)
+```
 
 ## Configuration System
 

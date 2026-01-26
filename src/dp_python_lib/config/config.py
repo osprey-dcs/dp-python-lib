@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import grpc
+import logging
 
 
 class ServiceConfig(BaseModel):
@@ -16,11 +17,14 @@ class ServiceConfig(BaseModel):
     
     def create_channel(self) -> grpc.Channel:
         """Create a gRPC channel for this service."""
+        logger = logging.getLogger(__name__)
         connection_str = self.connection_string()
         
         if self.use_tls:
+            logger.debug("Creating secure gRPC channel to %s", connection_str)
             return grpc.secure_channel(connection_str, grpc.ssl_channel_credentials())
         else:
+            logger.debug("Creating insecure gRPC channel to %s", connection_str)
             return grpc.insecure_channel(connection_str)
 
 
@@ -78,8 +82,10 @@ class MldpConfig(BaseSettings):
     def from_yaml(cls, yaml_file: str) -> 'MldpConfig':
         """Load configuration from YAML file."""
         import yaml
+        logger = logging.getLogger(__name__)
         
         try:
+            logger.info("Loading configuration from YAML file: %s", yaml_file)
             with open(yaml_file, 'r') as f:
                 data = yaml.safe_load(f)
             
@@ -91,27 +97,38 @@ class MldpConfig(BaseSettings):
                     service_config = data[service]
                     if 'host' in service_config:
                         flat_data[f'{service}_host'] = service_config['host']
+                        logger.debug("Loaded %s_host: %s", service, service_config['host'])
                     if 'port' in service_config:
                         flat_data[f'{service}_port'] = service_config['port']
+                        logger.debug("Loaded %s_port: %s", service, service_config['port'])
                     if 'use_tls' in service_config:
                         flat_data[f'{service}_use_tls'] = service_config['use_tls']
-                
+                        logger.debug("Loaded %s_use_tls: %s", service, service_config['use_tls'])
+            
+            logger.debug("Successfully loaded configuration from YAML, creating MldpConfig instance")
             return cls(**flat_data)
             
         except FileNotFoundError:
-            # Return default config if file not found
+            logger.warning("YAML configuration file not found: %s, using defaults", yaml_file)
             return cls()
         except Exception as e:
+            logger.error("Error loading configuration from %s: %s", yaml_file, e)
             raise ValueError(f"Error loading configuration from {yaml_file}: {e}")
     
     def create_ingestion_channel(self) -> grpc.Channel:
         """Create gRPC channel for ingestion service."""
+        logger = logging.getLogger(__name__)
+        logger.debug("Creating ingestion channel")
         return self.ingestion.create_channel()
     
     def create_query_channel(self) -> grpc.Channel:
         """Create gRPC channel for query service."""
+        logger = logging.getLogger(__name__)
+        logger.debug("Creating query channel")
         return self.query.create_channel()
     
     def create_annotation_channel(self) -> grpc.Channel:
         """Create gRPC channel for annotation service."""
+        logger = logging.getLogger(__name__)
+        logger.debug("Creating annotation channel")
         return self.annotation.create_channel()
