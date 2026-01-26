@@ -1,3 +1,4 @@
+from typing import Optional, Dict, List
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.grpc import ingestion_pb2_grpc
@@ -11,7 +12,7 @@ class RegisterProviderRequestParams:
     Encapsulates client parameters for call to registerProvider() API method.
     """
 
-    def __init__(self, name, description, tag_list, attribute_map):
+    def __init__(self, name: str, description: Optional[str], tag_list: Optional[List[str]], attribute_map: Optional[Dict[str, str]]) -> None:
         """
         :param name: Data provider name.
         :param description: Data provider description.
@@ -28,7 +29,7 @@ class RegisterProviderApiResult(ApiResultBase):
     Wraps the response from registerProvider(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error, message, response=None):
+    def __init__(self, is_error: bool, message: str, response: Optional[ingestion_pb2.RegisterProviderResponse] = None) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurrent id API call.
         :param message: Error message describing error condition.
@@ -43,13 +44,13 @@ class IngestionClient(ServiceApiClientBase):
     Ingestion Service methods.
     """
 
-    def __init__(self, channel):
+    def __init__(self, channel: grpc.Channel) -> None:
         """
         :param channel: gRPC communication channel for Ingestion Service.
         """
         super().__init__(channel)
 
-    def _build_register_provider_request(self, request_params):
+    def _build_register_provider_request(self, request_params: RegisterProviderRequestParams) -> ingestion_pb2.RegisterProviderRequest:
         """
         Builds a RegisterProviderRequest API object from the supplied RegisterProviderRequestParams object.
         :param request_params: A RegisterProviderRequestParams object containing the user parameters for call to registerProvider() API method.
@@ -74,7 +75,7 @@ class IngestionClient(ServiceApiClientBase):
 
         return request
 
-    def _send_register_provider(self, request):
+    def _send_register_provider(self, request: ingestion_pb2.RegisterProviderRequest) -> RegisterProviderApiResult:
         """
         Invokes the registerProvider() API method with the supplied request object.
         :param request: RegisgerProviderRequest object with parameters for call to registerProvider().
@@ -118,7 +119,7 @@ class IngestionClient(ServiceApiClientBase):
                 message=f"Unexpected error: {str(e)}"
             )
 
-    def register_provider(self, request_params):
+    def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:
         """
         User facing method for invoking the registerProvider() API method.
         :param request_params: Contains user parameters for call to registerProvider() API method.

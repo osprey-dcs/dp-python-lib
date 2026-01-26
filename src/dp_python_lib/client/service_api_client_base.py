@@ -1,4 +1,5 @@
 from abc import ABC
+import grpc
 
 
 class ServiceApiClientBase(ABC):
@@ -7,7 +8,7 @@ class ServiceApiClientBase(ABC):
     channel to an instance variable.
     """
 
-    def __init__(self, channel):
+    def __init__(self, channel: grpc.Channel) -> None:
         """
         :param channel: gRPC communication channel for the client's backend Service.
         """

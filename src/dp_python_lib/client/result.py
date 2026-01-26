@@ -7,7 +7,7 @@ class ResultStatus():
     of the operation, and a corresponding error message.
     """
 
-    def __init__(self, is_error, message=""):
+    def __init__(self, is_error: bool, message: str = "") -> None:
         """
         :param is_error: Boolean flag indicating success or failure of the API method call.
         :param message: Corresponding error message. Defaults to empty string when method is successful.
@@ -21,7 +21,7 @@ class ApiResultBase(ABC):
     details from the API method response, in addition to status information.
     """
 
-    def __init__(self, is_error, message):
+    def __init__(self, is_error: bool, message: str) -> None:
         """
         :param is_error: Boolean flag indicating success or failure of the API method call.
         :param message: Corresponding error message. Defaults to empty string when method is successful.

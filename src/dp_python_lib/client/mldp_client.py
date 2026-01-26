@@ -17,7 +17,7 @@ class MldpClient:
                  query_channel: Optional[grpc.Channel] = None,
                  annotation_channel: Optional[grpc.Channel] = None,
                  config: Optional[MldpConfig] = None,
-                 config_file: Optional[str] = None):
+                 config_file: Optional[str] = None) -> None:
         """
         Initialize MLDP client with either explicit channels or configuration.
         
