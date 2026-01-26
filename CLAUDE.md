@@ -78,3 +78,109 @@ Core dependencies are managed in `pyproject.toml`:
 - Mock the response behavior with `side_effect` for conditional logic (e.g., `HasField`)
 - Always verify mocks were called correctly with `assert_called_once_with()`
 - Test all error scenarios: success, business errors, gRPC exceptions, and unexpected cases
+
+## Configuration System
+
+### Overview
+The library uses a flexible configuration system supporting YAML files and environment variables with **pydantic-settings** for type safety.
+
+### Configuration Files
+**Default location**: `mldp-config.yaml` in project root
+```yaml
+ingestion:
+  host: localhost
+  port: 50051
+  use_tls: false
+query:
+  host: localhost
+  port: 50052
+  use_tls: false
+annotation:
+  host: localhost
+  port: 50053
+  use_tls: false
+```
+
+### Environment Variables
+Use pattern: `MLDP_<SERVICE>_<SETTING>`
+```bash
+# Override specific service settings  
+MLDP_INGESTION_HOST=prod-ingestion.example.com
+MLDP_INGESTION_PORT=443
+MLDP_INGESTION_USE_TLS=true
+
+# Custom config file location
+MLDP_CONFIG_FILE=/path/to/custom-config.yaml
+```
+
+### Usage Patterns
+```python
+from dp_python_lib.client import MldpClient
+from dp_python_lib.config import MldpConfig, ServiceConfig
+
+# Auto-load from default locations (env vars override YAML)
+client = MldpClient()
+
+# Specify config file
+client = MldpClient(config_file="custom-config.yaml")
+
+# Direct config object
+config = MldpConfig(
+    ingestion=ServiceConfig(host="custom-host", port=8080, use_tls=True)
+)
+client = MldpClient(config=config)
+
+# Backward compatibility - direct channels
+import grpc
+channel = grpc.insecure_channel("localhost:50051")
+client = MldpClient(ingestion_channel=channel)
+```
+
+### Configuration Priority (High to Low)
+1. **Explicit parameters** (direct channels, config objects)
+2. **Environment variables** (`MLDP_*`)
+3. **YAML configuration file**
+4. **Built-in defaults**
+
+### Configuration Implementation
+**Architecture**: Uses **flattened pydantic-settings** approach for standard environment variable handling:
+
+```python
+class MldpConfig(BaseSettings):
+    # Flat field structure for better env var support
+    ingestion_host: str = "localhost"
+    ingestion_port: int = 50051
+    ingestion_use_tls: bool = False
+    
+    query_host: str = "localhost" 
+    query_port: int = 50052
+    query_use_tls: bool = False
+    
+    annotation_host: str = "localhost"
+    annotation_port: int = 50053
+    annotation_use_tls: bool = False
+    
+    model_config = SettingsConfigDict(
+        env_prefix='MLDP_',
+        case_sensitive=False
+    )
+    
+    # Properties provide access to grouped ServiceConfig objects
+    @property
+    def ingestion(self) -> ServiceConfig:
+        return ServiceConfig(
+            host=self.ingestion_host,
+            port=self.ingestion_port, 
+            use_tls=self.ingestion_use_tls
+        )
+```
+
+### Key Configuration Classes
+- **`ServiceConfig`** - Individual service configuration (host, port, use_tls) with gRPC channel creation
+- **`MldpConfig`** - Main config container with flattened fields for environment variable support
+- **`load_config()`** - Configuration loader with priority handling
+- **`find_config_file()`** - Config file discovery (explicit path > env var > project locations)
+
+### Dependencies Added
+- `pydantic-settings` - Type-safe configuration with environment variable support
+- `PyYAML` - YAML file parsing

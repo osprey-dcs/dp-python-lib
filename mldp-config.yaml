@@ -1,0 +1,17 @@
+# MLDP Configuration File
+# This file contains default configuration for the Machine Learning Data Platform client
+
+ingestion:
+  host: localhost
+  port: 50051
+  use_tls: false
+
+query:
+  host: localhost
+  port: 50052
+  use_tls: false
+
+annotation:
+  host: localhost
+  port: 50053
+  use_tls: false

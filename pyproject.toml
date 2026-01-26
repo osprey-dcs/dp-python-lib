@@ -8,6 +8,8 @@ dependencies = [
   "grpcio",
   "grpcio-tools",
   "protobuf",
+  "pydantic-settings",
+  "PyYAML",
 ]
 
 [tool.pytest.ini_options]

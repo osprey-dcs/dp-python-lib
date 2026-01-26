@@ -179,8 +179,8 @@ class TestIngestionClient(unittest.TestCase):
         
         # Verify results
         self.assertIsInstance(result, RegisterProviderApiResult)
-        self.assertFalse(result.is_error)
-        self.assertIsNone(result.message)
+        self.assertFalse(result.result_status.is_error)
+        self.assertEqual(result.result_status.message, "")
         self.assertEqual(result.response, mock_response)
         
         # Verify stub was called correctly
@@ -210,8 +210,8 @@ class TestIngestionClient(unittest.TestCase):
         
         # Verify results
         self.assertIsInstance(result, RegisterProviderApiResult)
-        self.assertTrue(result.is_error)
-        self.assertEqual(result.message, "Provider name already exists")
+        self.assertTrue(result.result_status.is_error)
+        self.assertEqual(result.result_status.message, "Provider name already exists")
         self.assertIsNone(result.response)
     
     @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
@@ -235,8 +235,8 @@ class TestIngestionClient(unittest.TestCase):
         
         # Verify results
         self.assertIsInstance(result, RegisterProviderApiResult)
-        self.assertTrue(result.is_error)
-        self.assertIn("Unexpected response format", result.message)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("Unexpected response format", result.result_status.message)
         self.assertIsNone(result.response)
     
     @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
@@ -258,8 +258,8 @@ class TestIngestionClient(unittest.TestCase):
         
         # Verify results
         self.assertIsInstance(result, RegisterProviderApiResult)
-        self.assertTrue(result.is_error)
-        self.assertIn("gRPC error: Connection timeout", result.message)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("gRPC error: Connection timeout", result.result_status.message)
         self.assertIsNone(result.response)
     
     @patch('dp_python_lib.client.ingestion_client.ingestion_pb2_grpc.DpIngestionServiceStub')
@@ -279,8 +279,8 @@ class TestIngestionClient(unittest.TestCase):
         
         # Verify results
         self.assertIsInstance(result, RegisterProviderApiResult)
-        self.assertTrue(result.is_error)
-        self.assertIn("Unexpected error: Invalid parameter", result.message)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("Unexpected error: Invalid parameter", result.result_status.message)
         self.assertIsNone(result.response)
 
 

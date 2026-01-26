@@ -96,7 +96,7 @@ class IngestionClient(ServiceApiClientBase):
             elif response.HasField('registrationResult'):
                 return RegisterProviderApiResult(
                     is_error=False, 
-                    message=None, 
+                    message="", 
                     response=response
                 )
             
