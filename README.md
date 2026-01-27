@@ -6,6 +6,10 @@ NOTE: The dp-grpc repo includes an Actions workflow (generate-python-stubs.yml) 
 
 NOTE: This repo is a work in progess and requires additional work before it is useful for building Python client applications!
 
+## Status
+
+The goal for the first phase of this project was to build the framework necessary to handle a single gRPC API call and in the process to develop strategies / patterns for gRPC stub generation, gRPC communication, configuration, logging, Python conventions, unit testing, and integration testing.  Having accomplished this goal, the next phase of the project will focus on 1) adding handling for additional MLDP service APIs and 2) designing and implementing higher-level mechanisms for building pipelines for machine learning applications.  A high-level TODO list is below.
+
 ## Key Classes
 
 The primary user-facing class in the framework is MldpClient src/dp_python_lib/client/mldp_client.py.  This class provides simple wrappers for calling the MLDP service APIs needed to build a Python client.  A second user-facing class, mldp_application.py, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
