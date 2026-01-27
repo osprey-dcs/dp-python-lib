@@ -2,7 +2,7 @@
 
 This repo contains a python client API library for the [Machine Learning Data Platform](https://github.com/osprey-dcs/data-platform) (MLDP) project.  The gRPC API definition for utilizing the MLDP services is defined in the [dp-grpc repo]([https://github.com/osprey-dcs/dp-grpc](https://github.com/craigmcchesney/dp-grpc)).
 
-NOTE: The dp-grpc repo includes an Actions workflow (generate-python-stubs.yml) for generating Python stubs from the API definition.  It can be triggered manually, as part of the development process, and is triggered automatically when a new release tag is created (e.g., a tag prefixed with "rel-").  The workflow creates a pull request to merge the files to this dp-python-lib repo, in the src/dp_python_lib/grpc directory.  Because the files are generated, they should not be edited manually.  Any required changes should be made to the process that generates the stubs, not the generated files themselves.
+NOTE: The dp-grpc repo includes an Actions workflow (generate-python-stubs.yml) for generating Python stubs from the API definition.  It can be triggered manually, as part of the development process, and is triggered automatically when a new release tag is created (e.g., a tag prefixed with "rel-").  The workflow creates a pull request to merge the files to this dp-python-lib repo, in the [src/dp_python_lib/grpc](src/dp_python_lib/grpc) directory.  Because the files are generated, they should not be edited manually.  Any required changes should be made to the process that generates the stubs, not the generated files themselves.
 
 NOTE: This repo is a work in progess and requires additional work before it is useful for building Python client applications!
 
@@ -12,7 +12,7 @@ The goal for the first phase of this project was to build the framework necessar
 
 ## Key Classes
 
-The primary user-facing class in the framework is MldpClient src/dp_python_lib/client/mldp_client.py.  This class provides simple wrappers for calling the MLDP service APIs needed to build a Python client.  A second user-facing class, mldp_application.py, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
+The primary user-facing class in the framework is [MldpClient](src/dp_python_lib/client/mldp_client.py).  This class provides simple wrappers for calling the MLDP service APIs needed to build a Python client.  A second user-facing class, mldp_application.py, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
 
 ## Usage Examples
 
@@ -35,7 +35,7 @@ A simple example for calling the Ingestion Service registerProvider() API method
         result = self.client.ingestion_client.register_provider(params)
 ```
 
-This same pattern will be utilized for calling all the various service APIs.  The intention of the MldpClient class is to hide the details of the gRPC APIs to the extent that is possible.  A good place to look for additional examples is in the integration test directory, src/tests/integration.
+This same pattern will be utilized for calling all the various service APIs.  The intention of the MldpClient class is to hide the details of the gRPC APIs to the extent that is possible.  A good place to look for additional examples is in the [integration test directory](tests/integration).
 
 ## TODO
 
