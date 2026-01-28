@@ -12,7 +12,7 @@ The goal for the first phase of this project was to build the framework necessar
 
 ## Key Classes
 
-The primary user-facing class in the framework is [MldpClient](src/dp_python_lib/client/mldp_client.py).  This class provides simple wrappers for calling the MLDP service APIs needed to build a Python client.  A second user-facing class, mldp_application.py, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
+The primary user-facing class in the framework is [MldpClient](src/dp_python_lib/client/mldp_client.py).  That class reads the configuration, initializes the API, and creates interface objects for accessing each of the four MLDP services: IngestionClient, QueryClient, AnnotationClient, and IngestionStreamClient.  These classes provide simple wrappers and supporting data structures for calling the MLDP service APIs.  A second user-facing class, MldpApplication, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
 
 ## Usage Examples
 
@@ -57,5 +57,7 @@ This same pattern will be utilized for calling all the various service APIs.  Th
     * queryAnnotations() - Retrieves saved annotations.
     * exportData() - Exports datasets to popular file formats.
   * Ingestion Stream Service
-    * subscribeDataEvent() - Registers to receive notification when a data condition in the ingestion stream is triggered.
+    * subscribeDataEvent() - Registers to receive notification when a data condition in the ingestion stream is triggered. 
+* Design and implement MldpApplication with high-level application support.
+* Create CI workflow(s) for publishing running regession tests and publishing release artifacts.
    
