@@ -1,0 +1,17 @@
+[project]
+name = "dp-python-lib"
+version = "1.13.0"
+description = "Python client library for the MLDP gRPC API"
+requires-python = ">=3.10"
+
+dependencies = [
+  "grpcio",
+  "grpcio-tools",
+  "protobuf",
+  "pydantic-settings",
+  "PyYAML",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
