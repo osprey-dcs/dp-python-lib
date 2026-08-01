@@ -55,10 +55,12 @@ Core dependencies are managed in `pyproject.toml`:
 - `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (exposes `.pv_metadata` and `.machine_config`, with room to grow `.annotations`)
 - `src/dp_python_lib/client/pv_metadata_client.py` - PV metadata client (`save_pv_metadata()`, `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`) plus the `PvMetadataQuery` (`Q`) criterion helpers
 - `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers and the `to_timestamp()` helper (tz-aware datetime / epoch seconds / `common.Timestamp`). Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`)
+- `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `tests/unit/test_ingestion_client.py` - Unit tests for IngestionClient functionality
 - `tests/unit/test_pv_metadata_client.py` - Unit tests for PvMetadataClient functionality
 - `tests/unit/test_machine_config_client.py` - Unit tests for the Configuration side of MachineConfigClient
 - `tests/unit/test_machine_config_activation_client.py` - Unit tests for the ConfigurationActivation side of MachineConfigClient (incl. composite-key validation, timestamp handling, getActiveConfigurations)
+- `tests/unit/test_query_client.py` - Unit tests for QueryClient (request building, three-tier error handling, unary paging, streaming, `PvQuery`/`ConfigQuery` helpers, `QueryParams` validation)
 - `pyproject.toml` - Project metadata and dependencies
 - Generated gRPC stubs include services for:
   - Ingestion (`ingestion_pb2.py`, `ingestion_pb2_grpc.py`)
@@ -281,6 +283,52 @@ Notes:
 - Composite-key get/delete require exactly one key form (id XOR name+start_time); violations raise `ValueError`.
 - `ConfigurationQuery` (`C`) criteria: `name`/`category`/`tags`/`attributes`/`parent`.
   `ConfigurationActivationQuery` (`CA`) criteria: `timestamp`/`time_range`/`configuration_name`/`client_activation_id`/`category`/`tags`/`attributes`.  Each helper raises `ValueError` on empty inputs.
+
+### v2 Query API (Query Service)
+
+The sample-oriented v2 time-series query methods are exposed at `client.query` (a `QueryClient`; `None` when no
+query channel is configured).  A query is a kind-neutral `QueryParams` over a half-open time range `[begin, end)`,
+built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers.  Low-level methods return the raw
+protobuf `ColumnTable`; pandas/NumPy/Excel conversions (Phase 2, optional `[analysis]` extra) are reached via the
+result's `.to_dataframe()` / `.to_numpy()`.
+
+```python
+from datetime import datetime, timezone
+from dp_python_lib.client import MldpClient, QueryParams, PvQuery as PV, ConfigQuery as CFG
+
+client = MldpClient()
+q = client.query
+
+begin = datetime(2024, 1, 1, tzinfo=timezone.utc)
+end = datetime(2024, 1, 2, tzinfo=timezone.utc)
+
+# Select PVs by name list, a name pattern, or a metadata query (choose at most one form).
+params = QueryParams(
+    begin_time=begin, end_time=end,
+    pv_selector=PV.metadata([PV.pv_name(prefix=["ABC:"]), PV.tags(["vacuum"])]),
+    config_criteria=[CFG.configuration_name(["beamline-optics"])],   # optional; restricts to active intervals
+    limit=1000,                                                       # rows PER PAGE, not a total cap
+)
+
+# unary: one page, or transparently page over the whole range
+page = q.query_samples(params)                 # QuerySamplesApiResult; .column_table, .next_page_token
+for page in q.iter_query_samples(params):      # raises RuntimeError on a page error
+    table = page.column_table
+
+# server-streaming: lazy, fire-and-consume (no page tokens); raises RuntimeError on a mid-stream error
+for page in q.iter_query_samples_stream(params):
+    table = page.column_table
+```
+
+Notes:
+- Time inputs accept a tz-aware datetime, epoch seconds, or `common.Timestamp` (shared `to_timestamp()`); `begin`
+  must be strictly before `end`, and at least one of `pv_selector` / `config_criteria` must be present (a
+  config-only query is legal).  Empty inputs raise `ValueError`.
+- `PvQuery` (`PV`) selectors: `name_list(values)` / `pattern(str)` / `metadata([...])`, whose criteria are
+  `pv_name(exact=, prefix=, contains=)` / `aliases(exact=, prefix=, contains=)` (each repeated & coexisting) plus
+  `tags(values)` / `attr(key, values)`.  `ConfigQuery` (`CFG`) criteria:
+  `configuration_name`/`client_activation_id`/`category`/`tags` each `(values)`, and `attr(key, values)`.
+- Serialized columns are deferred: `useSerializedColumns` is forced `False`.
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)

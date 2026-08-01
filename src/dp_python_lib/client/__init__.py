@@ -31,6 +31,13 @@ from dp_python_lib.client.machine_config_client import (
     DeleteConfigurationActivationApiResult,
     GetActiveConfigurationsApiResult,
 )
+from dp_python_lib.client.query_client import (
+    QueryClient,
+    QueryParams,
+    PvQuery,
+    ConfigQuery,
+    QuerySamplesApiResult,
+)
 
 __all__ = [
     "MldpClient",
@@ -60,4 +67,9 @@ __all__ = [
     "QueryConfigurationActivationsApiResult",
     "DeleteConfigurationActivationApiResult",
     "GetActiveConfigurationsApiResult",
+    "QueryClient",
+    "QueryParams",
+    "PvQuery",
+    "ConfigQuery",
+    "QuerySamplesApiResult",
 ]
