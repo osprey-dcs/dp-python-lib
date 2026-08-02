@@ -15,6 +15,16 @@ dependencies = [
   "PyYAML",
 ]
 
+[project.optional-dependencies]
+# Pythonic query-result conversions (query_conversions): DataFrame / NumPy / Excel.  Kept out of the core
+# install so the gRPC client stays lightweight; imported lazily.  openpyxl is the Excel engine and is NOT
+# implied by pandas, so it is listed explicitly.
+analysis = [
+  "pandas",
+  "numpy",
+  "openpyxl",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
