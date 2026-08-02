@@ -221,6 +221,11 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
     datetime64[ns] index.  A dict-of-arrays is used (rather than a single structured/2-D array) so mixed and object
     dtypes are handled without forcing a common type.
 
+    NOTE (future PyTorch support): this dict-of-ndarrays is the intended substrate for a future `torch` extra -- a
+    column_table_to_torch() would wrap each numeric column via torch.from_numpy() (object/complex columns and the
+    datetime index need a defined policy first).  PyTorch is deliberately NOT a dependency here; it would be added
+    as a separate optional extra + conversion function, touching neither QueryClient nor this NumPy path.
+
     :param column_table: The ColumnTable to convert (None yields an empty dict).
     :return: A dict mapping "timestamps" and each column name to a numpy.ndarray.
     :raises ValueError: if any DataColumn length does not match the timestampList length.

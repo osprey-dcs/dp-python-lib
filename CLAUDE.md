@@ -347,6 +347,10 @@ Notes:
   `byteArrayValue`→bytes, `imageValue`→`Image(data, file_type)`); an unhandled oneof arm raises.  `valueStatus`
   is ignored (never populated in `querySamples()` results).  Per-column `ColumnMetadata` lands in
   `df.attrs["column_metadata"]` unless `exclude_column_metadata=True`.
+- Future PyTorch support (mentioned indirectly by the customer; to be confirmed in the post-implementation
+  requirements scan) is additive: `column_table_to_numpy()`'s dict-of-arrays is the intended substrate for a
+  `column_table_to_torch()` behind a separate optional `[torch]` extra — no change to `QueryClient` or the NumPy
+  path. Not built yet.
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)
