@@ -4,6 +4,7 @@ import logging
 
 from dp_python_lib.client.ingestion_client import IngestionClient
 from dp_python_lib.client.annotation_client import AnnotationClient
+from dp_python_lib.client.query_client import QueryClient
 from dp_python_lib.config import MldpConfig, load_config
 
 
@@ -92,8 +93,15 @@ class MldpClient:
             self.logger.debug("No annotation channel provided - annotation client will be None")
             self.annotation = None
 
-        # TODO: Add query client when implemented
-        # self.query_client = QueryClient(self._query_channel) if self._query_channel else None
+        # Query service client (sample-oriented v2 query API); only created if a channel is available.
+        # Exposed as .query (not .query_client) to leave room for feature-scoped sub-clients later, mirroring
+        # the .annotation facade.
+        if self._query_channel:
+            self.logger.info("Initializing query client")
+            self.query = QueryClient(self._query_channel)
+        else:
+            self.logger.debug("No query channel provided - query client will be None")
+            self.query = None
         
         # Store config for reference
         self._config = config

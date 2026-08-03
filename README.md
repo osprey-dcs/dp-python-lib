@@ -119,23 +119,64 @@ The Annotation Service machine configuration API is exposed under `client.annota
         mc.delete_configuration("beamline-optics")
 ```
 
+### Query Service — v2 time-series data (sample-oriented)
+
+The sample-oriented v2 query methods are exposed at `client.query`.  A query is a kind-neutral `QueryParams`
+over a half-open time range `[begin, end)`, built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion
+helpers.  Low-level methods return the raw protobuf `ColumnTable`; the Pythonic conversions (DataFrame / NumPy /
+Excel) require the optional `[analysis]` extra: `pip install dp-python-lib[analysis]`.
+
+```python
+        from datetime import datetime, timezone
+        from dp_python_lib.client import MldpClient, QueryParams, PvQuery as PV, ConfigQuery as CFG
+
+        client = MldpClient()
+        q = client.query
+
+        begin = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2024, 1, 2, tzinfo=timezone.utc)
+
+        # Choose at most one PV selector form: a name list, a name pattern, or a metadata query.
+        params = QueryParams(
+            begin_time=begin, end_time=end,
+            pv_selector=PV.metadata([PV.pv_name(prefix=["ABC:"]), PV.tags(["vacuum"])]),
+            config_criteria=[CFG.configuration_name(["beamline-optics"])],   # optional; restricts to active intervals
+            limit=1000,                                                       # rows PER PAGE, not a total cap
+        )
+
+        # unary: one page, or transparently page across the whole range (raises RuntimeError on a page error)
+        for page in q.iter_query_samples(params):
+            table = page.column_table
+
+        # server-streaming: lazy, fire-and-consume, no page tokens (raises RuntimeError on a mid-stream error)
+        for page in q.iter_query_samples_stream(params):
+            table = page.column_table
+
+        # Pythonic conversions (require the [analysis] extra)
+        df = q.query_samples(params).to_dataframe()      # one page -> pandas.DataFrame (UTC datetime index)
+
+        from dp_python_lib.client import query_conversions as qc
+        df_all = qc.query_samples_to_dataframe(q, params, max_rows=1_000_000)  # pages internally, concats by column name
+        qc.dataframe_to_excel(df_all, "out.xlsx")
+```
+
 This same pattern will be utilized for calling all the various service APIs.  The intention of the MldpClient class is to hide the details of the gRPC APIs to the extent that is possible.  A good place to look for additional examples is in the [integration test directory](tests/integration).
 
 ## TODO
 
 * Implement additional API wrappers:
   * Ingestion Service
-    * ingestData() - At least a simple implementation of unary ingestion, since it is not envisioned that Python clients will be used for high-volume ingestion.
+    * ingestData() / ingestDataStream() / ingestDataBidiStream() - Full ingestion client (shared DataFrame payload model + unary and streaming). Tracked as issue #17; also unblocks the closed-loop query integration test.
     * queryRequestStatus() - Checks async status of data ingestion requests.
     * subscribeData() - Receives data for specified PVs from the ingestion stream.
   * Query Service
+    * querySamples() / querySamplesStream() - Retrieves PV samples - DONE (client.query): unary (resumable paging) and server-streaming, plus DataFrame/NumPy/Excel conversions via the optional [analysis] extra.
+    * queryBuckets() / queryBucketsStream() - Retrieves raw data buckets. Tracked as issue #16.
     * queryData() - Retrieves bucketed PV time-series data.
     * queryTable() - Retrieves PV time-series data in tabular format.
     * queryPvStats() - Retrieves archive ingestion statistics for PVs (renamed from queryPvMetadata(); note user-defined PV metadata is now served by DpAnnotationService, see below).
     * queryProviders() - Retrieves Provider information.
     * queryProviderStats() - Retrieves archive ingestion statistics for providers (renamed from queryProviderMetadata()).
-    * queryBuckets() - Retrieves raw data buckets.
-    * querySamples() - Retrieves PV samples.
   * Annotation Service
     * PV metadata API - DONE (client.annotation.pv_metadata): savePvMetadata(), getPvMetadata(), queryPvMetadata(), deletePvMetadata().
     * Machine configuration API - DONE (client.annotation.machine_config): saveConfiguration(), getConfiguration(), queryConfigurations(), deleteConfiguration(), saveConfigurationActivation(), getConfigurationActivation(), queryConfigurationActivations(), deleteConfigurationActivation(), getActiveConfigurations().
