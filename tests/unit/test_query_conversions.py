@@ -225,6 +225,25 @@ class TestColumnTableToDataFrame(unittest.TestCase):
         self.assertEqual(len(df), 0)
         self.assertEqual(list(df.columns), ["temp"])
 
+    def test_duplicate_column_names_raise(self):
+        # Columns are keyed by name, so a duplicate would silently overwrite the earlier column and drop a
+        # whole PV's data.  Fail loud instead, and name the offending column.
+        ct = _column_table(
+            [1],
+            [("dup", [_scalar(intValue=10)]),
+             ("dup", [_scalar(intValue=20)])])
+        with self.assertRaises(ValueError) as cm:
+            conv.column_table_to_dataframe(ct)
+        self.assertIn("dup", str(cm.exception))
+
+    def test_distinct_column_names_do_not_raise(self):
+        ct = _column_table(
+            [1],
+            [("a", [_scalar(intValue=10)]),
+             ("b", [_scalar(intValue=20)])])
+        df = conv.column_table_to_dataframe(ct)
+        self.assertEqual(list(df.columns), ["a", "b"])
+
 
 # ----------------------------------------------------------------------
 # ColumnTable -> NumPy
@@ -264,6 +283,61 @@ class TestColumnTableToNumpy(unittest.TestCase):
         ct.serializedDataColumns.add().name = "s"
         with self.assertRaises(NotImplementedError):
             conv.column_table_to_numpy(ct)
+
+    def test_uniform_length_arrays_stay_1d_object(self):
+        # Regression: equal-length arrayValues used to succeed as np.array(...) and collapse into a (2, 2)
+        # int64 array, so a column's shape depended on whether its rows happened to match in length.
+        ct = _column_table(
+            [1, 2],
+            [("arr", [_array_value(_scalar(intValue=1), _scalar(intValue=2)),
+                      _array_value(_scalar(intValue=3), _scalar(intValue=4))])])
+        out = conv.column_table_to_numpy(ct)
+        self.assertEqual(out["arr"].shape, (2,))
+        self.assertEqual(out["arr"].dtype, object)
+        self.assertEqual(out["arr"][0], [1, 2])
+        self.assertEqual(out["arr"][1], [3, 4])
+
+    def test_ragged_arrays_stay_1d_object(self):
+        ct = _column_table(
+            [1, 2],
+            [("arr", [_array_value(_scalar(intValue=1)),
+                      _array_value(_scalar(intValue=2), _scalar(intValue=3))])])
+        out = conv.column_table_to_numpy(ct)
+        self.assertEqual(out["arr"].shape, (2,))
+        self.assertEqual(out["arr"].dtype, object)
+        self.assertEqual(out["arr"][1], [2, 3])
+
+    def test_structure_and_image_columns_stay_1d_object(self):
+        ct = _column_table(
+            [1, 2],
+            [("st", [_structure_value(a=_scalar(intValue=1)),
+                     _structure_value(a=_scalar(intValue=2))]),
+             ("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG),
+                      _image_value(b"\xff\xd8", common_pb2.Image.JPEG)])])
+        out = conv.column_table_to_numpy(ct)
+        for name in ("st", "img"):
+            self.assertEqual(out[name].shape, (2,))
+            self.assertEqual(out[name].dtype, object)
+        self.assertEqual(out["st"][0], {"a": 1})
+        self.assertEqual(out["img"][0], Image(b"\x89PNG", "PNG"))
+
+    def test_scalar_columns_keep_native_dtype(self):
+        # The complex-arm branch must not swallow ordinary scalar columns into object arrays.
+        ct = _column_table(
+            [1, 2],
+            [("i", [_scalar(intValue=1), _scalar(intValue=2)])])
+        out = conv.column_table_to_numpy(ct)
+        self.assertEqual(out["i"].shape, (2,))
+        self.assertNotEqual(out["i"].dtype, object)
+
+    def test_duplicate_column_names_raise(self):
+        ct = _column_table(
+            [1],
+            [("dup", [_scalar(intValue=10)]),
+             ("dup", [_scalar(intValue=20)])])
+        with self.assertRaises(ValueError) as cm:
+            conv.column_table_to_numpy(ct)
+        self.assertIn("dup", str(cm.exception))
 
 
 # ----------------------------------------------------------------------
@@ -308,6 +382,26 @@ class TestDataFrameToExcel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "out.xlsx")
             conv.dataframe_to_excel(df, path)  # should not raise on tz-aware index
+
+    def test_bytes_cells_written_natively(self):
+        # byteArrayValue lands in an object column but needs no stringification: openpyxl writes bytes
+        # natively.  A blanket repr() fallback would instead persist the string "b'\\x00\\x01'".
+        ct = _column_table([1704067200], [("b", [_scalar(byteArrayValue=b"\x00\x01")])])
+        df = conv.column_table_to_dataframe(ct)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.xlsx")
+            conv.dataframe_to_excel(df, path)
+            self.assertTrue(os.path.exists(path))
+
+    def test_image_cells_stringified_via_repr(self):
+        ct = _column_table(
+            [1704067200], [("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG)])])
+        df = conv.column_table_to_dataframe(ct)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.xlsx")
+            conv.dataframe_to_excel(df, path)
+            back = pd.read_excel(path, engine="openpyxl")
+            self.assertIn("Image(file_type='PNG'", back["img"].iloc[0])
 
 
 # ----------------------------------------------------------------------

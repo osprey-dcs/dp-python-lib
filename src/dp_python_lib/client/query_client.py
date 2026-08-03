@@ -264,11 +264,12 @@ class QueryParams:
             query.  At most one form may be set -- the PvQuery helpers each produce exactly one form.
         :param config_criteria: List of AND-combined configuration criteria (see ConfigQuery) restricting results to
             intervals when matching configurations were active.  Optional.
-        :param limit: Maximum number of rows to return per page (optional).  This is a per-page size, NOT a total cap.
+        :param limit: Maximum number of rows to return per page (optional).  This is a per-page size, NOT a total
+            cap.  0 is meaningful and means "let the server pick a default"; a negative value raises.
         :param exclude_column_metadata: If True, omit per-column ColumnMetadata from the results.  Defaults to False
             (metadata included).
         :raises ValueError: if both begin_time and end_time are not supplied, if neither pv_selector nor
-            config_criteria is present, or if begin_time is not strictly before end_time.
+            config_criteria is present, if begin_time is not strictly before end_time, or if limit is negative.
         """
         if begin_time is None or end_time is None:
             raise ValueError("QueryParams requires both begin_time and end_time")
@@ -283,6 +284,12 @@ class QueryParams:
             raise ValueError(
                 "QueryParams requires at least one of pv_selector or config_criteria")
 
+        # Validate eagerly here rather than letting a negative surface as a raw protobuf range error deep in
+        # request building (ExecutionOptions.limit is a uint32).  Note limit=0 is explicitly meaningful per the
+        # proto -- "if limit is omitted (0) the server selects an appropriate default" -- so only reject < 0.
+        if limit is not None and limit < 0:
+            raise ValueError(f"QueryParams limit must be non-negative, got {limit}")
+
         self.begin_time = begin_time
         self.end_time = end_time
         self._begin_ts = begin_ts
@@ -291,6 +298,16 @@ class QueryParams:
         self.config_criteria = config_criteria
         self.limit = limit
         self.exclude_column_metadata = exclude_column_metadata
+
+    @property
+    def begin_timestamp(self) -> common_pb2.Timestamp:
+        """The validated common.Timestamp for begin_time, converted once at construction."""
+        return self._begin_ts
+
+    @property
+    def end_timestamp(self) -> common_pb2.Timestamp:
+        """The validated common.Timestamp for end_time, converted once at construction."""
+        return self._end_ts
 
 
 class QuerySamplesApiResult(ApiResultBase):
@@ -382,8 +399,10 @@ class QueryClient(ServiceApiClientBase):
         """
         self.logger.debug("Building QuerySpec")
         spec = query_pb2.QuerySpec()
-        spec.timeRange.beginTime.CopyFrom(to_timestamp(request_params.begin_time))
-        spec.timeRange.endTime.CopyFrom(to_timestamp(request_params.end_time))
+        # Reuse the timestamps QueryParams converted and validated at construction rather than re-converting,
+        # so the request always carries exactly the values the [begin, end) ordering check was applied to.
+        spec.timeRange.beginTime.CopyFrom(request_params.begin_timestamp)
+        spec.timeRange.endTime.CopyFrom(request_params.end_timestamp)
 
         if request_params.pv_selector is not None:
             spec.pvSelector.CopyFrom(request_params.pv_selector)
@@ -510,10 +529,16 @@ class QueryClient(ServiceApiClientBase):
             self, request: query_pb2.QuerySamplesRequest) -> Iterator[QuerySamplesApiResult]:
         """
         Invokes the querySamplesStream() server-streaming API method with the supplied request, yielding one
-        QuerySamplesApiResult per streamed message.  A gRPC error while iterating the stream is surfaced as a final
-        error result (the caller sees it as the last yielded item).
+        QuerySamplesApiResult per streamed message.
+
+        Errors are yielded, not raised: a business error on a message, an unrecognized response, or a gRPC/unexpected
+        error while iterating the stream each yield an is_error result, and a transport error terminates the
+        generator after that final error item.  This is the internal contract -- the public
+        iter_query_samples_stream() wrapper consumes these and converts the first error result into a RuntimeError,
+        so callers of the public method never see an error result yielded.
+
         :param request: QuerySamplesRequest with parameters for the call (must carry no page token).
-        :return: An iterator over the streamed result messages.
+        :return: An iterator over the streamed result messages, possibly ending in an error result.
         """
         self.logger.info("Calling querySamplesStream API")
 

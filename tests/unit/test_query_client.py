@@ -199,6 +199,23 @@ class TestQueryParams(unittest.TestCase):
         with self.assertRaises(ValueError):
             QueryParams(BEGIN, None, pv_selector=PvQuery.pattern("x"))
 
+    def test_negative_limit_raises_at_construction(self):
+        # Caught here rather than surfacing later as a raw protobuf "Value out of range" from request building.
+        with self.assertRaises(ValueError):
+            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=-1)
+
+    def test_zero_and_positive_limits_accepted(self):
+        # limit=0 is meaningful per the proto ("the server selects an appropriate default"), not an error.
+        self.assertEqual(
+            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0).limit, 0)
+        self.assertEqual(
+            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=10).limit, 10)
+
+    def test_validated_timestamps_exposed(self):
+        p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+        self.assertEqual(p.begin_timestamp.epochSeconds, BEGIN_EPOCH)
+        self.assertEqual(p.end_timestamp.epochSeconds, END_EPOCH)
+
 
 # ----------------------------------------------------------------------
 # Request building (_build_query_spec / _build_query_samples_request)
@@ -253,6 +270,15 @@ class TestBuildRequest(unittest.TestCase):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0)
         req = self.client._build_query_samples_request(p)
         self.assertEqual(req.executionOptions.limit, 0)
+
+    def test_build_uses_validated_timestamps_not_reconversion(self):
+        # The spec must carry the timestamps QueryParams converted and range-checked at construction.  Mutating
+        # the public begin_time afterwards bypasses that validation, so it must not leak into the request.
+        p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+        p.begin_time = END  # would invert the range if re-converted here
+        req = self.client._build_query_samples_request(p)
+        self.assertEqual(req.querySpec.timeRange.beginTime.epochSeconds, BEGIN_EPOCH)
+        self.assertEqual(req.querySpec.timeRange.endTime.epochSeconds, END_EPOCH)
 
     def test_build_exclude_metadata(self):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), exclude_column_metadata=True)

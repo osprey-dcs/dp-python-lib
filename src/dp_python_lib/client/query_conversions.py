@@ -135,6 +135,17 @@ def _column_has_timestamp_arm(column: common_pb2.DataColumn) -> bool:
     return saw_value
 
 
+# The oneof arms whose Python values are containers (list/dict/Image).  NumPy would either collapse these into a
+# higher-dimensional array (uniform-length arrayValue) or raise (ragged), so such columns are always built as 1-D
+# object arrays instead -- matching the DataFrame path, which keeps them as object-dtype cells.
+_COMPLEX_ARMS = frozenset({"arrayValue", "structureValue", "imageValue"})
+
+
+def _column_has_complex_arm(column: common_pb2.DataColumn) -> bool:
+    """True if any set value in the column uses a complex (container-valued) oneof arm."""
+    return any(v.WhichOneof("value") in _COMPLEX_ARMS for v in column.dataValues)
+
+
 # ----------------------------------------------------------------------
 # ColumnTable -> pandas DataFrame
 # ----------------------------------------------------------------------
@@ -144,6 +155,32 @@ def _check_no_serialized_columns(column_table: query_pb2.ColumnTable) -> None:
     if len(column_table.serializedDataColumns) > 0:
         raise NotImplementedError(
             "serializedDataColumns are not supported yet; query with the default (dense) column representation")
+
+
+def _check_column_alignment(column: common_pb2.DataColumn, n_rows: int) -> None:
+    """Raises ValueError if the column is not dense and index-aligned with the timestampList."""
+    if len(column.dataValues) != n_rows:
+        raise ValueError(
+            f"column {column.name!r} has {len(column.dataValues)} values but the timestampList has "
+            f"{n_rows}; dense index alignment is required")
+
+
+def _check_no_duplicate_column_names(column_table: query_pb2.ColumnTable) -> None:
+    """
+    Raises ValueError if two DataColumns share a name.  Both conversions key their output by column name, so a
+    duplicate would silently overwrite the earlier column and drop a whole PV's data -- fail loud instead, matching
+    the module's other invariants (dense alignment, unhandled oneof arms, serialized columns).
+    """
+    seen = set()
+    duplicates = []
+    for column in column_table.dataColumns:
+        if column.name in seen and column.name not in duplicates:
+            duplicates.append(column.name)
+        seen.add(column.name)
+    if duplicates:
+        raise ValueError(
+            f"ColumnTable contains duplicate DataColumn name(s): {sorted(duplicates)!r}; conversions key "
+            f"columns by name and cannot represent duplicates without dropping data")
 
 
 def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> Dict[str, Any]:
@@ -172,7 +209,8 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
     :param column_table: The ColumnTable to convert (None yields an empty DataFrame).
     :param exclude_column_metadata: If True, do not attach ColumnMetadata to df.attrs.
     :return: A pandas.DataFrame.
-    :raises ValueError: if any DataColumn length does not match the timestampList length.
+    :raises ValueError: if any DataColumn length does not match the timestampList length, or if two DataColumns
+        share a name (columns are keyed by name, so a duplicate cannot be represented without dropping data).
     :raises NotImplementedError: if the ColumnTable carries serializedDataColumns.
     """
     pd = _require_pandas()
@@ -181,6 +219,7 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
         return pd.DataFrame()
 
     _check_no_serialized_columns(column_table)
+    _check_no_duplicate_column_names(column_table)
 
     timestamps = column_table.timestampList.timestamps
     n_rows = len(timestamps)
@@ -190,10 +229,7 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
     data: Dict[str, Any] = {}
     metadata: Dict[str, Any] = {}
     for column in column_table.dataColumns:
-        if len(column.dataValues) != n_rows:
-            raise ValueError(
-                f"column {column.name!r} has {len(column.dataValues)} values but the timestampList has "
-                f"{n_rows}; dense index alignment is required")
+        _check_column_alignment(column, n_rows)
 
         if _column_has_timestamp_arm(column):
             # Build a UTC datetime column from epoch-nanos, preserving None gaps as NaT.
@@ -221,14 +257,20 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
     datetime64[ns] index.  A dict-of-arrays is used (rather than a single structured/2-D array) so mixed and object
     dtypes are handled without forcing a common type.
 
+    Every returned array is 1-D with one element per row.  Scalar columns take their natural inferred dtype;
+    timestamp columns become datetime64[ns]; complex arms (arrayValue/structureValue/imageValue) are kept as
+    Python objects in a 1-D object array, so an array-valued column never collapses into a 2-D array just because
+    its rows happen to be equal-length.
+
     NOTE (future PyTorch support): this dict-of-ndarrays is the intended substrate for a future `torch` extra -- a
     column_table_to_torch() would wrap each numeric column via torch.from_numpy() (object/complex columns and the
     datetime index need a defined policy first).  PyTorch is deliberately NOT a dependency here; it would be added
     as a separate optional extra + conversion function, touching neither QueryClient nor this NumPy path.
 
     :param column_table: The ColumnTable to convert (None yields an empty dict).
-    :return: A dict mapping "timestamps" and each column name to a numpy.ndarray.
-    :raises ValueError: if any DataColumn length does not match the timestampList length.
+    :return: A dict mapping "timestamps" and each column name to a 1-D numpy.ndarray.
+    :raises ValueError: if any DataColumn length does not match the timestampList length, or if two DataColumns
+        share a name (columns are keyed by name, so a duplicate cannot be represented without dropping data).
     :raises NotImplementedError: if the ColumnTable carries serializedDataColumns.
     """
     np = _require_numpy()
@@ -237,6 +279,7 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
         return {}
 
     _check_no_serialized_columns(column_table)
+    _check_no_duplicate_column_names(column_table)
 
     timestamps = column_table.timestampList.timestamps
     n_rows = len(timestamps)
@@ -246,22 +289,18 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
             [_timestamp_to_epoch_nanos(ts) for ts in timestamps], dtype="datetime64[ns]")
     }
     for column in column_table.dataColumns:
-        if len(column.dataValues) != n_rows:
-            raise ValueError(
-                f"column {column.name!r} has {len(column.dataValues)} values but the timestampList has "
-                f"{n_rows}; dense index alignment is required")
+        _check_column_alignment(column, n_rows)
         values = [data_value_to_python(v) for v in column.dataValues]
         if _column_has_timestamp_arm(column):
             result[column.name] = np.array(values, dtype="datetime64[ns]")
+        elif _column_has_complex_arm(column):
+            # Decide by arm, not by exception: uniform-length arrayValues would otherwise succeed as a 2-D
+            # array while ragged ones raised, making a column's shape depend on its data.  Always 1-D object.
+            arr = np.empty(len(values), dtype=object)
+            arr[:] = values
+            result[column.name] = arr
         else:
-            # Let NumPy infer the dtype; complex arms (lists/dicts/Image) can't broadcast to a
-            # homogeneous array, so fall back to an explicit object array.
-            try:
-                result[column.name] = np.array(values)
-            except ValueError:
-                arr = np.empty(len(values), dtype=object)
-                arr[:] = values
-                result[column.name] = arr
+            result[column.name] = np.array(values)
     return result
 
 
@@ -271,8 +310,10 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
 
 def _stringify_complex_cell(value: Any) -> Any:
     """
-    Renders a complex DataFrame cell into an Excel-safe value: list/dict as JSON, Image via repr, and other
-    non-primitive objects via repr.  Scalars and datetimes are returned unchanged.
+    Renders a complex DataFrame cell into an Excel-safe value: list/dict as JSON, Image via repr.  Everything else
+    -- scalars, datetimes, and bytes from byteArrayValue -- is returned unchanged and left to openpyxl, which
+    handles those cell types natively.  Deliberately no blanket repr() fallback: it would turn b'abc' into the
+    string "b'abc'" and lose the value's type for no gain.
     """
     import json
     if isinstance(value, (list, dict)):
