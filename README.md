@@ -6,6 +6,16 @@ NOTE: The dp-grpc repo includes an Actions workflow (generate-python-stubs.yml) 
 
 NOTE: This repo is a work in progress and requires additional work before it is useful for building Python client applications!
 
+## Documentation
+
+The **[cookbook](doc/cookbook/)** is the task-oriented guide to using this library: connecting a
+client, cataloguing PVs, recording machine configuration, and querying time-series data into
+pandas or NumPy.  Start with [API conventions](doc/cookbook/conventions.md) and
+[Creating and connecting a client](doc/cookbook/connecting.md).
+
+For the wire protocol beneath this library — the protobuf messages and RPC semantics, documented
+in Java — see the [dp-grpc cookbook](https://github.com/osprey-dcs/dp-grpc/tree/main/doc/cookbook).
+
 ## Status
 
 The goal for the first phase of this project was to build the framework necessary to handle a single gRPC API call and in the process to develop strategies / patterns for gRPC stub generation, service / API / client / application abstractions, gRPC communication, configuration, logging, Python conventions, unit testing, and integration testing.  Having accomplished this goal, the next phase of the project will focus on 1) adding handling for additional MLDP service APIs and 2) designing and implementing higher-level mechanisms for building pipelines for machine learning applications.  A high-level TODO list is below.
