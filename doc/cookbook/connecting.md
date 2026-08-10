@@ -194,8 +194,8 @@ params = QueryParams(begin_time=begin, end_time=end, pv_selector=PV.name_list(["
 result = client.query.query_samples(params)
 ```
 
-This happens in exactly one situation: **passing `ingestion_channel` explicitly without also
-passing the others.**
+This happens in exactly one situation: **passing `ingestion_channel` with no configuration
+alongside it** — no `config=`, no `config_file=`, and no `query_channel`/`annotation_channel`.
 
 ```python
 import grpc
@@ -211,21 +211,27 @@ Calling straight through gives `AttributeError: 'NoneType' object has no attribu
 points at the call site rather than at the missing configuration — an unhelpful place to start
 debugging.
 
-The trigger is specifically `ingestion_channel`, because it is what suppresses configuration
-loading.  The other forms all end up with a config object, and a config always defines all three
-services (every one has built-in defaults), so all three channels get created:
+The trigger is specifically a bare `ingestion_channel`, because that is the one form that
+suppresses configuration loading.  Every other form ends up with a config object, and a config
+always defines all three services (each has built-in defaults), so all three channels get
+created:
 
 | Constructed with | `ingestion_client` | `query` | `annotation` |
 |---|---|---|---|
 | `MldpClient()` | ✅ | ✅ | ✅ |
 | `config=` / `config_file=` | ✅ | ✅ | ✅ |
 | `query_channel=` only | ✅ (from config) | ✅ | ✅ (from config) |
+| `ingestion_channel=` **+ `config=`/`config_file=`** | ✅ | ✅ (from config) | ✅ (from config) |
 | `ingestion_channel=` only | ✅ | **None** | **None** |
 
-So if you pass `ingestion_channel`, pass the channels you need alongside it.
+Note the last two rows: passing a config *alongside* an explicit `ingestion_channel` still builds
+the other two channels.  So if you pass `ingestion_channel` alone, pass the channels you need
+alongside it — or a config.
 
-`client.ingestion_client` is never `None`: an ingestion channel is required, and constructing a
-client without one raises `ValueError`.
+`client.ingestion_client` is never `None`.  Not because a missing channel is rejected, but the
+opposite: when you omit `ingestion_channel`, configuration is loaded and the channel is built from
+it, falling back to `localhost:50051` if nothing else supplies a host.  A client with no arguments
+at all is valid and fully populated.
 
 Note that a channel being present says nothing about the server being reachable — gRPC channels
 connect lazily, so an unreachable service surfaces as an error on the first call, not at

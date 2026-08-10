@@ -93,15 +93,68 @@ class TestMldpClient(unittest.TestCase):
         self.assertEqual(client._config, config)
     
     def test_init_no_ingestion_channel_or_config(self):
-        """Test MldpClient initialization fails without ingestion channel or config."""
+        """The no-channel-no-config guard fires only if config loading yields nothing.
+
+        This is defensive rather than reachable through the public constructor: omitting
+        ingestion_channel causes a config to be loaded, and load_config() always returns an
+        MldpConfig.  Mocking it to None is the only way to exercise the branch, so this test
+        pins the guard's behavior without implying a caller can trigger it.  See
+        test_init_with_no_arguments_succeeds for what actually happens.
+        """
         with patch('dp_python_lib.client.mldp_client.load_config') as mock_load_config:
             mock_load_config.return_value = None
-            
+
             with self.assertRaises(ValueError) as context:
                 MldpClient(ingestion_channel=None, config=None, config_file=None)
-            
-            self.assertIn("Either ingestion_channel or config must be provided", 
+
+            self.assertIn("Either ingestion_channel or config must be provided",
                          str(context.exception))
+
+    @patch('dp_python_lib.config.config.MldpConfig.create_ingestion_channel')
+    @patch('dp_python_lib.config.config.MldpConfig.create_query_channel')
+    @patch('dp_python_lib.config.config.MldpConfig.create_annotation_channel')
+    def test_init_with_no_arguments_succeeds(self, mock_annotation_channel,
+                                             mock_query_channel, mock_ingestion_channel):
+        """A client constructed with no arguments is valid and fully populated.
+
+        Omitting ingestion_channel does not raise -- configuration is loaded and the channel is
+        built from it (falling back to built-in defaults), so ingestion_client is never None.
+        """
+        mock_ingestion_channel.return_value = Mock()
+        mock_query_channel.return_value = Mock()
+        mock_annotation_channel.return_value = Mock()
+
+        client = MldpClient()
+
+        self.assertIsNotNone(client.ingestion_client)
+        self.assertIsNotNone(client.query)
+        self.assertIsNotNone(client.annotation)
+
+    @patch('dp_python_lib.config.config.MldpConfig.create_query_channel')
+    @patch('dp_python_lib.config.config.MldpConfig.create_annotation_channel')
+    def test_explicit_ingestion_channel_with_config_still_builds_others(
+            self, mock_annotation_channel, mock_query_channel):
+        """An explicit ingestion_channel alongside a config still yields query and annotation.
+
+        Only a *bare* ingestion_channel suppresses config loading; passing config= or
+        config_file= alongside it leaves the other two sub-clients populated.
+        """
+        mock_query_channel.return_value = Mock()
+        mock_annotation_channel.return_value = Mock()
+
+        client = MldpClient(ingestion_channel=self.mock_channel, config=MldpConfig())
+
+        self.assertEqual(client._ingestion_channel, self.mock_channel)
+        self.assertIsNotNone(client.query)
+        self.assertIsNotNone(client.annotation)
+
+    def test_bare_ingestion_channel_leaves_others_none(self):
+        """A bare ingestion_channel is the one form that leaves query and annotation as None."""
+        client = MldpClient(ingestion_channel=self.mock_channel)
+
+        self.assertIsNotNone(client.ingestion_client)
+        self.assertIsNone(client.query)
+        self.assertIsNone(client.annotation)
     
     @patch('dp_python_lib.config.config.MldpConfig.create_ingestion_channel')
     def test_mixed_channels_and_config(self, mock_ingestion_channel):

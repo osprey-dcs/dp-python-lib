@@ -44,23 +44,30 @@ class MldpClient:
             self.logger.info("Loading configuration from file: %s", config_file)
             config = load_config(config_file=config_file)
             
-        # Create channels from config or use provided channels
-        if ingestion_channel:
+        # Create channels from config or use provided channels.
+        #
+        # Note the `is not None` tests below rather than truthiness: config is always a valid
+        # MldpConfig once loaded, but an explicitly-passed one could in principle be falsy, and
+        # a truthiness test would silently fall through to the error branch.
+        if ingestion_channel is not None:
             self.logger.debug("Using explicit ingestion channel")
             self._ingestion_channel = ingestion_channel
-        elif config:
-            self.logger.info("Creating ingestion channel from config: %s:%s (TLS=%s)", 
+        elif config is not None:
+            self.logger.info("Creating ingestion channel from config: %s:%s (TLS=%s)",
                            config.ingestion.host, config.ingestion.port, config.ingestion.use_tls)
             self._ingestion_channel = config.create_ingestion_channel()
         else:
+            # Defensive: the branches above load a config whenever ingestion_channel is absent,
+            # so this is not reachable through the public constructor.  Kept as a guard against
+            # a future change to that loading logic.
             error_msg = "Either ingestion_channel or config must be provided"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
-            
-        if query_channel:
+
+        if query_channel is not None:
             self.logger.debug("Using explicit query channel")
             self._query_channel = query_channel
-        elif config:
+        elif config is not None:
             self.logger.debug("Creating query channel from config: %s:%s (TLS=%s)", 
                             config.query.host, config.query.port, config.query.use_tls)
             self._query_channel = config.create_query_channel()
@@ -69,10 +76,10 @@ class MldpClient:
             self.logger.debug("No query channel provided - will be None")
             self._query_channel = None
             
-        if annotation_channel:
+        if annotation_channel is not None:
             self.logger.debug("Using explicit annotation channel")
             self._annotation_channel = annotation_channel
-        elif config:
+        elif config is not None:
             self.logger.debug("Creating annotation channel from config: %s:%s (TLS=%s)", 
                             config.annotation.host, config.annotation.port, config.annotation.use_tls)
             self._annotation_channel = config.create_annotation_channel()
@@ -86,7 +93,7 @@ class MldpClient:
         self.ingestion_client = IngestionClient(self._ingestion_channel)
 
         # Annotation service facade (exposes .pv_metadata, etc.); only created if a channel is available
-        if self._annotation_channel:
+        if self._annotation_channel is not None:
             self.logger.info("Initializing annotation client")
             self.annotation = AnnotationClient(self._annotation_channel)
         else:
@@ -96,7 +103,7 @@ class MldpClient:
         # Query service client (sample-oriented v2 query API); only created if a channel is available.
         # Exposed as .query (not .query_client) to leave room for feature-scoped sub-clients later, mirroring
         # the .annotation facade.
-        if self._query_channel:
+        if self._query_channel is not None:
             self.logger.info("Initializing query client")
             self.query = QueryClient(self._query_channel)
         else:
