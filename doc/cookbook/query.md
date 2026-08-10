@@ -393,3 +393,21 @@ or use `itertools.islice`.
   range and selector.
 - **Bucket-oriented queries (`queryBuckets`) are not yet wrapped** by this library; see
   [issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
+
+### How far these examples have been verified
+
+Worth knowing what stands behind the recipes on this page, since it differs from the rest of the
+cookbook.
+
+The request-building side was exercised against a live MLDP stack: the queries below are accepted
+and well-formed.  What has **not** been observed end to end is the data path — rows coming back,
+`ColumnTable` populating, a DataFrame with real samples in it.  There is currently no way to
+ingest sample data from Python (`IngestionClient` exposes only `register_provider()`), so every
+query here returned zero rows.  The DataFrame and NumPy output shown above is illustrative, and
+the conversions themselves are covered by unit tests over hand-built `ColumnTable` objects.
+
+[Issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17) adds the ingestion client, and
+its Phase 3 is a closed-loop ingest→query round-trip.  **When that lands, re-verify this recipe
+against real data and delete this note** — in particular, confirm the sample DataFrame output
+above matches what a real query returns, and add the ingestion recipe this cookbook currently
+lacks.

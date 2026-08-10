@@ -26,6 +26,12 @@ client.
 | [Recording machine configuration](machine-configuration.md) | Defining configurations, recording when each was active, closing and opening intervals, and answering "what was the machine doing at 18:04?" |
 | [Querying time-series data](query.md) | Retrieving samples by PV name, by metadata, or by machine configuration, and converting results to pandas / NumPy / Excel |
 
+**Not yet covered: getting data in.**  `IngestionClient` currently exposes only
+`register_provider()`, so there is no ingestion recipe.
+[Issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17) adds the full ingestion client;
+when it lands, this cookbook needs an ingestion recipe, and the
+[query recipe's examples need re-verifying against real data](query.md#how-far-these-examples-have-been-verified).
+
 ## The worked example
 
 The recipes share one continuous example drawn from an accelerator facility, so the data in the
@@ -58,8 +64,13 @@ Every Python snippet in this directory is mechanically checked — parsed for sy
 type-checked against the installed package to catch wrong attribute and method names:
 
 ```bash
+pip install -e .[dev]
 .venv/bin/python .dev/tools/check-cookbook-snippets.py
 ```
+
+The checker self-tests before each run: if mypy ever stops resolving `dp_python_lib`, it would
+report success on every snippet regardless of correctness, so a canary asserts that a known-bad
+attribute is still flagged.
 
 Snippets carry `# cookbook:partial` when they are fragments that assume a client, and
 `# cookbook:skip` or `# cookbook:no-mypy` where checking does not apply.
