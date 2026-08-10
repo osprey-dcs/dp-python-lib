@@ -25,6 +25,14 @@ analysis = [
   "openpyxl",
 ]
 
+# Development tooling.  Not required to use the library.  mypy backs the cookbook snippet
+# checker (.dev/tools/check-cookbook-snippets.py), which type-checks every example in
+# doc/cookbook against this package to catch wrong attribute/method names in the docs.
+dev = [
+  "mypy",
+  "pytest",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

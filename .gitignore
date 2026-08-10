@@ -206,5 +206,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Local development notes / planning (not part of the published library)
-.dev/
+# Local development notes / planning (not part of the published library).
+# Note this ignores .dev/* rather than .dev/ -- git does not descend into an excluded
+# directory, so the negation below would have no effect against a `.dev/` rule.
+.dev/*
+# ...except the cookbook snippet checker, which doc/cookbook/README.md tells readers to run.
+!.dev/tools/
