@@ -1,202 +1,183 @@
+# dp-python-lib
+
+Python client library for the [Machine Learning Data Platform](https://github.com/osprey-dcs/data-platform) (MLDP).
+
 ## Overview
 
-This repo contains a python client API library for the [Machine Learning Data Platform](https://github.com/osprey-dcs/data-platform) (MLDP) project.  The gRPC API definition for utilizing the MLDP services is defined in the [dp-grpc repo]([https://github.com/osprey-dcs/dp-grpc](https://github.com/craigmcchesney/dp-grpc)).
+MLDP is a data platform for capturing, archiving, annotating, and querying scientific time-series
+data — PV samples from an accelerator or similar facility, together with the metadata that gives
+those samples meaning.  Its services are exposed as a gRPC API, defined in the
+[dp-grpc repo](https://github.com/osprey-dcs/dp-grpc).
 
-NOTE: The dp-grpc repo includes an Actions workflow (generate-python-stubs.yml) for generating Python stubs from the API definition.  It can be triggered manually, as part of the development process, and is triggered automatically when a new release tag is created (e.g., a tag prefixed with "rel-").  The workflow creates a pull request to merge the files to this dp-python-lib repo, in the [src/dp_python_lib/grpc](src/dp_python_lib/grpc) directory.  Because the files are generated, they should not be edited manually.  Any required changes should be made to the process that generates the stubs, not the generated files themselves.
+This repo exists so that Python applications — analysis notebooks, data pipelines, machine
+learning workflows — can use that platform without writing gRPC code.  It provides two layers:
 
-NOTE: This repo is a work in progress and requires additional work before it is useful for building Python client applications!
+1. **A low-level client API** that wraps each MLDP service call: parameter objects in, result
+   objects out, with connection handling, configuration, logging, and error handling done for you.
+2. **Higher-level application features** (in progress) that turn the raw API into the operations a
+   data science workflow actually wants — retrieving a labelled dataset, exporting to common
+   formats, feeding a training pipeline.
 
-## Documentation
+The generated gRPC stubs live in [src/dp_python_lib/grpc](src/dp_python_lib/grpc).  They are
+produced by an Actions workflow in the dp-grpc repo (`generate-python-stubs.yml`), which can be
+run manually and fires automatically on a release tag; it opens a pull request against this repo.
+**These files are generated and must not be edited by hand** — fix the generator instead.
 
-The **[cookbook](doc/cookbook/)** is the task-oriented guide to using this library: connecting a
-client, cataloguing PVs, recording machine configuration, and querying time-series data into
-pandas or NumPy.  Start with [API conventions](doc/cookbook/conventions.md) and
-[Creating and connecting a client](doc/cookbook/connecting.md).
+## Goal state
 
-For the wire protocol beneath this library — the protobuf messages and RPC semantics, documented
-in Java — see the [dp-grpc cookbook](https://github.com/osprey-dcs/dp-grpc/tree/main/doc/cookbook).
+The target is a library where the gRPC API is an implementation detail.
 
-## Status
+**Low-level API coverage.** A Python wrapper for every MLDP service method, following one
+consistent pattern (parameter class → request → result object), across all four services:
 
-The goal for the first phase of this project was to build the framework necessary to handle a single gRPC API call and in the process to develop strategies / patterns for gRPC stub generation, service / API / client / application abstractions, gRPC communication, configuration, logging, Python conventions, unit testing, and integration testing.  Having accomplished this goal, the next phase of the project will focus on 1) adding handling for additional MLDP service APIs and 2) designing and implementing higher-level mechanisms for building pipelines for machine learning applications.  A high-level TODO list is below.
+| Service | Scope |
+|---|---|
+| Ingestion | Registering providers, ingesting data (unary, streaming, bidirectional), checking request status, subscribing to live data |
+| Query | Retrieving time-series data as samples, buckets, or tables; retrieving PV, provider, and ingestion statistics |
+| Annotation | User-defined PV metadata, machine configuration, datasets, annotations, and export |
+| Ingestion Stream | Event subscriptions that fire when a data condition is triggered |
 
-## Key Classes
+**Higher-level application features.**  An `MldpApplication` layer built on top of the API
+clients, providing the things a data pipeline needs rather than the things the wire protocol
+offers: dataset assembly and reuse, Pythonic data structures (pandas, NumPy, and — pending
+confirmation — PyTorch tensors), export to common file formats, and end-to-end
+ingest → annotate → query → train workflows.
 
-The primary user-facing class in the framework is [MldpClient](src/dp_python_lib/client/mldp_client.py).  That class reads the configuration, initializes the API, and creates interface objects for accessing each of the four MLDP services: IngestionClient, QueryClient, AnnotationClient, and IngestionStreamClient.  These classes provide simple wrappers and supporting data structures for calling the MLDP service APIs.  A second user-facing class, MldpApplication, will be added that provides higher level features on top of the APIs that will be useful for building applications that are part of a machine learning data pipeline.
+The [current state](#current-state) below is the part of this that exists today; the
+[TODO](#todo) is what remains.
 
-## Usage Examples
+## Current state
 
-A simple example for calling the Ingestion Service registerProvider() API method is shown below:
-```
-        cls.client = MldpClient()
+`MldpClient` is the entry point.  It reads configuration, creates the service channels, and
+exposes the feature clients as attributes.  Sub-clients are `None` when no channel is configured
+for their service.
 
-        params = RegisterProviderRequestParams(
-            name=unique_name,
-            description="Integration test provider for dp-python-lib",
-            tag_list=["integration", "test", "automated"],
-            attribute_map={
-                "test_type": "integration", 
-                "framework": "unittest",
-                "timestamp": str(timestamp),
-                "client": "dp-python-lib"
-            }
-        )
-        
-        result = self.client.ingestion_client.register_provider(params)
-```
+**Implemented:**
 
-The Annotation Service PV metadata API is accessed via the `annotation` facade, which groups the feature-scoped clients that share the Annotation Service connection.  PV metadata methods are exposed under `client.annotation.pv_metadata`:
-```
-        client = MldpClient()
-        pv_client = client.annotation.pv_metadata
+- **PV metadata API** — `client.annotation.pv_metadata`.  Record what a PV *is* (aliases, tags,
+  attributes, description) and find PVs by those properties: `save_pv_metadata()`,
+  `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`, with
+  the `PvMetadataQuery` criterion helpers.
+- **Machine configuration API** — `client.annotation.machine_config`.  Named configurations and
+  their temporal activations — which configuration was active over which interval, and what is
+  active at a given instant.  Covers save/get/query/iterate/delete for both configurations and
+  activations, plus `get_active_configurations()`, with the `ConfigurationQuery` and
+  `ConfigurationActivationQuery` helpers.
+- **v2 query API (samples)** — `client.query`.  Sample-oriented time-series retrieval over a
+  half-open time range, selecting PVs by name list, name pattern, or metadata query, and
+  optionally restricting to intervals where a machine configuration was active.  Unary with
+  transparent paging (`query_samples()` / `iter_query_samples()`) and server-streaming
+  (`iter_query_samples_stream()`).  Results convert to pandas DataFrames, NumPy arrays, and Excel
+  via the optional `[analysis]` extra.
+- **Provider registration** — `client.ingestion_client.register_provider()`.  The rest of the
+  ingestion API is not yet implemented.
 
-        # Save metadata for a PV
-        save_params = SavePvMetadataRequestParams(
-            pv_name="ABC:1",
-            aliases=["abc-one"],
-            tags=["vacuum", "beam"],
-            attributes={"unit": "V", "system": "vacuum"},
-            modified_by="operator",
-            description="Vacuum gauge readback",
-        )
-        save_result = pv_client.save_pv_metadata(save_params)
+**Supporting framework:** YAML + environment-variable configuration (`MLDP_*`, via
+pydantic-settings), TLS-capable channel creation, hierarchical logging, three-tier error handling
+(gRPC errors, business-logic errors, unexpected exceptions), comprehensive type hints, and a unit
+and integration test suite.
 
-        # Get metadata by PV name or alias
-        get_result = pv_client.get_pv_metadata("abc-one")
-        metadata = get_result.pv_metadata
-
-        # Query metadata using criterion helpers; iterate transparently across pages
-        from dp_python_lib.client import PvMetadataQuery as Q
-        for pv in pv_client.iter_pv_metadata([Q.pv_name(prefix=["ABC:"]), Q.tags(["vacuum"])]):
-            print(pv.pvName)
-
-        # Delete metadata by PV name or alias
-        delete_result = pv_client.delete_pv_metadata("ABC:1")
-```
-
-The Annotation Service machine configuration API is exposed under `client.annotation.machine_config`.  It manages named machine *configurations* and their temporal *activations* (which configuration was active over a given time interval), plus a point-in-time "what is active now" lookup:
-```
-        from datetime import datetime, timezone
-        from dp_python_lib.client import (
-            SaveConfigurationRequestParams,
-            SaveConfigurationActivationRequestParams,
-            ConfigurationQuery as C,
-            ConfigurationActivationQuery as CA,
-        )
-
-        mc = client.annotation.machine_config
-
-        # Save a configuration
-        mc.save_configuration(SaveConfigurationRequestParams(
-            configuration_name="beamline-optics",
-            category="optics",
-            tags=["production"],
-            attributes={"owner": "ops"},
-            modified_by="operator",
-        ))
-
-        # Get / query / iterate configurations
-        config = mc.get_configuration("beamline-optics").configuration
-        for cfg in mc.iter_configurations([C.name(prefix=["beamline-"]), C.tags(["production"])]):
-            print(cfg.configurationName)
-
-        # Record that the configuration was active over a time interval.  Timestamps accept a
-        # timezone-aware datetime, epoch seconds, or a common.Timestamp.
-        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 1, 2, tzinfo=timezone.utc)
-        mc.save_configuration_activation(SaveConfigurationActivationRequestParams(
-            configuration_name="beamline-optics",
-            start_time=start,
-            end_time=end,
-            client_activation_id="act-001",
-            modified_by="operator",
-        ))
-
-        # Get an activation by client id, or by the (configuration_name, start_time) composite key
-        act = mc.get_configuration_activation(client_activation_id="act-001").configuration_activation
-        act = mc.get_configuration_activation(
-            configuration_name="beamline-optics", start_time=start).configuration_activation
-
-        # Query / iterate activations
-        for a in mc.iter_configuration_activations([CA.configuration_name(["beamline-optics"])]):
-            print(a.clientActivationId)
-
-        # What configurations are active right now? (pass a timestamp for a historical instant)
-        active = mc.get_active_configurations().configuration_activations
-
-        # Delete
-        mc.delete_configuration_activation(client_activation_id="act-001")
-        mc.delete_configuration("beamline-optics")
-```
-
-### Query Service — v2 time-series data (sample-oriented)
-
-The sample-oriented v2 query methods are exposed at `client.query`.  A query is a kind-neutral `QueryParams`
-over a half-open time range `[begin, end)`, built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion
-helpers.  Low-level methods return the raw protobuf `ColumnTable`; the Pythonic conversions (DataFrame / NumPy /
-Excel) require the optional `[analysis]` extra: `pip install dp-python-lib[analysis]`.
-
-```python
-        from datetime import datetime, timezone
-        from dp_python_lib.client import MldpClient, QueryParams, PvQuery as PV, ConfigQuery as CFG
-
-        client = MldpClient()
-        q = client.query
-
-        begin = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 1, 2, tzinfo=timezone.utc)
-
-        # Choose at most one PV selector form: a name list, a name pattern, or a metadata query.
-        params = QueryParams(
-            begin_time=begin, end_time=end,
-            pv_selector=PV.metadata([PV.pv_name(prefix=["ABC:"]), PV.tags(["vacuum"])]),
-            config_criteria=[CFG.configuration_name(["beamline-optics"])],   # optional; restricts to active intervals
-            limit=1000,                                                       # rows PER PAGE, not a total cap
-        )
-
-        # unary: one page, or transparently page across the whole range (raises RuntimeError on a page error)
-        for page in q.iter_query_samples(params):
-            table = page.column_table
-
-        # server-streaming: lazy, fire-and-consume, no page tokens (raises RuntimeError on a mid-stream error)
-        for page in q.iter_query_samples_stream(params):
-            table = page.column_table
-
-        # Pythonic conversions (require the [analysis] extra)
-        df = q.query_samples(params).to_dataframe()      # one page -> pandas.DataFrame (UTC datetime index)
-
-        from dp_python_lib.client import query_conversions as qc
-        df_all = qc.query_samples_to_dataframe(q, params, max_rows=1_000_000)  # pages internally, concats by column name
-        qc.dataframe_to_excel(df_all, "out.xlsx")
-```
-
-This same pattern will be utilized for calling all the various service APIs.  The intention of the MldpClient class is to hide the details of the gRPC APIs to the extent that is possible.  A good place to look for additional examples is in the [integration test directory](tests/integration).
+Note the v2 query API comes from unreleased dp-grpc work and will not work against a
+`rel-1.14.0` server.
 
 ## TODO
 
-* Implement additional API wrappers:
-  * Ingestion Service
-    * ingestData() / ingestDataStream() / ingestDataBidiStream() - Full ingestion client (shared DataFrame payload model + unary and streaming). Tracked as issue #17; also unblocks the closed-loop query integration test.
-    * queryRequestStatus() - Checks async status of data ingestion requests.
-    * subscribeData() - Receives data for specified PVs from the ingestion stream.
-  * Query Service
-    * querySamples() / querySamplesStream() - Retrieves PV samples - DONE (client.query): unary (resumable paging) and server-streaming, plus DataFrame/NumPy/Excel conversions via the optional [analysis] extra.
-    * queryBuckets() / queryBucketsStream() - Retrieves raw data buckets. Tracked as issue #16.
-    * queryData() - Retrieves bucketed PV time-series data.
-    * queryTable() - Retrieves PV time-series data in tabular format.
-    * queryPvStats() - Retrieves archive ingestion statistics for PVs (renamed from queryPvMetadata(); note user-defined PV metadata is now served by DpAnnotationService, see below).
-    * queryProviders() - Retrieves Provider information.
-    * queryProviderStats() - Retrieves archive ingestion statistics for providers (renamed from queryProviderMetadata()).
-  * Annotation Service
-    * PV metadata API - DONE (client.annotation.pv_metadata): savePvMetadata(), getPvMetadata(), queryPvMetadata(), deletePvMetadata().
-    * Machine configuration API - DONE (client.annotation.machine_config): saveConfiguration(), getConfiguration(), queryConfigurations(), deleteConfiguration(), saveConfigurationActivation(), getConfigurationActivation(), queryConfigurationActivations(), deleteConfigurationActivation(), getActiveConfigurations().
-    * saveDataSet() - Creates or saves a dataset including a collection of PVs and time ranges.
-    * queryDataSets() - Retrieves saved datasets.
-    * saveAnnotation() - Creates or saves an annotation targeting a dataset.
-    * queryAnnotations() - Retrieves saved annotations.
-    * exportData() - Exports datasets to popular file formats.
-  * Ingestion Stream Service
-    * subscribeDataEvent() - Registers to receive notification when a data condition in the ingestion stream is triggered. 
-* Design and implement MldpApplication with high-level application support.
-* Create CI workflow(s) for publishing running regession tests and publishing release artifacts.
-   
+**Low-level API coverage**
+
+- **Ingestion Service**
+  - `ingestData()` / `ingestDataStream()` / `ingestDataBidiStream()` — full ingestion client with a
+    shared DataFrame payload model ([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17);
+    also unblocks the closed-loop query integration test and the cookbook's ingestion recipe)
+  - `queryRequestStatus()` — async status of ingestion requests
+  - `subscribeData()` — receive data for specified PVs from the ingestion stream
+- **Query Service**
+  - `queryBuckets()` / `queryBucketsStream()` — raw data buckets
+    ([issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16))
+  - `queryData()` — bucketed PV time-series data
+  - `queryTable()` — PV time-series data in tabular format
+  - `queryPvStats()` — archive ingestion statistics for PVs
+  - `queryProviders()` / `queryProviderStats()` — provider information and ingestion statistics
+- **Annotation Service**
+  - `saveDataSet()` / `queryDataSets()` — datasets over collections of PVs and time ranges
+  - `saveAnnotation()` / `queryAnnotations()` — annotations targeting a dataset
+  - `exportData()` — export datasets to common file formats
+- **Ingestion Stream Service**
+  - `subscribeDataEvent()` — notification when a data condition in the ingestion stream triggers
+
+**Higher-level features**
+
+- Design and implement `MldpApplication` with high-level application support
+- Data science conveniences beyond the current DataFrame / NumPy conversions — PyTorch tensor
+  support is the likely next step, additive on top of the existing NumPy path
+
+**Project infrastructure**
+
+- CI workflow(s) for running regression tests and publishing release artifacts
+
+## Installation
+
+Python 3.10 or later.
+
+```bash
+# core client
+pip install -e .
+
+# with pandas / NumPy / Excel conversions for query results
+pip install -e .[analysis]
+
+# development tooling (pytest, mypy for the cookbook snippet checker)
+pip install -e .[dev]
+```
+
+Point the client at your MLDP services with an `mldp-config.yaml` file or `MLDP_*` environment
+variables — see [Creating and connecting a client](doc/cookbook/connecting.md).
+
+## Hello, MLDP
+
+Every call follows the same shape: build a parameter object, call a method on a feature client,
+check `result_status.is_error`, then read the typed payload.
+
+```python
+from dp_python_lib.client import MldpClient, SavePvMetadataRequestParams, PvMetadataQuery as Q
+
+client = MldpClient()                       # config file + MLDP_* env vars
+pv = client.annotation.pv_metadata
+
+# Record what a PV is
+result = pv.save_pv_metadata(SavePvMetadataRequestParams(
+    pv_name="BPMS:GUNB:314:X",
+    tags=["beam-position"],
+    attributes={"AREA": "GUNB", "TYPE": "BPMS"},
+    modified_by="operator",
+    description="Beam position monitor, horizontal",
+))
+if result.result_status.is_error:
+    raise RuntimeError(result.result_status.message)
+
+# Find it again by property rather than by name — iter_* pages transparently
+for metadata in pv.iter_pv_metadata([Q.attributes("AREA", ["GUNB"])]):
+    print(metadata.pvName)
+```
+
+Checking `result_status.is_error` is not ceremony: the typed accessors return `None` or `[]` on
+failure, so skipping the check turns an error into silently missing data.
+
+## How to use it
+
+The **[cookbook](doc/cookbook/)** is the guide.  Each recipe walks through a complete task, and
+the recipes share one continuous worked example drawn from an accelerator facility.
+
+| Recipe | Covers |
+|---|---|
+| [API conventions](doc/cookbook/conventions.md) | Patterns every call shares: checking results, paging, criteria AND/OR rules, full-replace saves, time handling |
+| [Creating and connecting a client](doc/cookbook/connecting.md) | Building an `MldpClient`, config files and environment variables, TLS, logging |
+| [Cataloguing PVs](doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
+| [Recording machine configuration](doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
+| [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel |
+
+Every Python snippet in the cookbook is mechanically syntax- and type-checked against the
+installed package.
+
+For further examples, see the [integration tests](tests/integration).  For the wire protocol
+beneath this library — the protobuf messages and RPC semantics, documented in Java — see the
+[dp-grpc cookbook](https://github.com/osprey-dcs/dp-grpc/tree/main/doc/cookbook).
