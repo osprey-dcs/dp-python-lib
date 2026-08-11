@@ -145,6 +145,52 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.client._build_save_configuration_activation_request(params)
 
+    def test_open_ended_omits_end_time(self):
+        """end_time=None leaves endTime genuinely absent, meaning "still in effect"."""
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name="cfg-1", start_time=100, end_time=None)
+        request = self.client._build_save_configuration_activation_request(params)
+
+        self.assertEqual(request.startTime.epochSeconds, 100)
+        self.assertFalse(request.HasField("endTime"))
+
+    def test_end_time_defaults_to_open_ended(self):
+        """end_time may be omitted entirely, not just passed as None."""
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name="cfg-1", start_time=100)
+        request = self.client._build_save_configuration_activation_request(params)
+
+        self.assertEqual(request.configurationName, "cfg-1")
+        self.assertFalse(request.HasField("endTime"))
+
+    def test_open_ended_datetime_start(self):
+        start = datetime(2023, 1, 1, tzinfo=timezone.utc)
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name="cfg-1", start_time=start, client_activation_id="act-open")
+        request = self.client._build_save_configuration_activation_request(params)
+
+        self.assertEqual(request.startTime.epochSeconds, int(start.timestamp()))
+        self.assertEqual(request.clientActivationId, "act-open")
+        self.assertFalse(request.HasField("endTime"))
+
+    def test_bounded_activation_still_sets_end_time(self):
+        """The bounded case is unchanged: endTime is present when supplied."""
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name="cfg-1", start_time=100, end_time=200)
+        request = self.client._build_save_configuration_activation_request(params)
+
+        self.assertTrue(request.HasField("endTime"))
+        self.assertEqual(request.endTime.epochSeconds, 200)
+
+    def test_end_time_zero_is_not_treated_as_absent(self):
+        """Epoch 0 is a real timestamp; only None means open-ended."""
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name="cfg-1", start_time=0, end_time=0)
+        request = self.client._build_save_configuration_activation_request(params)
+
+        self.assertTrue(request.HasField("endTime"))
+        self.assertEqual(request.endTime.epochSeconds, 0)
+
 
 class TestActivationKeyValidation(unittest.TestCase):
     def setUp(self):

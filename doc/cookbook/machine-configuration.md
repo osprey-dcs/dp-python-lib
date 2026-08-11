@@ -158,40 +158,38 @@ A naive datetime would be read against the local timezone, silently shifting eve
 the running machine's UTC offset.  Attach `tzinfo` explicitly.  See
 [conventions](conventions.md#time).
 
-### `end_time` is required by this client
+### Open-ended activations: omit `end_time`
 
-The protocol allows an activation with **no** `endTime`, meaning "still in effect".  This library
-does not expose that: `SaveConfigurationActivationRequestParams` requires `end_time`, and passing
-`None` raises `TypeError`.  Tracked as
-[#20](https://github.com/osprey-dcs/dp-python-lib/issues/20).
+An activation with no `end_time` means **still in effect**.  This is the natural shape for a live
+bridge: when the machine reports a configuration change, you open an interval now and close it
+later, when the next change arrives — you do not know the end time at the moment you record the
+start.
 
-For a live bridge that must open an interval before knowing when it ends, there are two options:
+```python
+# cookbook:partial
+machine_config = client.annotation.machine_config
+shift_start = datetime(2026, 2, 2, 17, 0, tzinfo=timezone.utc)
 
-1. **Write a provisional `end_time`** and re-save the record with the real one when the
-   configuration changes (see the next section).  Simplest, and the interval is never wrong for
-   longer than one update cycle.
-2. **Build the request directly** and clear the field, if you truly need an open-ended record:
+# no end_time -> open-ended: in effect until explicitly closed
+machine_config.save_configuration_activation(SaveConfigurationActivationRequestParams(
+    configuration_name="cxi-production",
+    start_time=shift_start,
+    client_activation_id="act-open",
+    modified_by="physics-ops",
+))
+```
+
+`get_active_configurations()` reports an open-ended activation as active at any instant at or
+after its `start_time`.  To close it, re-save the record with the same `client_activation_id` and
+a real `end_time` — see the next section.
+
+To test whether a record you have read back is still open, check the field directly:
 
 ```python
 # cookbook:partial
 # cookbook:no-mypy   (generated protobuf classes are built at import time; not statically visible)
-machine_config = client.annotation.machine_config
-
-request = machine_config._build_save_configuration_activation_request(
-    SaveConfigurationActivationRequestParams(
-        configuration_name="cxi-production",
-        start_time=shift_start,
-        end_time=shift_start,      # placeholder, cleared below
-        client_activation_id="act-open",
-        modified_by="physics-ops",
-    ))
-request.ClearField("endTime")      # -> open-ended: still in effect
-
-result = machine_config._send_save_configuration_activation(request)
+still_open = not activation.HasField("endTime")
 ```
-
-This reaches past the public API into underscore-prefixed methods, so treat it as a workaround
-rather than a pattern — it is not covered by the library's compatibility expectations.
 
 ## Closing one activation and opening the next
 
