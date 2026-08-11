@@ -187,7 +187,12 @@ To test whether a record you have read back is still open, check the field direc
 
 ```python
 # cookbook:partial
-# cookbook:no-mypy   (generated protobuf classes are built at import time; not statically visible)
+machine_config = client.annotation.machine_config
+
+read = machine_config.get_configuration_activation(client_activation_id="act-open")
+activation = read.configuration_activation
+assert activation is not None
+
 still_open = not activation.HasField("endTime")
 ```
 
