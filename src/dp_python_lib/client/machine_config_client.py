@@ -409,7 +409,8 @@ class SaveConfigurationActivationRequestParams:
     Encapsulates client parameters for a call to the saveConfigurationActivation() API method.
     """
 
-    def __init__(self, configuration_name: str, start_time: TimestampInput, end_time: TimestampInput,
+    def __init__(self, configuration_name: str, start_time: TimestampInput,
+                 end_time: Optional[TimestampInput] = None,
                  client_activation_id: Optional[str] = None, description: Optional[str] = None,
                  tags: Optional[List[str]] = None, attributes: Optional[Dict[str, str]] = None,
                  modified_by: Optional[str] = None) -> None:
@@ -417,6 +418,7 @@ class SaveConfigurationActivationRequestParams:
         :param configuration_name: Name of the configuration that was active.
         :param start_time: Start of the activation interval (tz-aware datetime, epoch seconds, or common.Timestamp).
         :param end_time: End of the activation interval (tz-aware datetime, epoch seconds, or common.Timestamp).
+            Omit or pass None for an open-ended activation, meaning the configuration is still in effect.
         :param client_activation_id: Optional client-supplied identifier for the activation.
         :param description: Human-readable description of the activation.
         :param tags: List of tags (keywords) describing the activation.
@@ -946,7 +948,10 @@ class MachineConfigClient(ServiceApiClientBase):
         request = annotation_pb2.SaveConfigurationActivationRequest()
         request.configurationName = request_params.configuration_name
         request.startTime.CopyFrom(to_timestamp(request_params.start_time))
-        request.endTime.CopyFrom(to_timestamp(request_params.end_time))
+
+        # endTime is left unset for an open-ended activation, which the API reads as "still in effect".
+        if request_params.end_time is not None:
+            request.endTime.CopyFrom(to_timestamp(request_params.end_time))
 
         if request_params.client_activation_id:
             request.clientActivationId = request_params.client_activation_id

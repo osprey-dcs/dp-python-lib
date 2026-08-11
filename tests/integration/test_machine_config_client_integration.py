@@ -249,6 +249,111 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
                          f"deleteConfiguration (cleanup) failed: {delete_config.result_status.message}")
         self.logger.info("Machine config activation round-trip integration test completed successfully")
 
+    def test_open_ended_activation_round_trip(self):
+        """
+        Exercises the open-ended activation shape against real services: an activation saved with no end_time
+        must round-trip with endTime genuinely absent (not defaulted to zero), be reported active at an
+        arbitrary far-future instant, and stop being active once closed with a real end_time.
+
+        This is the live-bridge pattern: open an interval now, close it when the next change arrives.
+        """
+        self.assertIsNotNone(self.client.annotation, "annotation client should be initialized")
+        mc = self.client.annotation.machine_config
+
+        now = int(time.time())
+        config_name = f"INTEGRATION:OPEN-CFG:{now}"
+        client_activation_id = f"integration-open-act-{now}"
+        start_time = now - 3600
+        # Far future rather than "now + delta": the open-ended semantics are the only thing under test,
+        # and the probe cannot be perturbed by clock skew or a slow test run.
+        far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+
+        self.addCleanup(mc.delete_configuration, config_name)
+        self.addCleanup(mc.delete_configuration_activation, client_activation_id)
+
+        save_config = mc.save_configuration(SaveConfigurationRequestParams(
+            configuration_name=config_name,
+            category="integration-open-activation",
+            modified_by="dp-python-lib-integration-test",
+        ))
+        self.assertFalse(save_config.result_status.is_error,
+                         f"saveConfiguration (for open activation) failed: {save_config.result_status.message}")
+
+        # --- save an activation with no end_time: open-ended, "still in effect" ---
+        save_act = mc.save_configuration_activation(SaveConfigurationActivationRequestParams(
+            configuration_name=config_name,
+            start_time=start_time,
+            client_activation_id=client_activation_id,
+            description="Integration test open-ended activation",
+            tags=["integration"],
+            modified_by="dp-python-lib-integration-test",
+        ))
+        self.assertFalse(save_act.result_status.is_error,
+                         f"saveConfigurationActivation (open-ended) failed: {save_act.result_status.message}")
+        self.logger.info("Saved open-ended configuration activation: %s", save_act.client_activation_id)
+
+        # --- read back: endTime must be genuinely absent, not zero ---
+        get_open = mc.get_configuration_activation(client_activation_id=client_activation_id)
+        self.assertFalse(get_open.result_status.is_error,
+                         f"getConfigurationActivation (open-ended) failed: {get_open.result_status.message}")
+        activation = get_open.configuration_activation
+        self.assertIsNotNone(activation, "getConfigurationActivation should return the open-ended record")
+        self.assertEqual(activation.startTime.epochSeconds, start_time)
+        self.assertFalse(activation.HasField("endTime"),
+                         "an open-ended activation must round-trip with endTime absent, not defaulted to zero")
+        self.logger.info("Open-ended activation round-tripped with endTime absent")
+
+        # --- an open-ended activation is active at any instant at or after start_time ---
+        active_future = mc.get_active_configurations(timestamp=far_future)
+        self.assertFalse(active_future.result_status.is_error,
+                         f"getActiveConfigurations (far future) failed: {active_future.result_status.message}")
+        self.assertIn(client_activation_id,
+                      [a.clientActivationId for a in active_future.configuration_activations],
+                      "getActiveConfigurations should report an open-ended activation as active in the far future")
+        self.logger.info("Open-ended activation reported active at %s", far_future.isoformat())
+
+        # --- close it: same client_activation_id means UPDATE, not a second record ---
+        end_time = now + 1800
+        close_act = mc.save_configuration_activation(SaveConfigurationActivationRequestParams(
+            configuration_name=config_name,
+            start_time=start_time,
+            end_time=end_time,
+            client_activation_id=client_activation_id,
+            description="Integration test open-ended activation",
+            tags=["integration"],
+            modified_by="dp-python-lib-integration-test",
+        ))
+        self.assertFalse(close_act.result_status.is_error,
+                         f"saveConfigurationActivation (closing) failed: {close_act.result_status.message}")
+
+        get_closed = mc.get_configuration_activation(client_activation_id=client_activation_id)
+        self.assertFalse(get_closed.result_status.is_error,
+                         f"getConfigurationActivation (closed) failed: {get_closed.result_status.message}")
+        closed = get_closed.configuration_activation
+        self.assertIsNotNone(closed, "getConfigurationActivation should return the closed record")
+        self.assertTrue(closed.HasField("endTime"), "closing the activation should set endTime")
+        self.assertEqual(closed.endTime.epochSeconds, end_time)
+        self.logger.info("Closed the open-ended activation at %d", end_time)
+
+        # --- once closed, the far-future probe no longer sees it ---
+        active_after_close = mc.get_active_configurations(timestamp=far_future)
+        self.assertFalse(active_after_close.result_status.is_error,
+                         f"getActiveConfigurations (after close) failed: "
+                         f"{active_after_close.result_status.message}")
+        self.assertNotIn(client_activation_id,
+                         [a.clientActivationId for a in active_after_close.configuration_activations],
+                         "a closed activation should not be active after its end_time")
+        self.logger.info("Closed activation correctly absent from far-future active set")
+
+        delete_act = mc.delete_configuration_activation(client_activation_id=client_activation_id)
+        self.assertFalse(delete_act.result_status.is_error,
+                         f"deleteConfigurationActivation failed: {delete_act.result_status.message}")
+
+        delete_config = mc.delete_configuration(config_name)
+        self.assertFalse(delete_config.result_status.is_error,
+                         f"deleteConfiguration (cleanup) failed: {delete_config.result_status.message}")
+        self.logger.info("Open-ended activation integration test completed successfully")
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
