@@ -27,7 +27,8 @@ _EXCEL_MAX_ROWS = 1_048_576 - 1
 
 # Mapping from the Image.FileType enum number to its name, resolved once from the descriptor.
 _IMAGE_FILE_TYPE_NAMES = {
-    v.number: v.name for v in common_pb2.Image.DESCRIPTOR.fields_by_name["fileType"].enum_type.values
+    v.number: v.name
+    for v in common_pb2.Image.DESCRIPTOR.fields_by_name["fileType"].enum_type.values
 }
 
 
@@ -49,15 +50,18 @@ class Image:
         return f"Image(file_type={self.file_type!r}, bytes={len(self.data)})"
 
     def __eq__(self, other: object) -> bool:
-        return (isinstance(other, Image)
-                and self.data == other.data
-                and self.file_type == other.file_type)
+        return (
+            isinstance(other, Image)
+            and self.data == other.data
+            and self.file_type == other.file_type
+        )
 
 
 def _require_pandas():
     """Imports and returns pandas, or raises an actionable error if the optional [analysis] extra is missing."""
     try:
         import pandas
+
         return pandas
     except ImportError as e:
         raise ImportError(
@@ -69,6 +73,7 @@ def _require_numpy():
     """Imports and returns numpy, or raises an actionable error if the optional [analysis] extra is missing."""
     try:
         import numpy
+
         return numpy
     except ImportError as e:
         raise ImportError(
@@ -81,10 +86,19 @@ def _require_numpy():
 # ----------------------------------------------------------------------
 
 # The scalar oneof arms that map directly to a native Python value via getattr.
-_SCALAR_ARMS = frozenset({
-    "stringValue", "booleanValue", "uintValue", "ulongValue",
-    "intValue", "longValue", "floatValue", "doubleValue", "byteArrayValue",
-})
+_SCALAR_ARMS = frozenset(
+    {
+        "stringValue",
+        "booleanValue",
+        "uintValue",
+        "ulongValue",
+        "intValue",
+        "longValue",
+        "floatValue",
+        "doubleValue",
+        "byteArrayValue",
+    }
+)
 
 
 def _timestamp_to_epoch_nanos(ts: common_pb2.Timestamp) -> int:
@@ -115,9 +129,13 @@ def data_value_to_python(value: common_pb2.DataValue) -> Any:
     if arm == "arrayValue":
         return [data_value_to_python(v) for v in value.arrayValue.dataValues]
     if arm == "structureValue":
-        return {field.name: data_value_to_python(field.value) for field in value.structureValue.fields}
+        return {
+            field.name: data_value_to_python(field.value) for field in value.structureValue.fields
+        }
     if arm == "imageValue":
-        file_type = _IMAGE_FILE_TYPE_NAMES.get(value.imageValue.fileType, str(value.imageValue.fileType))
+        file_type = _IMAGE_FILE_TYPE_NAMES.get(
+            value.imageValue.fileType, str(value.imageValue.fileType)
+        )
         return Image(value.imageValue.image, file_type)
     raise ValueError(f"Unhandled DataValue arm: {arm!r}")
 
@@ -150,11 +168,13 @@ def _column_has_complex_arm(column: common_pb2.DataColumn) -> bool:
 # ColumnTable -> pandas DataFrame
 # ----------------------------------------------------------------------
 
+
 def _check_no_serialized_columns(column_table: query_pb2.ColumnTable) -> None:
     """Raises NotImplementedError if the ColumnTable carries serialized columns (deferred; not decoded)."""
     if len(column_table.serializedDataColumns) > 0:
         raise NotImplementedError(
-            "serializedDataColumns are not supported yet; query with the default (dense) column representation")
+            "serializedDataColumns are not supported yet; query with the default (dense) column representation"
+        )
 
 
 def _check_column_alignment(column: common_pb2.DataColumn, n_rows: int) -> None:
@@ -162,7 +182,8 @@ def _check_column_alignment(column: common_pb2.DataColumn, n_rows: int) -> None:
     if len(column.dataValues) != n_rows:
         raise ValueError(
             f"column {column.name!r} has {len(column.dataValues)} values but the timestampList has "
-            f"{n_rows}; dense index alignment is required")
+            f"{n_rows}; dense index alignment is required"
+        )
 
 
 def _check_no_duplicate_column_names(column_table: query_pb2.ColumnTable) -> None:
@@ -180,7 +201,8 @@ def _check_no_duplicate_column_names(column_table: query_pb2.ColumnTable) -> Non
     if duplicates:
         raise ValueError(
             f"ColumnTable contains duplicate DataColumn name(s): {sorted(duplicates)!r}; conversions key "
-            f"columns by name and cannot represent duplicates without dropping data")
+            f"columns by name and cannot represent duplicates without dropping data"
+        )
 
 
 def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> Dict[str, Any]:
@@ -191,8 +213,9 @@ def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> Dict[str, Any]
     }
 
 
-def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
-                              exclude_column_metadata: bool = False) -> Any:
+def column_table_to_dataframe(
+    column_table: Optional[query_pb2.ColumnTable], exclude_column_metadata: bool = False
+) -> Any:
     """
     Converts a ColumnTable into a pandas DataFrame: a UTC datetime index built from the timestampList, and one column
     per DataColumn (column label = DataColumn.name).
@@ -224,7 +247,8 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
     timestamps = column_table.timestampList.timestamps
     n_rows = len(timestamps)
     index = pd.to_datetime(
-        [_timestamp_to_epoch_nanos(ts) for ts in timestamps], utc=True, unit="ns")
+        [_timestamp_to_epoch_nanos(ts) for ts in timestamps], utc=True, unit="ns"
+    )
 
     data: Dict[str, Any] = {}
     metadata: Dict[str, Any] = {}
@@ -234,7 +258,9 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
         if _column_has_timestamp_arm(column):
             # Build a UTC datetime column from epoch-nanos, preserving None gaps as NaT.
             epoch_nanos = [data_value_to_python(v) for v in column.dataValues]
-            data[column.name] = pd.to_datetime(pd.Series(epoch_nanos, index=index), utc=True, unit="ns")
+            data[column.name] = pd.to_datetime(
+                pd.Series(epoch_nanos, index=index), utc=True, unit="ns"
+            )
         else:
             data[column.name] = [data_value_to_python(v) for v in column.dataValues]
 
@@ -250,6 +276,7 @@ def column_table_to_dataframe(column_table: Optional[query_pb2.ColumnTable],
 # ----------------------------------------------------------------------
 # ColumnTable -> NumPy
 # ----------------------------------------------------------------------
+
 
 def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict[str, Any]:
     """
@@ -286,7 +313,8 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
 
     result: Dict[str, Any] = {
         "timestamps": np.array(
-            [_timestamp_to_epoch_nanos(ts) for ts in timestamps], dtype="datetime64[ns]")
+            [_timestamp_to_epoch_nanos(ts) for ts in timestamps], dtype="datetime64[ns]"
+        )
     }
     for column in column_table.dataColumns:
         _check_column_alignment(column, n_rows)
@@ -308,6 +336,7 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
 # Excel export
 # ----------------------------------------------------------------------
 
+
 def _stringify_complex_cell(value: Any) -> Any:
     """
     Renders a complex DataFrame cell into an Excel-safe value: list/dict as JSON, Image via repr.  Everything else
@@ -316,6 +345,7 @@ def _stringify_complex_cell(value: Any) -> Any:
     string "b'abc'" and lose the value's type for no gain.
     """
     import json
+
     if isinstance(value, (list, dict)):
         return json.dumps(value, default=repr)
     if isinstance(value, Image):
@@ -340,11 +370,14 @@ def dataframe_to_excel(df: Any, path: str, max_rows: Optional[int] = None) -> No
 
     n_rows = len(df)
     if max_rows is not None and n_rows > max_rows:
-        raise ValueError(f"DataFrame has {n_rows} rows, exceeding the requested max_rows={max_rows}")
+        raise ValueError(
+            f"DataFrame has {n_rows} rows, exceeding the requested max_rows={max_rows}"
+        )
     if n_rows > _EXCEL_MAX_ROWS:
         raise ValueError(
             f"DataFrame has {n_rows} rows, exceeding Excel's ceiling of {_EXCEL_MAX_ROWS}; "
-            f"narrow the query range or export another format")
+            f"narrow the query range or export another format"
+        )
 
     out = df.copy()
 
@@ -364,7 +397,10 @@ def dataframe_to_excel(df: Any, path: str, max_rows: Optional[int] = None) -> No
 # Whole-query conveniences (page internally)
 # ----------------------------------------------------------------------
 
-def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows: Optional[int] = None) -> Any:
+
+def query_samples_to_dataframe(
+    query_client: Any, request_params: Any, max_rows: Optional[int] = None
+) -> Any:
     """
     Runs a unary query, pages through the entire result via iter_query_samples(), and concatenates the pages into a
     single DataFrame.  Pages are concatenated on the row axis (axis=0) and aligned by column NAME (an outer join,
@@ -389,12 +425,14 @@ def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows:
     total = 0
     for page in query_client.iter_query_samples(request_params):
         frame = column_table_to_dataframe(
-            page.column_table, exclude_column_metadata=request_params.exclude_column_metadata)
+            page.column_table, exclude_column_metadata=request_params.exclude_column_metadata
+        )
         total += len(frame)
         if max_rows is not None and total > max_rows:
             raise ValueError(
                 f"query result exceeds max_rows={max_rows} (at least {total} rows); "
-                f"narrow the range or raise max_rows")
+                f"narrow the range or raise max_rows"
+            )
         frames.append(frame)
 
     if not frames:
@@ -416,4 +454,5 @@ def stream_query_samples_to_dataframes(query_client: Any, request_params: Any) -
     """
     for page in query_client.iter_query_samples_stream(request_params):
         yield column_table_to_dataframe(
-            page.column_table, exclude_column_metadata=request_params.exclude_column_metadata)
+            page.column_table, exclude_column_metadata=request_params.exclude_column_metadata
+        )

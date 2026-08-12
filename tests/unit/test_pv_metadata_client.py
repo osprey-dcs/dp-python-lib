@@ -5,7 +5,7 @@ import os
 import grpc
 
 # Add src directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.pv_metadata_client import (
     PvMetadataClient,
@@ -53,8 +53,9 @@ class TestPvMetadataClientBuildRequests(unittest.TestCase):
         self.assertEqual(list(request.tags), ["vacuum", "beam"])
         self.assertEqual(request.modifiedBy, "tester")
         self.assertEqual(request.description, "a test PV")
-        self.assertEqual({(a.name, a.value) for a in request.attributes},
-                         {("unit", "V"), ("system", "vac")})
+        self.assertEqual(
+            {(a.name, a.value) for a in request.attributes}, {("unit", "V"), ("system", "vac")}
+        )
 
     def test_build_save_request_name_only(self):
         params = SavePvMetadataRequestParams(pv_name="ABC:1")
@@ -139,7 +140,6 @@ class TestPvMetadataQueryHelpers(unittest.TestCase):
 
 
 class TestSendSavePvMetadata(unittest.TestCase):
-
     def setUp(self):
         self.mock_channel = Mock()
         self.client = PvMetadataClient(self.mock_channel)
@@ -213,7 +213,6 @@ class TestSendSavePvMetadata(unittest.TestCase):
 
 
 class TestSendGetPvMetadata(unittest.TestCase):
-
     def setUp(self):
         self.mock_channel = Mock()
         self.client = PvMetadataClient(self.mock_channel)
@@ -283,7 +282,6 @@ class TestSendGetPvMetadata(unittest.TestCase):
 
 
 class TestSendDeletePvMetadata(unittest.TestCase):
-
     def setUp(self):
         self.mock_channel = Mock()
         self.client = PvMetadataClient(self.mock_channel)
@@ -352,7 +350,6 @@ class TestSendDeletePvMetadata(unittest.TestCase):
 
 
 class TestSendQueryPvMetadata(unittest.TestCase):
-
     def setUp(self):
         self.mock_channel = Mock()
         self.client = PvMetadataClient(self.mock_channel)
@@ -430,7 +427,6 @@ class TestSendQueryPvMetadata(unittest.TestCase):
 
 
 class TestIterPvMetadata(unittest.TestCase):
-
     def setUp(self):
         self.mock_channel = Mock()
         self.client = PvMetadataClient(self.mock_channel)
@@ -483,5 +479,5 @@ class TestIterPvMetadata(unittest.TestCase):
         self.assertIn("query failed", str(ctx.exception))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

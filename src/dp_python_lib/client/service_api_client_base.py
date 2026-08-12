@@ -20,4 +20,6 @@ class ServiceApiClientBase(ABC):
         self.logger = logging.getLogger(__name__)
         self._channel = channel
         self._stub = stub_class(channel)
-        self.logger.debug("Initialized service client with channel: %s, stub: %s", channel, stub_class.__name__)
+        self.logger.debug(
+            "Initialized service client with channel: %s, stub: %s", channel, stub_class.__name__
+        )

@@ -80,8 +80,11 @@ class ConfigurationQuery:
     _Criterion = annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion
 
     @staticmethod
-    def name(exact: Optional[List[str]] = None, prefix: Optional[List[str]] = None,
-             contains: Optional[List[str]] = None) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
+    def name(
+        exact: Optional[List[str]] = None,
+        prefix: Optional[List[str]] = None,
+        contains: Optional[List[str]] = None,
+    ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
         Builds a criterion matching configuration names by exact value, prefix, and/or substring.
         :param exact: Configuration names to match exactly.
@@ -103,7 +106,9 @@ class ConfigurationQuery:
         return criterion
 
     @staticmethod
-    def category(values: List[str]) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
+    def category(
+        values: List[str],
+    ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
         Builds a criterion matching configurations having any of the specified categories.
         :param values: Category values to match.
@@ -117,7 +122,9 @@ class ConfigurationQuery:
         return criterion
 
     @staticmethod
-    def tags(values: List[str]) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
+    def tags(
+        values: List[str],
+    ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
         Builds a criterion matching configurations having any of the specified tags.
         :param values: Tag values to match.
@@ -131,7 +138,9 @@ class ConfigurationQuery:
         return criterion
 
     @staticmethod
-    def attributes(key: str, values: List[str]) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
+    def attributes(
+        key: str, values: List[str]
+    ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
         Builds a criterion matching configurations whose attribute with the given key has any of the specified values.
         :param key: Attribute key to match.
@@ -149,7 +158,9 @@ class ConfigurationQuery:
         return criterion
 
     @staticmethod
-    def parent(values: List[str]) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
+    def parent(
+        values: List[str],
+    ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
         Builds a criterion matching configurations whose parent configuration name is any of the specified values.
         :param values: Parent configuration names to match.
@@ -176,10 +187,16 @@ class ConfigurationActivationQuery:
         result = client.annotation.machine_config.query_configuration_activations(criteria=criteria)
     """
 
-    _Criterion = annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+    _Criterion = (
+        annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+    )
 
     @staticmethod
-    def timestamp(value: TimestampInput) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def timestamp(
+        value: TimestampInput,
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations that were active at the specified instant.
         :param value: The instant to match, as a tz-aware datetime, epoch seconds, or common.Timestamp
@@ -191,7 +208,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def time_range(start: TimestampInput, end: TimestampInput) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def time_range(
+        start: TimestampInput, end: TimestampInput
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations that overlap the specified time range.
         :param start: Start of the range, as a tz-aware datetime, epoch seconds, or common.Timestamp.
@@ -204,7 +225,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def configuration_name(values: List[str]) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def configuration_name(
+        values: List[str],
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations whose configuration name is any of the specified values.
         :param values: Configuration names to match.
@@ -218,7 +243,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def client_activation_id(values: List[str]) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def client_activation_id(
+        values: List[str],
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations whose client activation id is any of the specified values.
         :param values: Client activation ids to match.
@@ -232,7 +261,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def category(values: List[str]) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def category(
+        values: List[str],
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations whose configuration category is any of the specified values.
         :param values: Category values to match.
@@ -246,7 +279,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def tags(values: List[str]) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def tags(
+        values: List[str],
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations having any of the specified tags.
         :param values: Tag values to match.
@@ -260,7 +297,11 @@ class ConfigurationActivationQuery:
         return criterion
 
     @staticmethod
-    def attributes(key: str, values: List[str]) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
+    def attributes(
+        key: str, values: List[str]
+    ) -> (
+        "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion"
+    ):
         """
         Builds a criterion matching activations whose attribute with the given key has any of the specified values.
         :param key: Attribute key to match.
@@ -283,9 +324,16 @@ class SaveConfigurationRequestParams:
     Encapsulates client parameters for a call to the saveConfiguration() API method.
     """
 
-    def __init__(self, configuration_name: str, category: Optional[str] = None, description: Optional[str] = None,
-                 parent_configuration_name: Optional[str] = None, tags: Optional[List[str]] = None,
-                 attributes: Optional[Dict[str, str]] = None, modified_by: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        configuration_name: str,
+        category: Optional[str] = None,
+        description: Optional[str] = None,
+        parent_configuration_name: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        attributes: Optional[Dict[str, str]] = None,
+        modified_by: Optional[str] = None,
+    ) -> None:
         """
         :param configuration_name: Name of the machine configuration being saved.
         :param category: Category grouping for the configuration.
@@ -309,8 +357,12 @@ class SaveConfigurationApiResult(ApiResultBase):
     Wraps the response from saveConfiguration(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.SaveConfigurationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.SaveConfigurationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -322,7 +374,7 @@ class SaveConfigurationApiResult(ApiResultBase):
     @property
     def configuration_name(self) -> Optional[str]:
         """Name of the configuration that was saved, or None on error."""
-        if self.response is not None and self.response.HasField('saveConfigurationResult'):
+        if self.response is not None and self.response.HasField("saveConfigurationResult"):
             return self.response.saveConfigurationResult.configurationName
         return None
 
@@ -332,8 +384,12 @@ class GetConfigurationApiResult(ApiResultBase):
     Wraps the response from getConfiguration(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.GetConfigurationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.GetConfigurationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -345,7 +401,7 @@ class GetConfigurationApiResult(ApiResultBase):
     @property
     def configuration(self) -> Optional[common_pb2.Configuration]:
         """The Configuration for the requested name, or None on error."""
-        if self.response is not None and self.response.HasField('getConfigurationResult'):
+        if self.response is not None and self.response.HasField("getConfigurationResult"):
             return self.response.getConfigurationResult.configuration
         return None
 
@@ -356,8 +412,12 @@ class QueryConfigurationsApiResult(ApiResultBase):
     message.  Use MachineConfigClient.iter_configurations() to transparently page through all results.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.QueryConfigurationsResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.QueryConfigurationsResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -369,14 +429,14 @@ class QueryConfigurationsApiResult(ApiResultBase):
     @property
     def configurations(self) -> List[common_pb2.Configuration]:
         """The Configuration records in this page, or an empty list on error."""
-        if self.response is not None and self.response.HasField('queryConfigurationsResult'):
+        if self.response is not None and self.response.HasField("queryConfigurationsResult"):
             return list(self.response.queryConfigurationsResult.configurations)
         return []
 
     @property
     def next_page_token(self) -> str:
         """Token for retrieving the next page, or empty string if there are no more pages."""
-        if self.response is not None and self.response.HasField('queryConfigurationsResult'):
+        if self.response is not None and self.response.HasField("queryConfigurationsResult"):
             return self.response.queryConfigurationsResult.nextPageToken
         return ""
 
@@ -386,8 +446,12 @@ class DeleteConfigurationApiResult(ApiResultBase):
     Wraps the response from deleteConfiguration(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.DeleteConfigurationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.DeleteConfigurationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -399,7 +463,7 @@ class DeleteConfigurationApiResult(ApiResultBase):
     @property
     def configuration_name(self) -> Optional[str]:
         """Name of the configuration that was deleted, or None on error."""
-        if self.response is not None and self.response.HasField('deleteConfigurationResult'):
+        if self.response is not None and self.response.HasField("deleteConfigurationResult"):
             return self.response.deleteConfigurationResult.configurationName
         return None
 
@@ -409,11 +473,17 @@ class SaveConfigurationActivationRequestParams:
     Encapsulates client parameters for a call to the saveConfigurationActivation() API method.
     """
 
-    def __init__(self, configuration_name: str, start_time: TimestampInput,
-                 end_time: Optional[TimestampInput] = None,
-                 client_activation_id: Optional[str] = None, description: Optional[str] = None,
-                 tags: Optional[List[str]] = None, attributes: Optional[Dict[str, str]] = None,
-                 modified_by: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        configuration_name: str,
+        start_time: TimestampInput,
+        end_time: Optional[TimestampInput] = None,
+        client_activation_id: Optional[str] = None,
+        description: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        attributes: Optional[Dict[str, str]] = None,
+        modified_by: Optional[str] = None,
+    ) -> None:
         """
         :param configuration_name: Name of the configuration that was active.
         :param start_time: Start of the activation interval (tz-aware datetime, epoch seconds, or common.Timestamp).
@@ -440,8 +510,12 @@ class SaveConfigurationActivationApiResult(ApiResultBase):
     Wraps the response from saveConfigurationActivation(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.SaveConfigurationActivationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.SaveConfigurationActivationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -453,7 +527,9 @@ class SaveConfigurationActivationApiResult(ApiResultBase):
     @property
     def client_activation_id(self) -> Optional[str]:
         """Client activation id of the activation that was saved, or None on error."""
-        if self.response is not None and self.response.HasField('saveConfigurationActivationResult'):
+        if self.response is not None and self.response.HasField(
+            "saveConfigurationActivationResult"
+        ):
             return self.response.saveConfigurationActivationResult.clientActivationId
         return None
 
@@ -463,8 +539,12 @@ class GetConfigurationActivationApiResult(ApiResultBase):
     Wraps the response from getConfigurationActivation(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.GetConfigurationActivationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.GetConfigurationActivationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -476,7 +556,7 @@ class GetConfigurationActivationApiResult(ApiResultBase):
     @property
     def configuration_activation(self) -> Optional[common_pb2.ConfigurationActivation]:
         """The ConfigurationActivation for the requested key, or None on error."""
-        if self.response is not None and self.response.HasField('getConfigurationActivationResult'):
+        if self.response is not None and self.response.HasField("getConfigurationActivationResult"):
             return self.response.getConfigurationActivationResult.configurationActivation
         return None
 
@@ -488,8 +568,12 @@ class QueryConfigurationActivationsApiResult(ApiResultBase):
     results.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.QueryConfigurationActivationsResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.QueryConfigurationActivationsResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -501,14 +585,18 @@ class QueryConfigurationActivationsApiResult(ApiResultBase):
     @property
     def configuration_activations(self) -> List[common_pb2.ConfigurationActivation]:
         """The ConfigurationActivation records in this page, or an empty list on error."""
-        if self.response is not None and self.response.HasField('queryConfigurationActivationsResult'):
+        if self.response is not None and self.response.HasField(
+            "queryConfigurationActivationsResult"
+        ):
             return list(self.response.queryConfigurationActivationsResult.configurationActivations)
         return []
 
     @property
     def next_page_token(self) -> str:
         """Token for retrieving the next page, or empty string if there are no more pages."""
-        if self.response is not None and self.response.HasField('queryConfigurationActivationsResult'):
+        if self.response is not None and self.response.HasField(
+            "queryConfigurationActivationsResult"
+        ):
             return self.response.queryConfigurationActivationsResult.nextPageToken
         return ""
 
@@ -518,8 +606,12 @@ class DeleteConfigurationActivationApiResult(ApiResultBase):
     Wraps the response from deleteConfigurationActivation(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.DeleteConfigurationActivationResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.DeleteConfigurationActivationResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -531,7 +623,9 @@ class DeleteConfigurationActivationApiResult(ApiResultBase):
     @property
     def client_activation_id(self) -> Optional[str]:
         """Client activation id of the activation that was deleted, or None on error."""
-        if self.response is not None and self.response.HasField('deleteConfigurationActivationResult'):
+        if self.response is not None and self.response.HasField(
+            "deleteConfigurationActivationResult"
+        ):
             return self.response.deleteConfigurationActivationResult.clientActivationId
         return None
 
@@ -541,8 +635,12 @@ class GetActiveConfigurationsApiResult(ApiResultBase):
     Wraps the response from getActiveConfigurations(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.GetActiveConfigurationsResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.GetActiveConfigurationsResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -554,7 +652,7 @@ class GetActiveConfigurationsApiResult(ApiResultBase):
     @property
     def configuration_activations(self) -> List[common_pb2.ConfigurationActivation]:
         """The ConfigurationActivation records active at the requested instant, or an empty list on error."""
-        if self.response is not None and self.response.HasField('getActiveConfigurationsResult'):
+        if self.response is not None and self.response.HasField("getActiveConfigurationsResult"):
             return list(self.response.getActiveConfigurationsResult.configurationActivations)
         return []
 
@@ -582,14 +680,17 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_save_configuration_request(
-            self, request_params: SaveConfigurationRequestParams) -> annotation_pb2.SaveConfigurationRequest:
+        self, request_params: SaveConfigurationRequestParams
+    ) -> annotation_pb2.SaveConfigurationRequest:
         """
         Builds a SaveConfigurationRequest from the supplied SaveConfigurationRequestParams.
         :param request_params: User parameters for the call to saveConfiguration().
         :return: A SaveConfigurationRequest for the specified params.
         """
-        self.logger.debug("Building SaveConfigurationRequest for configuration: %s",
-                          request_params.configuration_name)
+        self.logger.debug(
+            "Building SaveConfigurationRequest for configuration: %s",
+            request_params.configuration_name,
+        )
 
         request = annotation_pb2.SaveConfigurationRequest()
         request.configurationName = request_params.configuration_name
@@ -620,25 +721,28 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_save_configuration(
-            self, request: annotation_pb2.SaveConfigurationRequest) -> SaveConfigurationApiResult:
+        self, request: annotation_pb2.SaveConfigurationRequest
+    ) -> SaveConfigurationApiResult:
         """
         Invokes the saveConfiguration() API method with the supplied request.
         :param request: SaveConfigurationRequest with parameters for the call.
         :return: A SaveConfigurationApiResult with the method response and status information.
         """
-        self.logger.info("Calling saveConfiguration API for configuration: %s", request.configurationName)
+        self.logger.info(
+            "Calling saveConfiguration API for configuration: %s", request.configurationName
+        )
 
         try:
             self.logger.debug("Invoking stub.saveConfiguration with request")
             response = self._stub.saveConfiguration(request)
             self.logger.debug("Received response from saveConfiguration API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("SaveConfiguration API returned business error: %s", error_msg)
                 return SaveConfigurationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('saveConfigurationResult'):
+            elif response.HasField("saveConfigurationResult"):
                 self.logger.info("Successfully saved configuration: %s", request.configurationName)
                 return SaveConfigurationApiResult(is_error=False, message="", response=response)
 
@@ -653,26 +757,36 @@ class MachineConfigClient(ServiceApiClientBase):
             return SaveConfigurationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during saveConfiguration: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during saveConfiguration: %s", str(e), exc_info=True
+            )
             return SaveConfigurationApiResult(is_error=True, message=error_msg)
 
-    def save_configuration(self, request_params: SaveConfigurationRequestParams) -> SaveConfigurationApiResult:
+    def save_configuration(
+        self, request_params: SaveConfigurationRequestParams
+    ) -> SaveConfigurationApiResult:
         """
         User-facing method for invoking the saveConfiguration() API method.
         :param request_params: Contains user parameters for the call to saveConfiguration().
         :return: A SaveConfigurationApiResult with the method response and status information.
         """
-        self.logger.info("Starting saveConfiguration operation for configuration: %s",
-                        request_params.configuration_name)
+        self.logger.info(
+            "Starting saveConfiguration operation for configuration: %s",
+            request_params.configuration_name,
+        )
 
         request = self._build_save_configuration_request(request_params)
         result = self._send_save_configuration(request)
 
         if result.result_status.is_error:
-            self.logger.error("SaveConfiguration operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "SaveConfiguration operation failed: %s", result.result_status.message
+            )
         else:
-            self.logger.info("SaveConfiguration operation completed successfully for: %s",
-                            request_params.configuration_name)
+            self.logger.info(
+                "SaveConfiguration operation completed successfully for: %s",
+                request_params.configuration_name,
+            )
 
         return result
 
@@ -680,7 +794,9 @@ class MachineConfigClient(ServiceApiClientBase):
     # getConfiguration
     # ------------------------------------------------------------------
 
-    def _build_get_configuration_request(self, configuration_name: str) -> annotation_pb2.GetConfigurationRequest:
+    def _build_get_configuration_request(
+        self, configuration_name: str
+    ) -> annotation_pb2.GetConfigurationRequest:
         """
         Builds a GetConfigurationRequest for the supplied configuration name.
         :param configuration_name: Configuration name to look up.
@@ -692,7 +808,8 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_get_configuration(
-            self, request: annotation_pb2.GetConfigurationRequest) -> GetConfigurationApiResult:
+        self, request: annotation_pb2.GetConfigurationRequest
+    ) -> GetConfigurationApiResult:
         """
         Invokes the getConfiguration() API method with the supplied request.
         :param request: GetConfigurationRequest with parameters for the call.
@@ -705,13 +822,15 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.getConfiguration(request)
             self.logger.debug("Received response from getConfiguration API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("GetConfiguration API returned business error: %s", error_msg)
                 return GetConfigurationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('getConfigurationResult'):
-                self.logger.info("Successfully retrieved configuration: %s", request.configurationName)
+            elif response.HasField("getConfigurationResult"):
+                self.logger.info(
+                    "Successfully retrieved configuration: %s", request.configurationName
+                )
                 return GetConfigurationApiResult(is_error=False, message="", response=response)
 
             else:
@@ -742,7 +861,9 @@ class MachineConfigClient(ServiceApiClientBase):
         if result.result_status.is_error:
             self.logger.error("GetConfiguration operation failed: %s", result.result_status.message)
         else:
-            self.logger.info("GetConfiguration operation completed successfully for: %s", configuration_name)
+            self.logger.info(
+                "GetConfiguration operation completed successfully for: %s", configuration_name
+            )
 
         return result
 
@@ -751,9 +872,11 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_query_configurations_request(
-            self, criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
-            limit: Optional[int] = None,
-            page_token: Optional[str] = None) -> annotation_pb2.QueryConfigurationsRequest:
+        self,
+        criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> annotation_pb2.QueryConfigurationsRequest:
         """
         Builds a QueryConfigurationsRequest from the supplied criteria and paging parameters.
         :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers).
@@ -771,7 +894,8 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_query_configurations(
-            self, request: annotation_pb2.QueryConfigurationsRequest) -> QueryConfigurationsApiResult:
+        self, request: annotation_pb2.QueryConfigurationsRequest
+    ) -> QueryConfigurationsApiResult:
         """
         Invokes the queryConfigurations() API method with the supplied request.
         :param request: QueryConfigurationsRequest with parameters for the call.
@@ -784,19 +908,25 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.queryConfigurations(request)
             self.logger.debug("Received response from queryConfigurations API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("QueryConfigurations API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "QueryConfigurations API returned business error: %s", error_msg
+                )
                 return QueryConfigurationsApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('queryConfigurationsResult'):
-                self.logger.info("QueryConfigurations returned %d records",
-                                 len(response.queryConfigurationsResult.configurations))
+            elif response.HasField("queryConfigurationsResult"):
+                self.logger.info(
+                    "QueryConfigurations returned %d records",
+                    len(response.queryConfigurationsResult.configurations),
+                )
                 return QueryConfigurationsApiResult(is_error=False, message="", response=response)
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "queryConfigurationsResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "queryConfigurationsResult found"
+                )
                 self.logger.error(error_msg)
                 return QueryConfigurationsApiResult(is_error=True, message=error_msg)
 
@@ -806,12 +936,17 @@ class MachineConfigClient(ServiceApiClientBase):
             return QueryConfigurationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during queryConfigurations: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during queryConfigurations: %s", str(e), exc_info=True
+            )
             return QueryConfigurationsApiResult(is_error=True, message=error_msg)
 
     def query_configurations(
-            self, criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
-            limit: Optional[int] = None, page_token: Optional[str] = None) -> QueryConfigurationsApiResult:
+        self,
+        criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> QueryConfigurationsApiResult:
         """
         User-facing method for invoking the queryConfigurations() API method.  Returns a single page of results; use
         iter_configurations() to page through all results transparently.
@@ -822,19 +957,25 @@ class MachineConfigClient(ServiceApiClientBase):
         """
         self.logger.info("Starting queryConfigurations operation with %d criteria", len(criteria))
 
-        request = self._build_query_configurations_request(criteria, limit=limit, page_token=page_token)
+        request = self._build_query_configurations_request(
+            criteria, limit=limit, page_token=page_token
+        )
         result = self._send_query_configurations(request)
 
         if result.result_status.is_error:
-            self.logger.error("QueryConfigurations operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "QueryConfigurations operation failed: %s", result.result_status.message
+            )
         else:
             self.logger.info("QueryConfigurations operation completed successfully")
 
         return result
 
     def iter_configurations(
-            self, criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
-            limit: Optional[int] = None) -> Iterator[common_pb2.Configuration]:
+        self,
+        criteria: List[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        limit: Optional[int] = None,
+    ) -> Iterator[common_pb2.Configuration]:
         """
         Convenience generator that transparently pages through all queryConfigurations() results, following the
         nextPageToken until the results are exhausted.  Yields individual Configuration records.
@@ -849,7 +990,9 @@ class MachineConfigClient(ServiceApiClientBase):
         while True:
             result = self.query_configurations(criteria, limit=limit, page_token=page_token)
             if result.result_status.is_error:
-                raise RuntimeError(f"queryConfigurations failed during paging: {result.result_status.message}")
+                raise RuntimeError(
+                    f"queryConfigurations failed during paging: {result.result_status.message}"
+                )
 
             for configuration in result.configurations:
                 yield configuration
@@ -863,7 +1006,8 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_delete_configuration_request(
-            self, configuration_name: str) -> annotation_pb2.DeleteConfigurationRequest:
+        self, configuration_name: str
+    ) -> annotation_pb2.DeleteConfigurationRequest:
         """
         Builds a DeleteConfigurationRequest for the supplied configuration name.
         :param configuration_name: Configuration name to delete.
@@ -875,7 +1019,8 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_delete_configuration(
-            self, request: annotation_pb2.DeleteConfigurationRequest) -> DeleteConfigurationApiResult:
+        self, request: annotation_pb2.DeleteConfigurationRequest
+    ) -> DeleteConfigurationApiResult:
         """
         Invokes the deleteConfiguration() API method with the supplied request.
         :param request: DeleteConfigurationRequest with parameters for the call.
@@ -888,18 +1033,24 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.deleteConfiguration(request)
             self.logger.debug("Received response from deleteConfiguration API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("DeleteConfiguration API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "DeleteConfiguration API returned business error: %s", error_msg
+                )
                 return DeleteConfigurationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('deleteConfigurationResult'):
-                self.logger.info("Successfully deleted configuration: %s", request.configurationName)
+            elif response.HasField("deleteConfigurationResult"):
+                self.logger.info(
+                    "Successfully deleted configuration: %s", request.configurationName
+                )
                 return DeleteConfigurationApiResult(is_error=False, message="", response=response)
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "deleteConfigurationResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "deleteConfigurationResult found"
+                )
                 self.logger.error(error_msg)
                 return DeleteConfigurationApiResult(is_error=True, message=error_msg)
 
@@ -909,7 +1060,9 @@ class MachineConfigClient(ServiceApiClientBase):
             return DeleteConfigurationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during deleteConfiguration: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during deleteConfiguration: %s", str(e), exc_info=True
+            )
             return DeleteConfigurationApiResult(is_error=True, message=error_msg)
 
     def delete_configuration(self, configuration_name: str) -> DeleteConfigurationApiResult:
@@ -924,9 +1077,13 @@ class MachineConfigClient(ServiceApiClientBase):
         result = self._send_delete_configuration(request)
 
         if result.result_status.is_error:
-            self.logger.error("DeleteConfiguration operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "DeleteConfiguration operation failed: %s", result.result_status.message
+            )
         else:
-            self.logger.info("DeleteConfiguration operation completed successfully for: %s", configuration_name)
+            self.logger.info(
+                "DeleteConfiguration operation completed successfully for: %s", configuration_name
+            )
 
         return result
 
@@ -935,15 +1092,17 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_save_configuration_activation_request(
-            self, request_params: SaveConfigurationActivationRequestParams
+        self, request_params: SaveConfigurationActivationRequestParams
     ) -> annotation_pb2.SaveConfigurationActivationRequest:
         """
         Builds a SaveConfigurationActivationRequest from the supplied SaveConfigurationActivationRequestParams.
         :param request_params: User parameters for the call to saveConfigurationActivation().
         :return: A SaveConfigurationActivationRequest for the specified params.
         """
-        self.logger.debug("Building SaveConfigurationActivationRequest for configuration: %s",
-                          request_params.configuration_name)
+        self.logger.debug(
+            "Building SaveConfigurationActivationRequest for configuration: %s",
+            request_params.configuration_name,
+        )
 
         request = annotation_pb2.SaveConfigurationActivationRequest()
         request.configurationName = request_params.configuration_name
@@ -976,32 +1135,43 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_save_configuration_activation(
-            self, request: annotation_pb2.SaveConfigurationActivationRequest
+        self, request: annotation_pb2.SaveConfigurationActivationRequest
     ) -> SaveConfigurationActivationApiResult:
         """
         Invokes the saveConfigurationActivation() API method with the supplied request.
         :param request: SaveConfigurationActivationRequest with parameters for the call.
         :return: A SaveConfigurationActivationApiResult with the method response and status information.
         """
-        self.logger.info("Calling saveConfigurationActivation API for configuration: %s", request.configurationName)
+        self.logger.info(
+            "Calling saveConfigurationActivation API for configuration: %s",
+            request.configurationName,
+        )
 
         try:
             self.logger.debug("Invoking stub.saveConfigurationActivation with request")
             response = self._stub.saveConfigurationActivation(request)
             self.logger.debug("Received response from saveConfigurationActivation API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("SaveConfigurationActivation API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "SaveConfigurationActivation API returned business error: %s", error_msg
+                )
                 return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('saveConfigurationActivationResult'):
-                self.logger.info("Successfully saved configuration activation for: %s", request.configurationName)
-                return SaveConfigurationActivationApiResult(is_error=False, message="", response=response)
+            elif response.HasField("saveConfigurationActivationResult"):
+                self.logger.info(
+                    "Successfully saved configuration activation for: %s", request.configurationName
+                )
+                return SaveConfigurationActivationApiResult(
+                    is_error=False, message="", response=response
+                )
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "saveConfigurationActivationResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "saveConfigurationActivationResult found"
+                )
                 self.logger.error(error_msg)
                 return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
 
@@ -1011,27 +1181,36 @@ class MachineConfigClient(ServiceApiClientBase):
             return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during saveConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during saveConfigurationActivation: %s", str(e), exc_info=True
+            )
             return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def save_configuration_activation(
-            self, request_params: SaveConfigurationActivationRequestParams) -> SaveConfigurationActivationApiResult:
+        self, request_params: SaveConfigurationActivationRequestParams
+    ) -> SaveConfigurationActivationApiResult:
         """
         User-facing method for invoking the saveConfigurationActivation() API method.
         :param request_params: Contains user parameters for the call to saveConfigurationActivation().
         :return: A SaveConfigurationActivationApiResult with the method response and status information.
         """
-        self.logger.info("Starting saveConfigurationActivation operation for configuration: %s",
-                        request_params.configuration_name)
+        self.logger.info(
+            "Starting saveConfigurationActivation operation for configuration: %s",
+            request_params.configuration_name,
+        )
 
         request = self._build_save_configuration_activation_request(request_params)
         result = self._send_save_configuration_activation(request)
 
         if result.result_status.is_error:
-            self.logger.error("SaveConfigurationActivation operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "SaveConfigurationActivation operation failed: %s", result.result_status.message
+            )
         else:
-            self.logger.info("SaveConfigurationActivation operation completed successfully for: %s",
-                            request_params.configuration_name)
+            self.logger.info(
+                "SaveConfigurationActivation operation completed successfully for: %s",
+                request_params.configuration_name,
+            )
 
         return result
 
@@ -1040,8 +1219,11 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _validate_activation_key(client_activation_id: Optional[str], configuration_name: Optional[str],
-                                 start_time: Optional[TimestampInput]) -> None:
+    def _validate_activation_key(
+        client_activation_id: Optional[str],
+        configuration_name: Optional[str],
+        start_time: Optional[TimestampInput],
+    ) -> None:
         """
         Validates that exactly one activation key form is supplied: either a non-empty client_activation_id, or the
         composite (non-empty configuration_name and a start_time).  Raises ValueError otherwise.  Empty strings count
@@ -1055,19 +1237,24 @@ class MachineConfigClient(ServiceApiClientBase):
         has_composite = has_name or has_start
         if has_id and has_composite:
             raise ValueError(
-                "provide either client_activation_id OR (configuration_name and start_time), not both")
+                "provide either client_activation_id OR (configuration_name and start_time), not both"
+            )
         if not has_id:
             if not has_name or not has_start:
                 raise ValueError(
-                    "provide a non-empty client_activation_id, or both configuration_name and start_time")
+                    "provide a non-empty client_activation_id, or both configuration_name and start_time"
+                )
 
     # ------------------------------------------------------------------
     # getConfigurationActivation
     # ------------------------------------------------------------------
 
     def _build_get_configuration_activation_request(
-            self, client_activation_id: Optional[str], configuration_name: Optional[str],
-            start_time: Optional[TimestampInput]) -> annotation_pb2.GetConfigurationActivationRequest:
+        self,
+        client_activation_id: Optional[str],
+        configuration_name: Optional[str],
+        start_time: Optional[TimestampInput],
+    ) -> annotation_pb2.GetConfigurationActivationRequest:
         """
         Builds a GetConfigurationActivationRequest for either a client activation id or the composite
         (configuration name, start time) key.
@@ -1080,17 +1267,23 @@ class MachineConfigClient(ServiceApiClientBase):
         self._validate_activation_key(client_activation_id, configuration_name, start_time)
         request = annotation_pb2.GetConfigurationActivationRequest()
         if client_activation_id:
-            self.logger.debug("Building GetConfigurationActivationRequest by clientActivationId: %s",
-                              client_activation_id)
+            self.logger.debug(
+                "Building GetConfigurationActivationRequest by clientActivationId: %s",
+                client_activation_id,
+            )
             request.clientActivationId = client_activation_id
         else:
-            self.logger.debug("Building GetConfigurationActivationRequest by composite key: %s", configuration_name)
+            self.logger.debug(
+                "Building GetConfigurationActivationRequest by composite key: %s",
+                configuration_name,
+            )
             request.compositeKey.configurationName = configuration_name
             request.compositeKey.startTime.CopyFrom(to_timestamp(start_time))
         return request
 
     def _send_get_configuration_activation(
-            self, request: annotation_pb2.GetConfigurationActivationRequest) -> GetConfigurationActivationApiResult:
+        self, request: annotation_pb2.GetConfigurationActivationRequest
+    ) -> GetConfigurationActivationApiResult:
         """
         Invokes the getConfigurationActivation() API method with the supplied request.
         :param request: GetConfigurationActivationRequest with parameters for the call.
@@ -1103,18 +1296,24 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.getConfigurationActivation(request)
             self.logger.debug("Received response from getConfigurationActivation API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("GetConfigurationActivation API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "GetConfigurationActivation API returned business error: %s", error_msg
+                )
                 return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('getConfigurationActivationResult'):
+            elif response.HasField("getConfigurationActivationResult"):
                 self.logger.info("Successfully retrieved configuration activation")
-                return GetConfigurationActivationApiResult(is_error=False, message="", response=response)
+                return GetConfigurationActivationApiResult(
+                    is_error=False, message="", response=response
+                )
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "getConfigurationActivationResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "getConfigurationActivationResult found"
+                )
                 self.logger.error(error_msg)
                 return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
 
@@ -1124,12 +1323,17 @@ class MachineConfigClient(ServiceApiClientBase):
             return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during getConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during getConfigurationActivation: %s", str(e), exc_info=True
+            )
             return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def get_configuration_activation(
-            self, client_activation_id: Optional[str] = None, configuration_name: Optional[str] = None,
-            start_time: Optional[TimestampInput] = None) -> GetConfigurationActivationApiResult:
+        self,
+        client_activation_id: Optional[str] = None,
+        configuration_name: Optional[str] = None,
+        start_time: Optional[TimestampInput] = None,
+    ) -> GetConfigurationActivationApiResult:
         """
         User-facing method for invoking the getConfigurationActivation() API method.  Look up an activation by either
         its client activation id, or the composite (configuration_name, start_time) key -- exactly one form must be
@@ -1143,11 +1347,14 @@ class MachineConfigClient(ServiceApiClientBase):
         self.logger.info("Starting getConfigurationActivation operation")
 
         request = self._build_get_configuration_activation_request(
-            client_activation_id, configuration_name, start_time)
+            client_activation_id, configuration_name, start_time
+        )
         result = self._send_get_configuration_activation(request)
 
         if result.result_status.is_error:
-            self.logger.error("GetConfigurationActivation operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "GetConfigurationActivation operation failed: %s", result.result_status.message
+            )
         else:
             self.logger.info("GetConfigurationActivation operation completed successfully")
 
@@ -1158,10 +1365,13 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_query_configuration_activations_request(
-            self,
-            criteria: List[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
-            limit: Optional[int] = None,
-            page_token: Optional[str] = None) -> annotation_pb2.QueryConfigurationActivationsRequest:
+        self,
+        criteria: List[
+            annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+        ],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> annotation_pb2.QueryConfigurationActivationsRequest:
         """
         Builds a QueryConfigurationActivationsRequest from the supplied criteria and paging parameters.
         :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery).
@@ -1169,7 +1379,9 @@ class MachineConfigClient(ServiceApiClientBase):
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationActivationsRequest for the specified params.
         """
-        self.logger.debug("Building QueryConfigurationActivationsRequest with %d criteria", len(criteria))
+        self.logger.debug(
+            "Building QueryConfigurationActivationsRequest with %d criteria", len(criteria)
+        )
         request = annotation_pb2.QueryConfigurationActivationsRequest()
         request.criteria.extend(criteria)
         if limit is not None:
@@ -1179,33 +1391,43 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_query_configuration_activations(
-            self, request: annotation_pb2.QueryConfigurationActivationsRequest
+        self, request: annotation_pb2.QueryConfigurationActivationsRequest
     ) -> QueryConfigurationActivationsApiResult:
         """
         Invokes the queryConfigurationActivations() API method with the supplied request.
         :param request: QueryConfigurationActivationsRequest with parameters for the call.
         :return: A QueryConfigurationActivationsApiResult with the method response and status information.
         """
-        self.logger.info("Calling queryConfigurationActivations API with %d criteria", len(request.criteria))
+        self.logger.info(
+            "Calling queryConfigurationActivations API with %d criteria", len(request.criteria)
+        )
 
         try:
             self.logger.debug("Invoking stub.queryConfigurationActivations with request")
             response = self._stub.queryConfigurationActivations(request)
             self.logger.debug("Received response from queryConfigurationActivations API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("QueryConfigurationActivations API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "QueryConfigurationActivations API returned business error: %s", error_msg
+                )
                 return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('queryConfigurationActivationsResult'):
-                self.logger.info("QueryConfigurationActivations returned %d records",
-                                 len(response.queryConfigurationActivationsResult.configurationActivations))
-                return QueryConfigurationActivationsApiResult(is_error=False, message="", response=response)
+            elif response.HasField("queryConfigurationActivationsResult"):
+                self.logger.info(
+                    "QueryConfigurationActivations returned %d records",
+                    len(response.queryConfigurationActivationsResult.configurationActivations),
+                )
+                return QueryConfigurationActivationsApiResult(
+                    is_error=False, message="", response=response
+                )
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "queryConfigurationActivationsResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "queryConfigurationActivationsResult found"
+                )
                 self.logger.error(error_msg)
                 return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
 
@@ -1215,14 +1437,19 @@ class MachineConfigClient(ServiceApiClientBase):
             return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during queryConfigurationActivations: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during queryConfigurationActivations: %s", str(e), exc_info=True
+            )
             return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
 
     def query_configuration_activations(
-            self,
-            criteria: List[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
-            limit: Optional[int] = None,
-            page_token: Optional[str] = None) -> QueryConfigurationActivationsApiResult:
+        self,
+        criteria: List[
+            annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+        ],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> QueryConfigurationActivationsApiResult:
         """
         User-facing method for invoking the queryConfigurationActivations() API method.  Returns a single page of
         results; use iter_configuration_activations() to page through all results transparently.
@@ -1231,22 +1458,31 @@ class MachineConfigClient(ServiceApiClientBase):
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationActivationsApiResult with a single page of results and status information.
         """
-        self.logger.info("Starting queryConfigurationActivations operation with %d criteria", len(criteria))
+        self.logger.info(
+            "Starting queryConfigurationActivations operation with %d criteria", len(criteria)
+        )
 
-        request = self._build_query_configuration_activations_request(criteria, limit=limit, page_token=page_token)
+        request = self._build_query_configuration_activations_request(
+            criteria, limit=limit, page_token=page_token
+        )
         result = self._send_query_configuration_activations(request)
 
         if result.result_status.is_error:
-            self.logger.error("QueryConfigurationActivations operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "QueryConfigurationActivations operation failed: %s", result.result_status.message
+            )
         else:
             self.logger.info("QueryConfigurationActivations operation completed successfully")
 
         return result
 
     def iter_configuration_activations(
-            self,
-            criteria: List[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
-            limit: Optional[int] = None) -> Iterator[common_pb2.ConfigurationActivation]:
+        self,
+        criteria: List[
+            annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+        ],
+        limit: Optional[int] = None,
+    ) -> Iterator[common_pb2.ConfigurationActivation]:
         """
         Convenience generator that transparently pages through all queryConfigurationActivations() results, following
         the nextPageToken until the results are exhausted.  Yields individual ConfigurationActivation records.
@@ -1259,10 +1495,13 @@ class MachineConfigClient(ServiceApiClientBase):
         """
         page_token: Optional[str] = None
         while True:
-            result = self.query_configuration_activations(criteria, limit=limit, page_token=page_token)
+            result = self.query_configuration_activations(
+                criteria, limit=limit, page_token=page_token
+            )
             if result.result_status.is_error:
                 raise RuntimeError(
-                    f"queryConfigurationActivations failed during paging: {result.result_status.message}")
+                    f"queryConfigurationActivations failed during paging: {result.result_status.message}"
+                )
 
             for activation in result.configuration_activations:
                 yield activation
@@ -1276,8 +1515,11 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_delete_configuration_activation_request(
-            self, client_activation_id: Optional[str], configuration_name: Optional[str],
-            start_time: Optional[TimestampInput]) -> annotation_pb2.DeleteConfigurationActivationRequest:
+        self,
+        client_activation_id: Optional[str],
+        configuration_name: Optional[str],
+        start_time: Optional[TimestampInput],
+    ) -> annotation_pb2.DeleteConfigurationActivationRequest:
         """
         Builds a DeleteConfigurationActivationRequest for either a client activation id or the composite
         (configuration name, start time) key.
@@ -1290,18 +1532,22 @@ class MachineConfigClient(ServiceApiClientBase):
         self._validate_activation_key(client_activation_id, configuration_name, start_time)
         request = annotation_pb2.DeleteConfigurationActivationRequest()
         if client_activation_id:
-            self.logger.debug("Building DeleteConfigurationActivationRequest by clientActivationId: %s",
-                              client_activation_id)
+            self.logger.debug(
+                "Building DeleteConfigurationActivationRequest by clientActivationId: %s",
+                client_activation_id,
+            )
             request.clientActivationId = client_activation_id
         else:
-            self.logger.debug("Building DeleteConfigurationActivationRequest by composite key: %s",
-                              configuration_name)
+            self.logger.debug(
+                "Building DeleteConfigurationActivationRequest by composite key: %s",
+                configuration_name,
+            )
             request.compositeKey.configurationName = configuration_name
             request.compositeKey.startTime.CopyFrom(to_timestamp(start_time))
         return request
 
     def _send_delete_configuration_activation(
-            self, request: annotation_pb2.DeleteConfigurationActivationRequest
+        self, request: annotation_pb2.DeleteConfigurationActivationRequest
     ) -> DeleteConfigurationActivationApiResult:
         """
         Invokes the deleteConfigurationActivation() API method with the supplied request.
@@ -1315,18 +1561,24 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.deleteConfigurationActivation(request)
             self.logger.debug("Received response from deleteConfigurationActivation API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("DeleteConfigurationActivation API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "DeleteConfigurationActivation API returned business error: %s", error_msg
+                )
                 return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('deleteConfigurationActivationResult'):
+            elif response.HasField("deleteConfigurationActivationResult"):
                 self.logger.info("Successfully deleted configuration activation")
-                return DeleteConfigurationActivationApiResult(is_error=False, message="", response=response)
+                return DeleteConfigurationActivationApiResult(
+                    is_error=False, message="", response=response
+                )
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "deleteConfigurationActivationResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "deleteConfigurationActivationResult found"
+                )
                 self.logger.error(error_msg)
                 return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
 
@@ -1336,12 +1588,17 @@ class MachineConfigClient(ServiceApiClientBase):
             return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during deleteConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during deleteConfigurationActivation: %s", str(e), exc_info=True
+            )
             return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def delete_configuration_activation(
-            self, client_activation_id: Optional[str] = None, configuration_name: Optional[str] = None,
-            start_time: Optional[TimestampInput] = None) -> DeleteConfigurationActivationApiResult:
+        self,
+        client_activation_id: Optional[str] = None,
+        configuration_name: Optional[str] = None,
+        start_time: Optional[TimestampInput] = None,
+    ) -> DeleteConfigurationActivationApiResult:
         """
         User-facing method for invoking the deleteConfigurationActivation() API method.  Delete an activation by
         either its client activation id, or the composite (configuration_name, start_time) key -- exactly one form
@@ -1355,11 +1612,14 @@ class MachineConfigClient(ServiceApiClientBase):
         self.logger.info("Starting deleteConfigurationActivation operation")
 
         request = self._build_delete_configuration_activation_request(
-            client_activation_id, configuration_name, start_time)
+            client_activation_id, configuration_name, start_time
+        )
         result = self._send_delete_configuration_activation(request)
 
         if result.result_status.is_error:
-            self.logger.error("DeleteConfigurationActivation operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "DeleteConfigurationActivation operation failed: %s", result.result_status.message
+            )
         else:
             self.logger.info("DeleteConfigurationActivation operation completed successfully")
 
@@ -1370,7 +1630,8 @@ class MachineConfigClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_get_active_configurations_request(
-            self, timestamp: Optional[TimestampInput] = None) -> annotation_pb2.GetActiveConfigurationsRequest:
+        self, timestamp: Optional[TimestampInput] = None
+    ) -> annotation_pb2.GetActiveConfigurationsRequest:
         """
         Builds a GetActiveConfigurationsRequest for the supplied instant, defaulting to "now" (current UTC).
         :param timestamp: The instant to look up (tz-aware datetime, epoch seconds, or common.Timestamp).  If None,
@@ -1387,7 +1648,8 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_get_active_configurations(
-            self, request: annotation_pb2.GetActiveConfigurationsRequest) -> GetActiveConfigurationsApiResult:
+        self, request: annotation_pb2.GetActiveConfigurationsRequest
+    ) -> GetActiveConfigurationsApiResult:
         """
         Invokes the getActiveConfigurations() API method with the supplied request.
         :param request: GetActiveConfigurationsRequest with parameters for the call.
@@ -1400,19 +1662,27 @@ class MachineConfigClient(ServiceApiClientBase):
             response = self._stub.getActiveConfigurations(request)
             self.logger.debug("Received response from getActiveConfigurations API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
-                self.logger.warning("GetActiveConfigurations API returned business error: %s", error_msg)
+                self.logger.warning(
+                    "GetActiveConfigurations API returned business error: %s", error_msg
+                )
                 return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('getActiveConfigurationsResult'):
-                self.logger.info("GetActiveConfigurations returned %d records",
-                                 len(response.getActiveConfigurationsResult.configurationActivations))
-                return GetActiveConfigurationsApiResult(is_error=False, message="", response=response)
+            elif response.HasField("getActiveConfigurationsResult"):
+                self.logger.info(
+                    "GetActiveConfigurations returned %d records",
+                    len(response.getActiveConfigurationsResult.configurationActivations),
+                )
+                return GetActiveConfigurationsApiResult(
+                    is_error=False, message="", response=response
+                )
 
             else:
-                error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                             "getActiveConfigurationsResult found")
+                error_msg = (
+                    "Unexpected response format: neither exceptionalResult nor "
+                    "getActiveConfigurationsResult found"
+                )
                 self.logger.error(error_msg)
                 return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
 
@@ -1422,11 +1692,14 @@ class MachineConfigClient(ServiceApiClientBase):
             return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during getActiveConfigurations: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during getActiveConfigurations: %s", str(e), exc_info=True
+            )
             return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
 
     def get_active_configurations(
-            self, timestamp: Optional[TimestampInput] = None) -> GetActiveConfigurationsApiResult:
+        self, timestamp: Optional[TimestampInput] = None
+    ) -> GetActiveConfigurationsApiResult:
         """
         User-facing method for invoking the getActiveConfigurations() API method: returns every configuration
         activation whose interval covers the given instant.  With no argument, answers "what is active right now"
@@ -1441,7 +1714,9 @@ class MachineConfigClient(ServiceApiClientBase):
         result = self._send_get_active_configurations(request)
 
         if result.result_status.is_error:
-            self.logger.error("GetActiveConfigurations operation failed: %s", result.result_status.message)
+            self.logger.error(
+                "GetActiveConfigurations operation failed: %s", result.result_status.message
+            )
         else:
             self.logger.info("GetActiveConfigurations operation completed successfully")
 

@@ -23,8 +23,11 @@ class PvMetadataQuery:
     _Criterion = annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion
 
     @staticmethod
-    def pv_name(exact: Optional[List[str]] = None, prefix: Optional[List[str]] = None,
-                contains: Optional[List[str]] = None) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
+    def pv_name(
+        exact: Optional[List[str]] = None,
+        prefix: Optional[List[str]] = None,
+        contains: Optional[List[str]] = None,
+    ) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
         """
         Builds a criterion matching PV names by exact value, prefix, and/or substring.
         :param exact: PV names to match exactly.
@@ -46,8 +49,11 @@ class PvMetadataQuery:
         return criterion
 
     @staticmethod
-    def aliases(exact: Optional[List[str]] = None, prefix: Optional[List[str]] = None,
-                contains: Optional[List[str]] = None) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
+    def aliases(
+        exact: Optional[List[str]] = None,
+        prefix: Optional[List[str]] = None,
+        contains: Optional[List[str]] = None,
+    ) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
         """
         Builds a criterion matching PV aliases by exact value, prefix, and/or substring.
         :param exact: Aliases to match exactly.
@@ -83,7 +89,9 @@ class PvMetadataQuery:
         return criterion
 
     @staticmethod
-    def attributes(key: str, values: List[str]) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
+    def attributes(
+        key: str, values: List[str]
+    ) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
         """
         Builds a criterion matching PVs whose attribute with the given key has any of the specified values.
         :param key: Attribute key to match.
@@ -106,9 +114,15 @@ class SavePvMetadataRequestParams:
     Encapsulates client parameters for a call to the savePvMetadata() API method.
     """
 
-    def __init__(self, pv_name: str, aliases: Optional[List[str]] = None, tags: Optional[List[str]] = None,
-                 attributes: Optional[Dict[str, str]] = None, modified_by: Optional[str] = None,
-                 description: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        pv_name: str,
+        aliases: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        attributes: Optional[Dict[str, str]] = None,
+        modified_by: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> None:
         """
         :param pv_name: Name of the PV whose metadata is being saved.
         :param aliases: Alternate names for the PV.
@@ -130,8 +144,12 @@ class SavePvMetadataApiResult(ApiResultBase):
     Wraps the response from savePvMetadata(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.SavePvMetadataResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.SavePvMetadataResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -143,7 +161,7 @@ class SavePvMetadataApiResult(ApiResultBase):
     @property
     def pv_name(self) -> Optional[str]:
         """Name of the PV whose metadata was saved, or None on error."""
-        if self.response is not None and self.response.HasField('savePvMetadataResult'):
+        if self.response is not None and self.response.HasField("savePvMetadataResult"):
             return self.response.savePvMetadataResult.pvName
         return None
 
@@ -153,8 +171,12 @@ class GetPvMetadataApiResult(ApiResultBase):
     Wraps the response from getPvMetadata(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.GetPvMetadataResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.GetPvMetadataResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -166,7 +188,7 @@ class GetPvMetadataApiResult(ApiResultBase):
     @property
     def pv_metadata(self) -> Optional[common_pb2.PvMetadata]:
         """The PvMetadata for the requested PV, or None on error."""
-        if self.response is not None and self.response.HasField('getPvMetadataResult'):
+        if self.response is not None and self.response.HasField("getPvMetadataResult"):
             return self.response.getPvMetadataResult.pvMetadata
         return None
 
@@ -177,8 +199,12 @@ class QueryPvMetadataApiResult(ApiResultBase):
     message.  Use PvMetadataClient.iter_pv_metadata() to transparently page through all results.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.QueryPvMetadataResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.QueryPvMetadataResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -190,14 +216,14 @@ class QueryPvMetadataApiResult(ApiResultBase):
     @property
     def pv_metadata_list(self) -> List[common_pb2.PvMetadata]:
         """The PvMetadata records in this page, or an empty list on error."""
-        if self.response is not None and self.response.HasField('pvMetadataResult'):
+        if self.response is not None and self.response.HasField("pvMetadataResult"):
             return list(self.response.pvMetadataResult.pvMetadata)
         return []
 
     @property
     def next_page_token(self) -> str:
         """Token for retrieving the next page, or empty string if there are no more pages."""
-        if self.response is not None and self.response.HasField('pvMetadataResult'):
+        if self.response is not None and self.response.HasField("pvMetadataResult"):
             return self.response.pvMetadataResult.nextPageToken
         return ""
 
@@ -207,8 +233,12 @@ class DeletePvMetadataApiResult(ApiResultBase):
     Wraps the response from deletePvMetadata(), with a status object including an error flag and message.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[annotation_pb2.DeletePvMetadataResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[annotation_pb2.DeletePvMetadataResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -220,7 +250,7 @@ class DeletePvMetadataApiResult(ApiResultBase):
     @property
     def pv_name(self) -> Optional[str]:
         """Name of the PV whose metadata was deleted, or None on error."""
-        if self.response is not None and self.response.HasField('deletePvMetadataResult'):
+        if self.response is not None and self.response.HasField("deletePvMetadataResult"):
             return self.response.deletePvMetadataResult.pvName
         return None
 
@@ -245,7 +275,8 @@ class PvMetadataClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_save_pv_metadata_request(
-            self, request_params: SavePvMetadataRequestParams) -> annotation_pb2.SavePvMetadataRequest:
+        self, request_params: SavePvMetadataRequestParams
+    ) -> annotation_pb2.SavePvMetadataRequest:
         """
         Builds a SavePvMetadataRequest from the supplied SavePvMetadataRequestParams.
         :param request_params: User parameters for the call to savePvMetadata().
@@ -278,7 +309,9 @@ class PvMetadataClient(ServiceApiClientBase):
         self.logger.debug("SavePvMetadataRequest built successfully")
         return request
 
-    def _send_save_pv_metadata(self, request: annotation_pb2.SavePvMetadataRequest) -> SavePvMetadataApiResult:
+    def _send_save_pv_metadata(
+        self, request: annotation_pb2.SavePvMetadataRequest
+    ) -> SavePvMetadataApiResult:
         """
         Invokes the savePvMetadata() API method with the supplied request.
         :param request: SavePvMetadataRequest with parameters for the call.
@@ -291,12 +324,12 @@ class PvMetadataClient(ServiceApiClientBase):
             response = self._stub.savePvMetadata(request)
             self.logger.debug("Received response from savePvMetadata API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("SavePvMetadata API returned business error: %s", error_msg)
                 return SavePvMetadataApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('savePvMetadataResult'):
+            elif response.HasField("savePvMetadataResult"):
                 self.logger.info("Successfully saved PV metadata for: %s", request.pvName)
                 return SavePvMetadataApiResult(is_error=False, message="", response=response)
 
@@ -314,7 +347,9 @@ class PvMetadataClient(ServiceApiClientBase):
             self.logger.error("Unexpected error during savePvMetadata: %s", str(e), exc_info=True)
             return SavePvMetadataApiResult(is_error=True, message=error_msg)
 
-    def save_pv_metadata(self, request_params: SavePvMetadataRequestParams) -> SavePvMetadataApiResult:
+    def save_pv_metadata(
+        self, request_params: SavePvMetadataRequestParams
+    ) -> SavePvMetadataApiResult:
         """
         User-facing method for invoking the savePvMetadata() API method.
         :param request_params: Contains user parameters for the call to savePvMetadata().
@@ -328,7 +363,9 @@ class PvMetadataClient(ServiceApiClientBase):
         if result.result_status.is_error:
             self.logger.error("SavePvMetadata operation failed: %s", result.result_status.message)
         else:
-            self.logger.info("SavePvMetadata operation completed successfully for PV: %s", request_params.pv_name)
+            self.logger.info(
+                "SavePvMetadata operation completed successfully for PV: %s", request_params.pv_name
+            )
 
         return result
 
@@ -336,7 +373,9 @@ class PvMetadataClient(ServiceApiClientBase):
     # getPvMetadata
     # ------------------------------------------------------------------
 
-    def _build_get_pv_metadata_request(self, pv_name_or_alias: str) -> annotation_pb2.GetPvMetadataRequest:
+    def _build_get_pv_metadata_request(
+        self, pv_name_or_alias: str
+    ) -> annotation_pb2.GetPvMetadataRequest:
         """
         Builds a GetPvMetadataRequest for the supplied PV name or alias.
         :param pv_name_or_alias: PV name or alias to look up.
@@ -347,7 +386,9 @@ class PvMetadataClient(ServiceApiClientBase):
         request.pvNameOrAlias = pv_name_or_alias
         return request
 
-    def _send_get_pv_metadata(self, request: annotation_pb2.GetPvMetadataRequest) -> GetPvMetadataApiResult:
+    def _send_get_pv_metadata(
+        self, request: annotation_pb2.GetPvMetadataRequest
+    ) -> GetPvMetadataApiResult:
         """
         Invokes the getPvMetadata() API method with the supplied request.
         :param request: GetPvMetadataRequest with parameters for the call.
@@ -360,13 +401,15 @@ class PvMetadataClient(ServiceApiClientBase):
             response = self._stub.getPvMetadata(request)
             self.logger.debug("Received response from getPvMetadata API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("GetPvMetadata API returned business error: %s", error_msg)
                 return GetPvMetadataApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('getPvMetadataResult'):
-                self.logger.info("Successfully retrieved PV metadata for: %s", request.pvNameOrAlias)
+            elif response.HasField("getPvMetadataResult"):
+                self.logger.info(
+                    "Successfully retrieved PV metadata for: %s", request.pvNameOrAlias
+                )
                 return GetPvMetadataApiResult(is_error=False, message="", response=response)
 
             else:
@@ -397,7 +440,9 @@ class PvMetadataClient(ServiceApiClientBase):
         if result.result_status.is_error:
             self.logger.error("GetPvMetadata operation failed: %s", result.result_status.message)
         else:
-            self.logger.info("GetPvMetadata operation completed successfully for: %s", pv_name_or_alias)
+            self.logger.info(
+                "GetPvMetadata operation completed successfully for: %s", pv_name_or_alias
+            )
 
         return result
 
@@ -406,8 +451,11 @@ class PvMetadataClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _build_query_pv_metadata_request(
-            self, criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
-            limit: Optional[int] = None, page_token: Optional[str] = None) -> annotation_pb2.QueryPvMetadataRequest:
+        self,
+        criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> annotation_pb2.QueryPvMetadataRequest:
         """
         Builds a QueryPvMetadataRequest from the supplied criteria and paging parameters.
         :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
@@ -424,7 +472,9 @@ class PvMetadataClient(ServiceApiClientBase):
             request.pageToken = page_token
         return request
 
-    def _send_query_pv_metadata(self, request: annotation_pb2.QueryPvMetadataRequest) -> QueryPvMetadataApiResult:
+    def _send_query_pv_metadata(
+        self, request: annotation_pb2.QueryPvMetadataRequest
+    ) -> QueryPvMetadataApiResult:
         """
         Invokes the queryPvMetadata() API method with the supplied request.
         :param request: QueryPvMetadataRequest with parameters for the call.
@@ -437,14 +487,15 @@ class PvMetadataClient(ServiceApiClientBase):
             response = self._stub.queryPvMetadata(request)
             self.logger.debug("Received response from queryPvMetadata API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("QueryPvMetadata API returned business error: %s", error_msg)
                 return QueryPvMetadataApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('pvMetadataResult'):
-                self.logger.info("QueryPvMetadata returned %d records",
-                                 len(response.pvMetadataResult.pvMetadata))
+            elif response.HasField("pvMetadataResult"):
+                self.logger.info(
+                    "QueryPvMetadata returned %d records", len(response.pvMetadataResult.pvMetadata)
+                )
                 return QueryPvMetadataApiResult(is_error=False, message="", response=response)
 
             else:
@@ -462,8 +513,11 @@ class PvMetadataClient(ServiceApiClientBase):
             return QueryPvMetadataApiResult(is_error=True, message=error_msg)
 
     def query_pv_metadata(
-            self, criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
-            limit: Optional[int] = None, page_token: Optional[str] = None) -> QueryPvMetadataApiResult:
+        self,
+        criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        limit: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> QueryPvMetadataApiResult:
         """
         User-facing method for invoking the queryPvMetadata() API method.  Returns a single page of results; use
         iter_pv_metadata() to page through all results transparently.
@@ -474,7 +528,9 @@ class PvMetadataClient(ServiceApiClientBase):
         """
         self.logger.info("Starting queryPvMetadata operation with %d criteria", len(criteria))
 
-        request = self._build_query_pv_metadata_request(criteria, limit=limit, page_token=page_token)
+        request = self._build_query_pv_metadata_request(
+            criteria, limit=limit, page_token=page_token
+        )
         result = self._send_query_pv_metadata(request)
 
         if result.result_status.is_error:
@@ -485,8 +541,10 @@ class PvMetadataClient(ServiceApiClientBase):
         return result
 
     def iter_pv_metadata(
-            self, criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
-            limit: Optional[int] = None) -> Iterator[common_pb2.PvMetadata]:
+        self,
+        criteria: List[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        limit: Optional[int] = None,
+    ) -> Iterator[common_pb2.PvMetadata]:
         """
         Convenience generator that transparently pages through all queryPvMetadata() results, following the
         nextPageToken until the results are exhausted.  Yields individual PvMetadata records.
@@ -501,7 +559,9 @@ class PvMetadataClient(ServiceApiClientBase):
         while True:
             result = self.query_pv_metadata(criteria, limit=limit, page_token=page_token)
             if result.result_status.is_error:
-                raise RuntimeError(f"queryPvMetadata failed during paging: {result.result_status.message}")
+                raise RuntimeError(
+                    f"queryPvMetadata failed during paging: {result.result_status.message}"
+                )
 
             for pv_metadata in result.pv_metadata_list:
                 yield pv_metadata
@@ -514,7 +574,9 @@ class PvMetadataClient(ServiceApiClientBase):
     # deletePvMetadata
     # ------------------------------------------------------------------
 
-    def _build_delete_pv_metadata_request(self, pv_name_or_alias: str) -> annotation_pb2.DeletePvMetadataRequest:
+    def _build_delete_pv_metadata_request(
+        self, pv_name_or_alias: str
+    ) -> annotation_pb2.DeletePvMetadataRequest:
         """
         Builds a DeletePvMetadataRequest for the supplied PV name or alias.
         :param pv_name_or_alias: PV name or alias to delete.
@@ -525,7 +587,9 @@ class PvMetadataClient(ServiceApiClientBase):
         request.pvNameOrAlias = pv_name_or_alias
         return request
 
-    def _send_delete_pv_metadata(self, request: annotation_pb2.DeletePvMetadataRequest) -> DeletePvMetadataApiResult:
+    def _send_delete_pv_metadata(
+        self, request: annotation_pb2.DeletePvMetadataRequest
+    ) -> DeletePvMetadataApiResult:
         """
         Invokes the deletePvMetadata() API method with the supplied request.
         :param request: DeletePvMetadataRequest with parameters for the call.
@@ -538,12 +602,12 @@ class PvMetadataClient(ServiceApiClientBase):
             response = self._stub.deletePvMetadata(request)
             self.logger.debug("Received response from deletePvMetadata API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("DeletePvMetadata API returned business error: %s", error_msg)
                 return DeletePvMetadataApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('deletePvMetadataResult'):
+            elif response.HasField("deletePvMetadataResult"):
                 self.logger.info("Successfully deleted PV metadata for: %s", request.pvNameOrAlias)
                 return DeletePvMetadataApiResult(is_error=False, message="", response=response)
 
@@ -575,6 +639,8 @@ class PvMetadataClient(ServiceApiClientBase):
         if result.result_status.is_error:
             self.logger.error("DeletePvMetadata operation failed: %s", result.result_status.message)
         else:
-            self.logger.info("DeletePvMetadata operation completed successfully for: %s", pv_name_or_alias)
+            self.logger.info(
+                "DeletePvMetadata operation completed successfully for: %s", pv_name_or_alias
+            )
 
         return result

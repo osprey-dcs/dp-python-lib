@@ -57,7 +57,9 @@ class PvQuery:
         return selector
 
     @staticmethod
-    def metadata(criteria: List["query_pb2.PvSelector.MetadataQuery.Criterion"]) -> query_pb2.PvSelector:
+    def metadata(
+        criteria: List["query_pb2.PvSelector.MetadataQuery.Criterion"],
+    ) -> query_pb2.PvSelector:
         """
         Builds a PvSelector selecting PVs matching a metadata query (a list of AND-combined criteria).
         :param criteria: List of metadata criteria (see pv_name/aliases/tags/attr helpers).
@@ -71,8 +73,11 @@ class PvQuery:
         return selector
 
     @staticmethod
-    def pv_name(exact: Optional[List[str]] = None, prefix: Optional[List[str]] = None,
-                contains: Optional[List[str]] = None) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
+    def pv_name(
+        exact: Optional[List[str]] = None,
+        prefix: Optional[List[str]] = None,
+        contains: Optional[List[str]] = None,
+    ) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PV names by exact value, prefix, and/or substring.  The three forms are
         repeated and may coexist (all are ANDed by the server).
@@ -94,8 +99,11 @@ class PvQuery:
         return criterion
 
     @staticmethod
-    def aliases(exact: Optional[List[str]] = None, prefix: Optional[List[str]] = None,
-                contains: Optional[List[str]] = None) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
+    def aliases(
+        exact: Optional[List[str]] = None,
+        prefix: Optional[List[str]] = None,
+        contains: Optional[List[str]] = None,
+    ) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PV aliases by exact value, prefix, and/or substring.  The three forms are
         repeated and may coexist.
@@ -251,11 +259,15 @@ class QueryParams:
     legal, so pv_selector may be omitted -- but at least one of {pv_selector, config_criteria} must be present.
     """
 
-    def __init__(self, begin_time: TimestampInput, end_time: TimestampInput,
-                 pv_selector: Optional[query_pb2.PvSelector] = None,
-                 config_criteria: Optional[List["query_pb2.ConfigurationSelector.Criterion"]] = None,
-                 limit: Optional[int] = None,
-                 exclude_column_metadata: bool = False) -> None:
+    def __init__(
+        self,
+        begin_time: TimestampInput,
+        end_time: TimestampInput,
+        pv_selector: Optional[query_pb2.PvSelector] = None,
+        config_criteria: Optional[List["query_pb2.ConfigurationSelector.Criterion"]] = None,
+        limit: Optional[int] = None,
+        exclude_column_metadata: bool = False,
+    ) -> None:
         """
         :param begin_time: Inclusive start of the query range (tz-aware datetime, epoch seconds, or common.Timestamp).
         :param end_time: Exclusive end of the query range (tz-aware datetime, epoch seconds, or common.Timestamp).
@@ -276,13 +288,16 @@ class QueryParams:
 
         begin_ts = to_timestamp(begin_time)
         end_ts = to_timestamp(end_time)
-        if (begin_ts.epochSeconds, begin_ts.nanoseconds) >= (end_ts.epochSeconds, end_ts.nanoseconds):
+        if (begin_ts.epochSeconds, begin_ts.nanoseconds) >= (
+            end_ts.epochSeconds,
+            end_ts.nanoseconds,
+        ):
             raise ValueError(
-                "QueryParams requires begin_time strictly before end_time (half-open [begin, end))")
+                "QueryParams requires begin_time strictly before end_time (half-open [begin, end))"
+            )
 
         if pv_selector is None and not config_criteria:
-            raise ValueError(
-                "QueryParams requires at least one of pv_selector or config_criteria")
+            raise ValueError("QueryParams requires at least one of pv_selector or config_criteria")
 
         # Validate eagerly here rather than letting a negative surface as a raw protobuf range error deep in
         # request building (ExecutionOptions.limit is a uint32).  Note limit=0 is explicitly meaningful per the
@@ -319,8 +334,12 @@ class QuerySamplesApiResult(ApiResultBase):
     by .to_dataframe()/.to_numpy(), which require the optional [analysis] extra (pandas/numpy) -- see query_conversions.
     """
 
-    def __init__(self, is_error: bool, message: str,
-                 response: Optional[query_pb2.QuerySamplesResponse] = None) -> None:
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: Optional[query_pb2.QuerySamplesResponse] = None,
+    ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing the error condition.
@@ -332,7 +351,7 @@ class QuerySamplesApiResult(ApiResultBase):
     @property
     def column_table(self) -> Optional[query_pb2.ColumnTable]:
         """The raw ColumnTable for this page/message, or None on error."""
-        if self.response is not None and self.response.HasField('sampleQueryResult'):
+        if self.response is not None and self.response.HasField("sampleQueryResult"):
             return self.response.sampleQueryResult.columnTable
         return None
 
@@ -342,7 +361,7 @@ class QuerySamplesApiResult(ApiResultBase):
         Token for retrieving the next page (unary querySamples() only), or empty string if there are no more pages.
         Always empty for streamed messages (querySamplesStream() is fire-and-consume).
         """
-        if self.response is not None and self.response.HasField('sampleQueryResult'):
+        if self.response is not None and self.response.HasField("sampleQueryResult"):
             return self.response.sampleQueryResult.nextPageToken
         return ""
 
@@ -355,8 +374,10 @@ class QuerySamplesApiResult(ApiResultBase):
         :return: A pandas.DataFrame for this page.
         """
         from dp_python_lib.client import query_conversions
+
         return query_conversions.column_table_to_dataframe(
-            self.column_table, exclude_column_metadata=exclude_column_metadata)
+            self.column_table, exclude_column_metadata=exclude_column_metadata
+        )
 
     def to_numpy(self) -> Any:
         """
@@ -365,6 +386,7 @@ class QuerySamplesApiResult(ApiResultBase):
         :return: A dict of column name to numpy.ndarray for this page.
         """
         from dp_python_lib.client import query_conversions
+
         return query_conversions.column_table_to_numpy(self.column_table)
 
 
@@ -413,8 +435,8 @@ class QueryClient(ServiceApiClientBase):
         return spec
 
     def _build_query_samples_request(
-            self, request_params: QueryParams,
-            page_token: Optional[str] = None) -> query_pb2.QuerySamplesRequest:
+        self, request_params: QueryParams, page_token: Optional[str] = None
+    ) -> query_pb2.QuerySamplesRequest:
         """
         Builds a QuerySamplesRequest from the supplied QueryParams and optional page token.  Used by both the unary and
         streaming RPCs (they share the request type); the streaming path must never supply a page_token.
@@ -454,12 +476,12 @@ class QueryClient(ServiceApiClientBase):
             response = self._stub.querySamples(request)
             self.logger.debug("Received response from querySamples API")
 
-            if response.HasField('exceptionalResult'):
+            if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
                 self.logger.warning("QuerySamples API returned business error: %s", error_msg)
                 return QuerySamplesApiResult(is_error=True, message=error_msg)
 
-            elif response.HasField('sampleQueryResult'):
+            elif response.HasField("sampleQueryResult"):
                 self.logger.info("QuerySamples returned a result page")
                 return QuerySamplesApiResult(is_error=False, message="", response=response)
 
@@ -477,8 +499,9 @@ class QueryClient(ServiceApiClientBase):
             self.logger.error("Unexpected error during querySamples: %s", str(e), exc_info=True)
             return QuerySamplesApiResult(is_error=True, message=error_msg)
 
-    def query_samples(self, request_params: QueryParams,
-                      page_token: Optional[str] = None) -> QuerySamplesApiResult:
+    def query_samples(
+        self, request_params: QueryParams, page_token: Optional[str] = None
+    ) -> QuerySamplesApiResult:
         """
         User-facing method for invoking the unary querySamples() API method.  Returns a single page of results; use
         iter_query_samples() to page through all results transparently.
@@ -513,7 +536,9 @@ class QueryClient(ServiceApiClientBase):
         while True:
             result = self.query_samples(request_params, page_token=page_token)
             if result.result_status.is_error:
-                raise RuntimeError(f"querySamples failed during paging: {result.result_status.message}")
+                raise RuntimeError(
+                    f"querySamples failed during paging: {result.result_status.message}"
+                )
 
             yield result
 
@@ -526,7 +551,8 @@ class QueryClient(ServiceApiClientBase):
     # ------------------------------------------------------------------
 
     def _send_query_samples_stream(
-            self, request: query_pb2.QuerySamplesRequest) -> Iterator[QuerySamplesApiResult]:
+        self, request: query_pb2.QuerySamplesRequest
+    ) -> Iterator[QuerySamplesApiResult]:
         """
         Invokes the querySamplesStream() server-streaming API method with the supplied request, yielding one
         QuerySamplesApiResult per streamed message.
@@ -546,15 +572,17 @@ class QueryClient(ServiceApiClientBase):
             self.logger.debug("Invoking stub.querySamplesStream with request")
             stream = self._stub.querySamplesStream(request)
             for response in stream:
-                if response.HasField('exceptionalResult'):
+                if response.HasField("exceptionalResult"):
                     error_msg = response.exceptionalResult.message
                     self.logger.warning("QuerySamplesStream returned business error: %s", error_msg)
                     yield QuerySamplesApiResult(is_error=True, message=error_msg)
-                elif response.HasField('sampleQueryResult'):
+                elif response.HasField("sampleQueryResult"):
                     yield QuerySamplesApiResult(is_error=False, message="", response=response)
                 else:
-                    error_msg = ("Unexpected response format: neither exceptionalResult nor "
-                                 "sampleQueryResult found")
+                    error_msg = (
+                        "Unexpected response format: neither exceptionalResult nor "
+                        "sampleQueryResult found"
+                    )
                     self.logger.error(error_msg)
                     yield QuerySamplesApiResult(is_error=True, message=error_msg)
 
@@ -564,10 +592,14 @@ class QueryClient(ServiceApiClientBase):
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error("Unexpected error during querySamplesStream: %s", str(e), exc_info=True)
+            self.logger.error(
+                "Unexpected error during querySamplesStream: %s", str(e), exc_info=True
+            )
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
 
-    def iter_query_samples_stream(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
+    def iter_query_samples_stream(
+        self, request_params: QueryParams
+    ) -> Iterator[QuerySamplesApiResult]:
         """
         User-facing lazy generator for the server-streaming querySamplesStream() API method.  Yields one
         QuerySamplesApiResult per streamed message, symmetric with iter_query_samples() but fire-and-consume: the
@@ -589,5 +621,6 @@ class QueryClient(ServiceApiClientBase):
         for result in self._send_query_samples_stream(request):
             if result.result_status.is_error:
                 raise RuntimeError(
-                    f"querySamplesStream failed during streaming: {result.result_status.message}")
+                    f"querySamplesStream failed during streaming: {result.result_status.message}"
+                )
             yield result

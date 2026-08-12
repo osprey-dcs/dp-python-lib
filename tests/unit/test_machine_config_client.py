@@ -6,7 +6,7 @@ import os
 import grpc
 
 # Add src directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.machine_config_client import (
     MachineConfigClient,
@@ -164,8 +164,9 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
         self.assertEqual(request.parentConfigurationName, "root-cfg")
         self.assertEqual(list(request.tags), ["production", "stable"])
         self.assertEqual(request.modifiedBy, "tester")
-        self.assertEqual({(a.name, a.value) for a in request.attributes},
-                         {("owner", "ops"), ("rev", "3")})
+        self.assertEqual(
+            {(a.name, a.value) for a in request.attributes}, {("owner", "ops"), ("rev", "3")}
+        )
 
     def test_build_save_request_name_only(self):
         params = SaveConfigurationRequestParams(configuration_name="cfg-1")
@@ -188,8 +189,13 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
         self.assertEqual(request.configurationName, "cfg-1")
 
     def test_build_query_request_with_criteria_limit_token(self):
-        criteria = [ConfigurationQuery.name(prefix=["beamline-"]), ConfigurationQuery.tags(["production"])]
-        request = self.client._build_query_configurations_request(criteria, limit=50, page_token="tok")
+        criteria = [
+            ConfigurationQuery.name(prefix=["beamline-"]),
+            ConfigurationQuery.tags(["production"]),
+        ]
+        request = self.client._build_query_configurations_request(
+            criteria, limit=50, page_token="tok"
+        )
         self.assertEqual(len(request.criteria), 2)
         self.assertEqual(request.limit, 50)
         self.assertEqual(request.pageToken, "tok")
@@ -204,7 +210,8 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
     def test_build_query_request_limit_zero_is_set(self):
         # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression.
         request = self.client._build_query_configurations_request(
-            [ConfigurationQuery.tags(["x"])], limit=0)
+            [ConfigurationQuery.tags(["x"])], limit=0
+        )
         self.assertEqual(request.limit, 0)
 
 
@@ -216,7 +223,7 @@ class TestSaveConfiguration(unittest.TestCase):
         self.request = annotation_pb2.SaveConfigurationRequest(configurationName="cfg-1")
 
     def test_success(self):
-        response = _response_with_field('saveConfigurationResult')
+        response = _response_with_field("saveConfigurationResult")
         response.saveConfigurationResult.configurationName = "cfg-1"
         self.mock_stub.saveConfiguration.return_value = response
 
@@ -228,7 +235,7 @@ class TestSaveConfiguration(unittest.TestCase):
         self.mock_stub.saveConfiguration.assert_called_once_with(self.request)
 
     def test_exceptional_result(self):
-        response = _response_with_field('exceptionalResult')
+        response = _response_with_field("exceptionalResult")
         response.exceptionalResult.message = "duplicate name"
         self.mock_stub.saveConfiguration.return_value = response
 
@@ -275,7 +282,7 @@ class TestGetConfiguration(unittest.TestCase):
         self.request = annotation_pb2.GetConfigurationRequest(configurationName="cfg-1")
 
     def test_success(self):
-        response = _response_with_field('getConfigurationResult')
+        response = _response_with_field("getConfigurationResult")
         response.getConfigurationResult.configuration.configurationName = "cfg-1"
         self.mock_stub.getConfiguration.return_value = response
 
@@ -285,7 +292,7 @@ class TestGetConfiguration(unittest.TestCase):
         self.assertEqual(result.configuration.configurationName, "cfg-1")
 
     def test_exceptional_result(self):
-        response = _response_with_field('exceptionalResult')
+        response = _response_with_field("exceptionalResult")
         response.exceptionalResult.message = "not found"
         self.mock_stub.getConfiguration.return_value = response
 
@@ -332,7 +339,7 @@ class TestDeleteConfiguration(unittest.TestCase):
         self.request = annotation_pb2.DeleteConfigurationRequest(configurationName="cfg-1")
 
     def test_success(self):
-        response = _response_with_field('deleteConfigurationResult')
+        response = _response_with_field("deleteConfigurationResult")
         response.deleteConfigurationResult.configurationName = "cfg-1"
         self.mock_stub.deleteConfiguration.return_value = response
 
@@ -342,7 +349,7 @@ class TestDeleteConfiguration(unittest.TestCase):
         self.assertEqual(result.configuration_name, "cfg-1")
 
     def test_exceptional_result(self):
-        response = _response_with_field('exceptionalResult')
+        response = _response_with_field("exceptionalResult")
         response.exceptionalResult.message = "in use"
         self.mock_stub.deleteConfiguration.return_value = response
 
@@ -389,7 +396,7 @@ class TestQueryConfigurations(unittest.TestCase):
         self.request = annotation_pb2.QueryConfigurationsRequest()
 
     def _result_response(self, names, next_token=""):
-        response = _response_with_field('queryConfigurationsResult')
+        response = _response_with_field("queryConfigurationsResult")
         configs = [common_pb2.Configuration(configurationName=n) for n in names]
         response.queryConfigurationsResult.configurations = configs
         response.queryConfigurationsResult.nextPageToken = next_token
@@ -405,7 +412,7 @@ class TestQueryConfigurations(unittest.TestCase):
         self.assertEqual(result.next_page_token, "tok")
 
     def test_exceptional_result(self):
-        response = _response_with_field('exceptionalResult')
+        response = _response_with_field("exceptionalResult")
         response.exceptionalResult.message = "bad criteria"
         self.mock_stub.queryConfigurations.return_value = response
 
@@ -450,9 +457,10 @@ class TestIterConfigurations(unittest.TestCase):
         self.client = MachineConfigClient(Mock())
 
     def _page(self, names, next_token=""):
-        response = _response_with_field('queryConfigurationsResult')
+        response = _response_with_field("queryConfigurationsResult")
         response.queryConfigurationsResult.configurations = [
-            common_pb2.Configuration(configurationName=n) for n in names]
+            common_pb2.Configuration(configurationName=n) for n in names
+        ]
         response.queryConfigurationsResult.nextPageToken = next_token
         return QueryConfigurationsApiResult(is_error=False, message="", response=response)
 
@@ -460,14 +468,20 @@ class TestIterConfigurations(unittest.TestCase):
         pages = [self._page(["a", "b"], "tok1"), self._page(["c"], "")]
         self.client.query_configurations = Mock(side_effect=pages)
 
-        names = [c.configurationName for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])]
+        names = [
+            c.configurationName
+            for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])
+        ]
 
         self.assertEqual(names, ["a", "b", "c"])
         self.assertEqual(self.client.query_configurations.call_count, 2)
 
     def test_single_page(self):
         self.client.query_configurations = Mock(return_value=self._page(["only"], ""))
-        names = [c.configurationName for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])]
+        names = [
+            c.configurationName
+            for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])
+        ]
         self.assertEqual(names, ["only"])
 
     def test_error_page_raises(self):
@@ -479,5 +493,5 @@ class TestIterConfigurations(unittest.TestCase):
         self.assertIn("query failed", str(ctx.exception))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
