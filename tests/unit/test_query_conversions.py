@@ -14,7 +14,9 @@ from dp_python_lib.grpc import common_pb2, query_pb2
 # The conversion layer depends on the optional [analysis] extra; skip the DataFrame/NumPy/Excel tests cleanly when
 # it is not installed.  The pure DataValue-extraction tests need no optional deps and always run.
 try:
-    import numpy as np
+    # F401: numpy is imported both as an availability probe for the [analysis] extra and for
+    # use in the guarded tests below; find_spec() would not bind the name.
+    import numpy as np  # noqa: F401
     import pandas as pd
 
     _HAVE_ANALYSIS = True

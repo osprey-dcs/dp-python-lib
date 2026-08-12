@@ -62,11 +62,11 @@ class TestQueryClientIntegration(unittest.TestCase):
             raise unittest.SkipTest(
                 f"MLDP query service not available at {cls.QUERY_ADDRESS}. "
                 "Please start the MLDP ecosystem before running integration tests."
-            )
+            ) from None
         except Exception as e:
             raise unittest.SkipTest(
                 f"Cannot connect to MLDP query service: {e}. Please ensure the MLDP ecosystem is running."
-            )
+            ) from None
 
     def _params(self):
         """A bounded, well-formed query over a recent one-hour window for a broad name pattern."""

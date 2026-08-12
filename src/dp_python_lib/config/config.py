@@ -100,7 +100,7 @@ class MldpConfig(BaseSettings):
             return cls()
         except Exception as e:
             logger.error("Error loading configuration from %s: %s", yaml_file, e)
-            raise ValueError(f"Error loading configuration from {yaml_file}: {e}")
+            raise ValueError(f"Error loading configuration from {yaml_file}: {e}") from e
 
     def create_ingestion_channel(self) -> grpc.Channel:
         """Create gRPC channel for ingestion service."""

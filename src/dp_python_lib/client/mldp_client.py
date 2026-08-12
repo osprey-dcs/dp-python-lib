@@ -34,7 +34,8 @@ class MldpClient:
 
         self.logger = logging.getLogger(__name__)
         self.logger.debug(
-            "Initializing MldpClient with ingestion_channel=%s, query_channel=%s, annotation_channel=%s, config=%s, config_file=%s",
+            "Initializing MldpClient with ingestion_channel=%s, query_channel=%s, "
+            "annotation_channel=%s, config=%s, config_file=%s",
             ingestion_channel is not None,
             query_channel is not None,
             annotation_channel is not None,

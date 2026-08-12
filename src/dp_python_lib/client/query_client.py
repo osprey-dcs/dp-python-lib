@@ -161,7 +161,8 @@ class PvQuery:
 class ConfigQuery:
     """
     Factory of lightweight helpers for building the ConfigurationSelector criteria of a QueryParams (see QueryClient).
-    Each helper returns a single criterion; callers pass a list of criteria (AND-combined) as QueryParams.config_criteria.
+    Each helper returns a single criterion; callers pass a list of criteria (AND-combined) as
+    QueryParams.config_criteria.
 
     A configuration selector restricts query results to the intervals during which matching machine-configuration
     activations were in effect.
@@ -495,7 +496,7 @@ class QueryClient(ServiceApiClientBase):
             return QuerySamplesApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during querySamples: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during querySamples: %s", str(e))
             return QuerySamplesApiResult(is_error=True, message=error_msg)
 
     def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:
@@ -582,7 +583,7 @@ class QueryClient(ServiceApiClientBase):
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during querySamplesStream: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during querySamplesStream: %s", str(e))
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
 
     def iter_query_samples_stream(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:

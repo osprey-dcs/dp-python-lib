@@ -57,11 +57,11 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             raise unittest.SkipTest(
                 f"MLDP annotation service not available at {cls.ANNOTATION_ADDRESS}. "
                 "Please start the MLDP ecosystem before running integration tests."
-            )
+            ) from None
         except Exception as e:
             raise unittest.SkipTest(
                 f"Cannot connect to MLDP annotation service: {e}. Please ensure the MLDP ecosystem is running."
-            )
+            ) from None
 
     def test_configuration_round_trip(self):
         """

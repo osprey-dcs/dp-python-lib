@@ -70,7 +70,8 @@ class IngestionClient(ServiceApiClientBase):
     ) -> ingestion_pb2.RegisterProviderRequest:
         """
         Builds a RegisterProviderRequest API object from the supplied RegisterProviderRequestParams object.
-        :param request_params: A RegisterProviderRequestParams object containing the user parameters for call to registerProvider() API method.
+        :param request_params: A RegisterProviderRequestParams object containing the user parameters for
+            call to registerProvider() API method.
         :return: Returns a RegisterProviderRequest API object for the specified params.
         """
         self.logger.debug("Building RegisterProviderRequest for provider: %s", request_params.name)
@@ -142,7 +143,7 @@ class IngestionClient(ServiceApiClientBase):
             return RegisterProviderApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during registerProvider: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during registerProvider: %s", str(e))
             return RegisterProviderApiResult(is_error=True, message=error_msg)
 
     def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:

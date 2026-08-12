@@ -62,12 +62,12 @@ class TestIngestionClientIntegration(unittest.TestCase):
             raise unittest.SkipTest(
                 "MLDP ingestion service not available at localhost:50051. "
                 "Please start the MLDP ecosystem with 'docker compose up -d' before running integration tests."
-            )
+            ) from None
         except Exception as e:
             cls.logger.error("Failed to connect to ingestion service: %s", e)
             raise unittest.SkipTest(
                 f"Cannot connect to MLDP services: {e}. Please ensure the MLDP ecosystem is running."
-            )
+            ) from None
 
     def test_register_provider_integration_success_or_known_error(self):
         """

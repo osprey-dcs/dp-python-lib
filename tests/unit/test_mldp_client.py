@@ -202,7 +202,7 @@ ingestion:
   port: 9001
   use_tls: false
 query:
-  host: test-query.example.com  
+  host: test-query.example.com
   port: 9002
 annotation:
   host: test-annotation.example.com
@@ -217,7 +217,9 @@ annotation:
                 with patch("grpc.insecure_channel") as mock_insecure_channel:
                     mock_insecure_channel.return_value = Mock()
 
-                    client = MldpClient(config_file=f.name)
+                    # Constructed for its side effects: the assertions below check the
+                    # channels it creates, not the client object itself.
+                    MldpClient(config_file=f.name)
 
                     # Verify channels were created with correct connection strings
                     expected_calls = [

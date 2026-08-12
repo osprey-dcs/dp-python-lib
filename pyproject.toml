@@ -73,6 +73,10 @@ ignore = [
   # `int(round(x))` reads as deliberate in the nanosecond arithmetic in to_timestamp(); the
   # redundant cast documents the intent to land on an int.
   "RUF046",
+  # ServiceApiClientBase and ApiResultBase inherit ABC to mark them as not-directly-instantiable
+  # shared-implementation bases.  They intentionally have no abstract methods; adding one purely
+  # to satisfy this rule would be worse than the warning.
+  "B024",
 ]
 
 [tool.ruff.lint.per-file-ignores]

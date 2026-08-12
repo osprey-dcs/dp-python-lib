@@ -44,7 +44,7 @@ def find_config_file(config_file: str | None = None) -> str | None:
     # Check project root (look for pyproject.toml to identify project root)
     current_path = Path.cwd()
     logger.debug("Searching for config file in project root directories")
-    for parent in [current_path] + list(current_path.parents):
+    for parent in [current_path, *current_path.parents]:
         if (parent / "pyproject.toml").exists():
             project_config = parent / "mldp-config.yaml"
             logger.debug("Checking project root config: %s", project_config)

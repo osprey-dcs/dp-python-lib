@@ -73,7 +73,8 @@ class TestToTimestamp(unittest.TestCase):
 
     def test_naive_datetime_raises(self):
         with self.assertRaises(ValueError):
-            to_timestamp(datetime(2023, 11, 14, 22, 13, 20))
+            # DTZ001: the naive datetime is the point of this test -- it must be rejected.
+            to_timestamp(datetime(2023, 11, 14, 22, 13, 20))  # noqa: DTZ001
 
     def test_bool_raises(self):
         with self.assertRaises(TypeError):

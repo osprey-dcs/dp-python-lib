@@ -134,7 +134,10 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
     def test_naive_datetime_rejected(self):
         params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=datetime(2023, 1, 1), end_time=200
+            # DTZ001: the naive datetime is the point of this test -- it must be rejected.
+            configuration_name="cfg-1",
+            start_time=datetime(2023, 1, 1),  # noqa: DTZ001
+            end_time=200,
         )
         with self.assertRaises(ValueError):
             self.client._build_save_configuration_activation_request(params)

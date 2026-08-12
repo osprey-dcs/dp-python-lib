@@ -340,7 +340,7 @@ class PvMetadataClient(ServiceApiClientBase):
             return SavePvMetadataApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during savePvMetadata: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during savePvMetadata: %s", str(e))
             return SavePvMetadataApiResult(is_error=True, message=error_msg)
 
     def save_pv_metadata(self, request_params: SavePvMetadataRequestParams) -> SavePvMetadataApiResult:
@@ -409,7 +409,7 @@ class PvMetadataClient(ServiceApiClientBase):
             return GetPvMetadataApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during getPvMetadata: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during getPvMetadata: %s", str(e))
             return GetPvMetadataApiResult(is_error=True, message=error_msg)
 
     def get_pv_metadata(self, pv_name_or_alias: str) -> GetPvMetadataApiResult:
@@ -489,7 +489,7 @@ class PvMetadataClient(ServiceApiClientBase):
             return QueryPvMetadataApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during queryPvMetadata: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during queryPvMetadata: %s", str(e))
             return QueryPvMetadataApiResult(is_error=True, message=error_msg)
 
     def query_pv_metadata(
@@ -539,8 +539,7 @@ class PvMetadataClient(ServiceApiClientBase):
             if result.result_status.is_error:
                 raise RuntimeError(f"queryPvMetadata failed during paging: {result.result_status.message}")
 
-            for pv_metadata in result.pv_metadata_list:
-                yield pv_metadata
+            yield from result.pv_metadata_list
 
             page_token = result.next_page_token
             if not page_token:
@@ -594,7 +593,7 @@ class PvMetadataClient(ServiceApiClientBase):
             return DeletePvMetadataApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during deletePvMetadata: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during deletePvMetadata: %s", str(e))
             return DeletePvMetadataApiResult(is_error=True, message=error_msg)
 
     def delete_pv_metadata(self, pv_name_or_alias: str) -> DeletePvMetadataApiResult:

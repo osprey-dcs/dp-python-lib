@@ -2,7 +2,6 @@ import logging
 import math
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Union
 
 import grpc
 
@@ -12,7 +11,7 @@ from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
 # Accepted input types for API parameters that map to a common.Timestamp:
 # a timezone-aware datetime, epoch seconds (int or float), or an already-built Timestamp.
-TimestampInput = Union[datetime, int, float, common_pb2.Timestamp]
+TimestampInput = datetime | int | float | common_pb2.Timestamp
 
 
 def to_timestamp(value: TimestampInput) -> common_pb2.Timestamp:
@@ -729,7 +728,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return SaveConfigurationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during saveConfiguration: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during saveConfiguration: %s", str(e))
             return SaveConfigurationApiResult(is_error=True, message=error_msg)
 
     def save_configuration(self, request_params: SaveConfigurationRequestParams) -> SaveConfigurationApiResult:
@@ -804,7 +803,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return GetConfigurationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during getConfiguration: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during getConfiguration: %s", str(e))
             return GetConfigurationApiResult(is_error=True, message=error_msg)
 
     def get_configuration(self, configuration_name: str) -> GetConfigurationApiResult:
@@ -889,7 +888,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return QueryConfigurationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during queryConfigurations: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during queryConfigurations: %s", str(e))
             return QueryConfigurationsApiResult(is_error=True, message=error_msg)
 
     def query_configurations(
@@ -939,8 +938,7 @@ class MachineConfigClient(ServiceApiClientBase):
             if result.result_status.is_error:
                 raise RuntimeError(f"queryConfigurations failed during paging: {result.result_status.message}")
 
-            for configuration in result.configurations:
-                yield configuration
+            yield from result.configurations
 
             page_token = result.next_page_token
             if not page_token:
@@ -996,7 +994,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return DeleteConfigurationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during deleteConfiguration: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during deleteConfiguration: %s", str(e))
             return DeleteConfigurationApiResult(is_error=True, message=error_msg)
 
     def delete_configuration(self, configuration_name: str) -> DeleteConfigurationApiResult:
@@ -1104,7 +1102,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during saveConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during saveConfigurationActivation: %s", str(e))
             return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def save_configuration_activation(
@@ -1156,9 +1154,8 @@ class MachineConfigClient(ServiceApiClientBase):
         has_composite = has_name or has_start
         if has_id and has_composite:
             raise ValueError("provide either client_activation_id OR (configuration_name and start_time), not both")
-        if not has_id:
-            if not has_name or not has_start:
-                raise ValueError("provide a non-empty client_activation_id, or both configuration_name and start_time")
+        if not has_id and (not has_name or not has_start):
+            raise ValueError("provide a non-empty client_activation_id, or both configuration_name and start_time")
 
     # ------------------------------------------------------------------
     # getConfigurationActivation
@@ -1233,7 +1230,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during getConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during getConfigurationActivation: %s", str(e))
             return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def get_configuration_activation(
@@ -1331,7 +1328,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during queryConfigurationActivations: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during queryConfigurationActivations: %s", str(e))
             return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
 
     def query_configuration_activations(
@@ -1383,8 +1380,7 @@ class MachineConfigClient(ServiceApiClientBase):
                     f"queryConfigurationActivations failed during paging: {result.result_status.message}"
                 )
 
-            for activation in result.configuration_activations:
-                yield activation
+            yield from result.configuration_activations
 
             page_token = result.next_page_token
             if not page_token:
@@ -1464,7 +1460,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during deleteConfigurationActivation: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during deleteConfigurationActivation: %s", str(e))
             return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def delete_configuration_activation(
@@ -1559,7 +1555,7 @@ class MachineConfigClient(ServiceApiClientBase):
             return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
-            self.logger.error("Unexpected error during getActiveConfigurations: %s", str(e), exc_info=True)
+            self.logger.exception("Unexpected error during getActiveConfigurations: %s", str(e))
             return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
 
     def get_active_configurations(self, timestamp: TimestampInput | None = None) -> GetActiveConfigurationsApiResult:
