@@ -4,17 +4,11 @@ on:
   push:
     tags:
       - "rel-*"
+  # Manual dispatch is always a rehearsal: it builds, verifies, and signs, but never
+  # publishes.  Publishing is gated on a `rel-` tag push and nothing else, so there is no
+  # path to cutting a release from an arbitrary ref.  Choose the ref to rehearse against
+  # with the branch/tag selector in the Actions UI.
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Git ref (tag/branch/commit) to build. Defaults to the current ref."
-        required: false
-        default: ""
-      dry_run:
-        description: "Build, verify, and sign, but do not publish a GitHub Release."
-        required: false
-        type: boolean
-        default: true
 
 # A publish must never be cancelled halfway through, so unlike CI this does not set
 # cancel-in-progress.
@@ -36,15 +30,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        # Actions in this workflow are pinned to commit SHAs rather than floating major
+        # tags: this pipeline holds an OIDC signing token and write access to releases, so
+        # a compromised upstream tag here would be able to sign and publish artifacts.
+        # Dependabot (.github/dependabot.yml) keeps the pins current.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.ref || github.ref }}
           # setuptools-scm derives the version from the tag, so full history and tags are
           # required.  Without this the release would be versioned 0.1.dev1.
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -60,8 +57,13 @@ jobs:
             fi
             VERSION="${TAG#rel-}"
             # Guard against a typo'd tag (rel-1.15, rel-v1.15.0) producing a bad release.
-            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              echo "::error::Tag '$TAG' does not yield an X.Y.Z version (got '$VERSION')"
+            # Anchored at both ends deliberately: the version check below is a plain string
+            # compare against the wheel's version, and setuptools-scm emits PEP 440
+            # normalized versions.  A tag like `rel-1.15.0-rc1` would normalize to
+            # `1.15.0rc1` and fail that compare with a confusing message, so reject the
+            # unsupported shape here where the error can say what is actually wrong.
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag '$TAG' must be rel-X.Y.Z with no suffix (got '$VERSION')"
               exit 1
             fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -125,7 +127,7 @@ jobs:
           inputs: ./dist/*.whl ./dist/*.tar.gz ./dist/SHA256SUMS
 
       - name: Upload build outputs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-dist
           path: dist/
@@ -135,14 +137,15 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    # Skipped for a dry run, and for manual dispatches that are not on a rel- tag.
+    # Publishing happens only on a `rel-` tag push.  A workflow_dispatch run is therefore
+    # always a rehearsal: it builds, verifies, and signs, but stops here.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')
     permissions:
       contents: write
 
     steps:
       - name: Download build outputs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-dist
           path: dist
@@ -212,7 +215,7 @@ jobs:
 
     steps:
       - name: Download build outputs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-dist
           path: dist

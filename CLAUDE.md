@@ -59,12 +59,18 @@ GitHub Actions workflows live in `.github/workflows/`:
 - **`release.yml`** — runs on `rel-X.Y.Z` tag pushes.  Builds the wheel and sdist,
   asserts the setuptools-scm version matches the tag, emits a `SHA256SUMS` file,
   signs everything with keyless Sigstore, and publishes a GitHub Release.  A
-  `workflow_dispatch` trigger with a `dry_run` input allows rehearsing without
-  cutting a tag.  A PyPI publish job is wired up but disabled (`if: false`); the
-  comment block above it lists the steps to enable it.
+  `workflow_dispatch` trigger allows rehearsing the whole path without cutting a
+  tag: publishing is gated on a `rel-` tag push, so a manual run always stops after
+  build/verify/sign.  A PyPI publish job is wired up but disabled (`if: false`); the
+  comment block above it lists the steps to enable it.  Actions in `release.yml` are
+  pinned to commit SHAs (this pipeline holds an OIDC signing token and release write
+  access); `ci.yml` uses floating major tags, and Dependabot updates both.
 
 **Cutting a release**: the version comes from the git tag alone (setuptools-scm),
 so there is no version to bump in a file.  Tag `rel-X.Y.Z` and push the tag.
+The tag must be exactly `rel-X.Y.Z` with no suffix — prerelease shapes like
+`rel-1.15.0-rc1` are rejected up front, because setuptools-scm would normalize them
+(`1.15.0rc1`) and fail the tag-vs-built version assertion with a confusing error.
 
 ### Dependencies
 Core dependencies are managed in `pyproject.toml`:
