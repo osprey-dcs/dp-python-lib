@@ -1,12 +1,13 @@
-from typing import Optional, List, Iterator, Any
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
-from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.machine_config_client import to_timestamp, TimestampInput
-from dp_python_lib.grpc import query_pb2_grpc
-from dp_python_lib.grpc import query_pb2
-from dp_python_lib.grpc import common_pb2
-import grpc
 import logging
+from collections.abc import Iterator
+from typing import Any
+
+import grpc
+
+from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
+from dp_python_lib.client.result import ApiResultBase
+from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.grpc import common_pb2, query_pb2, query_pb2_grpc
 
 
 class PvQuery:
@@ -29,7 +30,7 @@ class PvQuery:
     _MetaCriterion = query_pb2.PvSelector.MetadataQuery.Criterion
 
     @staticmethod
-    def name_list(pv_names: List[str]) -> query_pb2.PvSelector:
+    def name_list(pv_names: list[str]) -> query_pb2.PvSelector:
         """
         Builds a PvSelector selecting an explicit list of PV names.
         :param pv_names: PV names to select.
@@ -58,7 +59,7 @@ class PvQuery:
 
     @staticmethod
     def metadata(
-        criteria: List["query_pb2.PvSelector.MetadataQuery.Criterion"],
+        criteria: list["query_pb2.PvSelector.MetadataQuery.Criterion"],
     ) -> query_pb2.PvSelector:
         """
         Builds a PvSelector selecting PVs matching a metadata query (a list of AND-combined criteria).
@@ -74,9 +75,9 @@ class PvQuery:
 
     @staticmethod
     def pv_name(
-        exact: Optional[List[str]] = None,
-        prefix: Optional[List[str]] = None,
-        contains: Optional[List[str]] = None,
+        exact: list[str] | None = None,
+        prefix: list[str] | None = None,
+        contains: list[str] | None = None,
     ) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PV names by exact value, prefix, and/or substring.  The three forms are
@@ -100,9 +101,9 @@ class PvQuery:
 
     @staticmethod
     def aliases(
-        exact: Optional[List[str]] = None,
-        prefix: Optional[List[str]] = None,
-        contains: Optional[List[str]] = None,
+        exact: list[str] | None = None,
+        prefix: list[str] | None = None,
+        contains: list[str] | None = None,
     ) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PV aliases by exact value, prefix, and/or substring.  The three forms are
@@ -125,7 +126,7 @@ class PvQuery:
         return criterion
 
     @staticmethod
-    def tags(values: List[str]) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
+    def tags(values: list[str]) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PVs having any of the specified tags.
         :param values: Tag values to match.
@@ -139,7 +140,7 @@ class PvQuery:
         return criterion
 
     @staticmethod
-    def attr(key: str, values: List[str]) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
+    def attr(key: str, values: list[str]) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
         Builds a metadata criterion matching PVs whose attribute with the given key has any of the specified values.
         :param key: Attribute key to match.
@@ -173,7 +174,7 @@ class ConfigQuery:
     _Criterion = query_pb2.ConfigurationSelector.Criterion
 
     @staticmethod
-    def configuration_name(values: List[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def configuration_name(values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
         """
         Builds a criterion matching activations whose configuration name is any of the specified values.
         :param values: Configuration names to match.
@@ -187,7 +188,7 @@ class ConfigQuery:
         return criterion
 
     @staticmethod
-    def client_activation_id(values: List[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def client_activation_id(values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
         """
         Builds a criterion matching activations whose client activation id is any of the specified values.
         :param values: Client activation ids to match.
@@ -201,7 +202,7 @@ class ConfigQuery:
         return criterion
 
     @staticmethod
-    def category(values: List[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def category(values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
         """
         Builds a criterion matching activations whose configuration category is any of the specified values.
         :param values: Category values to match.
@@ -215,7 +216,7 @@ class ConfigQuery:
         return criterion
 
     @staticmethod
-    def tags(values: List[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def tags(values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
         """
         Builds a criterion matching activations having any of the specified tags.
         :param values: Tag values to match.
@@ -229,7 +230,7 @@ class ConfigQuery:
         return criterion
 
     @staticmethod
-    def attr(key: str, values: List[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def attr(key: str, values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
         """
         Builds a criterion matching activations whose attribute with the given key has any of the specified values.
         :param key: Attribute key to match.
@@ -263,9 +264,9 @@ class QueryParams:
         self,
         begin_time: TimestampInput,
         end_time: TimestampInput,
-        pv_selector: Optional[query_pb2.PvSelector] = None,
-        config_criteria: Optional[List["query_pb2.ConfigurationSelector.Criterion"]] = None,
-        limit: Optional[int] = None,
+        pv_selector: query_pb2.PvSelector | None = None,
+        config_criteria: list["query_pb2.ConfigurationSelector.Criterion"] | None = None,
+        limit: int | None = None,
         exclude_column_metadata: bool = False,
     ) -> None:
         """
@@ -292,9 +293,7 @@ class QueryParams:
             end_ts.epochSeconds,
             end_ts.nanoseconds,
         ):
-            raise ValueError(
-                "QueryParams requires begin_time strictly before end_time (half-open [begin, end))"
-            )
+            raise ValueError("QueryParams requires begin_time strictly before end_time (half-open [begin, end))")
 
         if pv_selector is None and not config_criteria:
             raise ValueError("QueryParams requires at least one of pv_selector or config_criteria")
@@ -338,7 +337,7 @@ class QuerySamplesApiResult(ApiResultBase):
         self,
         is_error: bool,
         message: str,
-        response: Optional[query_pb2.QuerySamplesResponse] = None,
+        response: query_pb2.QuerySamplesResponse | None = None,
     ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurred in the API call.
@@ -349,7 +348,7 @@ class QuerySamplesApiResult(ApiResultBase):
         self.response = response
 
     @property
-    def column_table(self) -> Optional[query_pb2.ColumnTable]:
+    def column_table(self) -> query_pb2.ColumnTable | None:
         """The raw ColumnTable for this page/message, or None on error."""
         if self.response is not None and self.response.HasField("sampleQueryResult"):
             return self.response.sampleQueryResult.columnTable
@@ -435,7 +434,7 @@ class QueryClient(ServiceApiClientBase):
         return spec
 
     def _build_query_samples_request(
-        self, request_params: QueryParams, page_token: Optional[str] = None
+        self, request_params: QueryParams, page_token: str | None = None
     ) -> query_pb2.QuerySamplesRequest:
         """
         Builds a QuerySamplesRequest from the supplied QueryParams and optional page token.  Used by both the unary and
@@ -495,13 +494,11 @@ class QueryClient(ServiceApiClientBase):
             self.logger.error("gRPC error during querySamples: %s", e.details())
             return QuerySamplesApiResult(is_error=True, message=error_msg)
         except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {e!s}"
             self.logger.error("Unexpected error during querySamples: %s", str(e), exc_info=True)
             return QuerySamplesApiResult(is_error=True, message=error_msg)
 
-    def query_samples(
-        self, request_params: QueryParams, page_token: Optional[str] = None
-    ) -> QuerySamplesApiResult:
+    def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:
         """
         User-facing method for invoking the unary querySamples() API method.  Returns a single page of results; use
         iter_query_samples() to page through all results transparently.
@@ -532,13 +529,11 @@ class QueryClient(ServiceApiClientBase):
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
         :return: An iterator over the result pages.
         """
-        page_token: Optional[str] = None
+        page_token: str | None = None
         while True:
             result = self.query_samples(request_params, page_token=page_token)
             if result.result_status.is_error:
-                raise RuntimeError(
-                    f"querySamples failed during paging: {result.result_status.message}"
-                )
+                raise RuntimeError(f"querySamples failed during paging: {result.result_status.message}")
 
             yield result
 
@@ -550,9 +545,7 @@ class QueryClient(ServiceApiClientBase):
     # querySamplesStream (server-streaming)
     # ------------------------------------------------------------------
 
-    def _send_query_samples_stream(
-        self, request: query_pb2.QuerySamplesRequest
-    ) -> Iterator[QuerySamplesApiResult]:
+    def _send_query_samples_stream(self, request: query_pb2.QuerySamplesRequest) -> Iterator[QuerySamplesApiResult]:
         """
         Invokes the querySamplesStream() server-streaming API method with the supplied request, yielding one
         QuerySamplesApiResult per streamed message.
@@ -579,10 +572,7 @@ class QueryClient(ServiceApiClientBase):
                 elif response.HasField("sampleQueryResult"):
                     yield QuerySamplesApiResult(is_error=False, message="", response=response)
                 else:
-                    error_msg = (
-                        "Unexpected response format: neither exceptionalResult nor "
-                        "sampleQueryResult found"
-                    )
+                    error_msg = "Unexpected response format: neither exceptionalResult nor sampleQueryResult found"
                     self.logger.error(error_msg)
                     yield QuerySamplesApiResult(is_error=True, message=error_msg)
 
@@ -591,15 +581,11 @@ class QueryClient(ServiceApiClientBase):
             self.logger.error("gRPC error during querySamplesStream: %s", e.details())
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
         except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error(
-                "Unexpected error during querySamplesStream: %s", str(e), exc_info=True
-            )
+            error_msg = f"Unexpected error: {e!s}"
+            self.logger.error("Unexpected error during querySamplesStream: %s", str(e), exc_info=True)
             yield QuerySamplesApiResult(is_error=True, message=error_msg)
 
-    def iter_query_samples_stream(
-        self, request_params: QueryParams
-    ) -> Iterator[QuerySamplesApiResult]:
+    def iter_query_samples_stream(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
         """
         User-facing lazy generator for the server-streaming querySamplesStream() API method.  Yields one
         QuerySamplesApiResult per streamed message, symmetric with iter_query_samples() but fire-and-consume: the
@@ -620,7 +606,5 @@ class QueryClient(ServiceApiClientBase):
         request = self._build_query_samples_request(request_params, page_token=None)
         for result in self._send_query_samples_stream(request):
             if result.result_status.is_error:
-                raise RuntimeError(
-                    f"querySamplesStream failed during streaming: {result.result_status.message}"
-                )
+                raise RuntimeError(f"querySamplesStream failed during streaming: {result.result_status.message}")
             yield result

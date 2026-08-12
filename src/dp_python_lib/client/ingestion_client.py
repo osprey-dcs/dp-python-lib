@@ -1,11 +1,10 @@
-from typing import Optional, Dict, List
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
-from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.grpc import ingestion_pb2_grpc
-from dp_python_lib.grpc import ingestion_pb2
-from dp_python_lib.grpc import common_pb2
-import grpc
 import logging
+
+import grpc
+
+from dp_python_lib.client.result import ApiResultBase
+from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
 
 
 class RegisterProviderRequestParams:
@@ -16,9 +15,9 @@ class RegisterProviderRequestParams:
     def __init__(
         self,
         name: str,
-        description: Optional[str],
-        tag_list: Optional[List[str]],
-        attribute_map: Optional[Dict[str, str]],
+        description: str | None,
+        tag_list: list[str] | None,
+        attribute_map: dict[str, str] | None,
     ) -> None:
         """
         :param name: Data provider name.
@@ -41,7 +40,7 @@ class RegisterProviderApiResult(ApiResultBase):
         self,
         is_error: bool,
         message: str,
-        response: Optional[ingestion_pb2.RegisterProviderResponse] = None,
+        response: ingestion_pb2.RegisterProviderResponse | None = None,
     ) -> None:
         """
         :param is_error: Boolean flag indicating if an error occurrent id API call.
@@ -84,9 +83,7 @@ class IngestionClient(ServiceApiClientBase):
             request.description = request_params.description
 
         if request_params.tag_list:
-            self.logger.debug(
-                "Adding %d tags: %s", len(request_params.tag_list), request_params.tag_list
-            )
+            self.logger.debug("Adding %d tags: %s", len(request_params.tag_list), request_params.tag_list)
             request.tags[:] = request_params.tag_list
 
         if request_params.attribute_map:
@@ -104,9 +101,7 @@ class IngestionClient(ServiceApiClientBase):
         self.logger.debug("RegisterProviderRequest built successfully")
         return request
 
-    def _send_register_provider(
-        self, request: ingestion_pb2.RegisterProviderRequest
-    ) -> RegisterProviderApiResult:
+    def _send_register_provider(self, request: ingestion_pb2.RegisterProviderRequest) -> RegisterProviderApiResult:
         """
         Invokes the registerProvider() API method with the supplied request object.
         :param request: RegisgerProviderRequest object with parameters for call to registerProvider().
@@ -141,28 +136,22 @@ class IngestionClient(ServiceApiClientBase):
             # Safely get error code - may not be available in test mocks
             try:
                 error_code = e.code()
-                self.logger.error(
-                    "gRPC error during registerProvider: %s (code: %s)", e.details(), error_code
-                )
+                self.logger.error("gRPC error during registerProvider: %s (code: %s)", e.details(), error_code)
             except (AttributeError, TypeError):
                 self.logger.error("gRPC error during registerProvider: %s", e.details())
             return RegisterProviderApiResult(is_error=True, message=error_msg)
         except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {e!s}"
             self.logger.error("Unexpected error during registerProvider: %s", str(e), exc_info=True)
             return RegisterProviderApiResult(is_error=True, message=error_msg)
 
-    def register_provider(
-        self, request_params: RegisterProviderRequestParams
-    ) -> RegisterProviderApiResult:
+    def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:
         """
         User facing method for invoking the registerProvider() API method.
         :param request_params: Contains user parameters for call to registerProvider() API method.
         :return: Returns RegisterProviderApiResult with the method response and status information.
         """
-        self.logger.info(
-            "Starting registerProvider operation for provider: %s", request_params.name
-        )
+        self.logger.info("Starting registerProvider operation for provider: %s", request_params.name)
 
         request = self._build_register_provider_request(request_params)
         result = self._send_register_provider(request)

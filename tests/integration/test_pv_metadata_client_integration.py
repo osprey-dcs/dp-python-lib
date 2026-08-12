@@ -1,15 +1,16 @@
-import unittest
-import time
 import logging
-import grpc
-import sys
 import os
+import sys
+import time
+import unittest
+
+import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.mldp_client import MldpClient
-from dp_python_lib.client.pv_metadata_client import SavePvMetadataRequestParams, PvMetadataQuery
+from dp_python_lib.client.pv_metadata_client import PvMetadataQuery, SavePvMetadataRequestParams
 
 
 class TestPvMetadataClientIntegration(unittest.TestCase):
@@ -30,9 +31,7 @@ class TestPvMetadataClientIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         cls.logger = logging.getLogger(__name__)
         cls.logger.info("Setting up PV metadata integration test environment")
 
@@ -56,8 +55,7 @@ class TestPvMetadataClientIntegration(unittest.TestCase):
             )
         except Exception as e:
             raise unittest.SkipTest(
-                f"Cannot connect to MLDP annotation service: {e}. "
-                "Please ensure the MLDP ecosystem is running."
+                f"Cannot connect to MLDP annotation service: {e}. Please ensure the MLDP ecosystem is running."
             )
 
     def test_save_get_query_delete_round_trip(self):
@@ -136,10 +134,7 @@ class TestPvMetadataClientIntegration(unittest.TestCase):
         self.logger.info("Query returned %d record(s)", len(query_result.pv_metadata_list))
 
         # --- iterate by exact name: paging iterator should yield the PV ---
-        iterated_names = [
-            pv.pvName
-            for pv in pv_client.iter_pv_metadata([PvMetadataQuery.pv_name(exact=[pv_name])])
-        ]
+        iterated_names = [pv.pvName for pv in pv_client.iter_pv_metadata([PvMetadataQuery.pv_name(exact=[pv_name])])]
         self.assertIn(pv_name, iterated_names, "iter_pv_metadata should yield the saved PV")
         self.logger.info("Iterator yielded %d record(s)", len(iterated_names))
 

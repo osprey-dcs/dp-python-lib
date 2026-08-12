@@ -1,7 +1,8 @@
-import unittest
-from unittest.mock import Mock, MagicMock
-import sys
 import os
+import sys
+import unittest
+from unittest.mock import Mock
+
 import grpc
 
 # Add src directory to path for imports
@@ -9,11 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.ingestion_client import (
     IngestionClient,
-    RegisterProviderRequestParams,
     RegisterProviderApiResult,
+    RegisterProviderRequestParams,
 )
-from dp_python_lib.grpc import ingestion_pb2
-from dp_python_lib.grpc import common_pb2
+from dp_python_lib.grpc import common_pb2, ingestion_pb2
 
 
 class TestIngestionClient(unittest.TestCase):
@@ -71,9 +71,7 @@ class TestIngestionClient(unittest.TestCase):
 
     def test_build_register_provider_request_empty_description(self):
         """Test _build_register_provider_request with empty description."""
-        params = RegisterProviderRequestParams(
-            name="test_provider", description="", tag_list=None, attribute_map=None
-        )
+        params = RegisterProviderRequestParams(name="test_provider", description="", tag_list=None, attribute_map=None)
 
         request = self.client._build_register_provider_request(params)
 

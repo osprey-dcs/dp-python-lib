@@ -1,21 +1,22 @@
-import unittest
-import time
 import logging
-import grpc
-import sys
 import os
+import sys
+import time
+import unittest
 from datetime import datetime, timezone
+
+import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
-from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.machine_config_client import (
-    SaveConfigurationRequestParams,
-    SaveConfigurationActivationRequestParams,
-    ConfigurationQuery,
     ConfigurationActivationQuery,
+    ConfigurationQuery,
+    SaveConfigurationActivationRequestParams,
+    SaveConfigurationRequestParams,
 )
+from dp_python_lib.client.mldp_client import MldpClient
 
 
 class TestMachineConfigClientIntegration(unittest.TestCase):
@@ -35,9 +36,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         cls.logger = logging.getLogger(__name__)
         cls.logger.info("Setting up machine config integration test environment")
 
@@ -61,8 +60,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             )
         except Exception as e:
             raise unittest.SkipTest(
-                f"Cannot connect to MLDP annotation service: {e}. "
-                "Please ensure the MLDP ecosystem is running."
+                f"Cannot connect to MLDP annotation service: {e}. Please ensure the MLDP ecosystem is running."
             )
 
     def test_configuration_round_trip(self):
@@ -122,19 +120,14 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             f"queryConfigurations failed: {query_result.result_status.message}",
         )
         queried_names = [c.configurationName for c in query_result.configurations]
-        self.assertIn(
-            config_name, queried_names, "query by exact name should return the saved configuration"
-        )
+        self.assertIn(config_name, queried_names, "query by exact name should return the saved configuration")
         self.logger.info("Query returned %d record(s)", len(query_result.configurations))
 
         # --- iterate by category ---
         iterated_names = [
-            c.configurationName
-            for c in mc.iter_configurations([ConfigurationQuery.category([category])])
+            c.configurationName for c in mc.iter_configurations([ConfigurationQuery.category([category])])
         ]
-        self.assertIn(
-            config_name, iterated_names, "iter_configurations should yield the saved configuration"
-        )
+        self.assertIn(config_name, iterated_names, "iter_configurations should yield the saved configuration")
         self.logger.info("Iterator yielded %d record(s)", len(iterated_names))
 
         # --- delete ---
@@ -223,24 +216,17 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
         self.logger.info("Retrieved activation by id: %s", activation.clientActivationId)
 
         # --- get by composite key (configuration_name + start_time) ---
-        get_by_key = mc.get_configuration_activation(
-            configuration_name=config_name, start_time=start_time
-        )
+        get_by_key = mc.get_configuration_activation(configuration_name=config_name, start_time=start_time)
         self.assertFalse(
             get_by_key.result_status.is_error,
-            f"getConfigurationActivation (by composite key) failed: "
-            f"{get_by_key.result_status.message}",
+            f"getConfigurationActivation (by composite key) failed: {get_by_key.result_status.message}",
         )
         self.assertIsNotNone(get_by_key.configuration_activation)
-        self.assertEqual(
-            get_by_key.configuration_activation.clientActivationId, client_activation_id
-        )
+        self.assertEqual(get_by_key.configuration_activation.clientActivationId, client_activation_id)
         self.logger.info("Retrieved activation by composite key")
 
         # --- query by configuration name ---
-        query_act = mc.query_configuration_activations(
-            [ConfigurationActivationQuery.configuration_name([config_name])]
-        )
+        query_act = mc.query_configuration_activations([ConfigurationActivationQuery.configuration_name([config_name])])
         self.assertFalse(
             query_act.result_status.is_error,
             f"queryConfigurationActivations failed: {query_act.result_status.message}",
@@ -251,9 +237,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             queried_ids,
             "query by configuration name should return the saved activation",
         )
-        self.logger.info(
-            "Activation query returned %d record(s)", len(query_act.configuration_activations)
-        )
+        self.logger.info("Activation query returned %d record(s)", len(query_act.configuration_activations))
 
         # --- iterate by client activation id ---
         iterated_ids = [
@@ -296,9 +280,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
         self.logger.info("Deleted configuration activation: %s", delete_act.client_activation_id)
 
         # --- get after delete should report a business error ---
-        get_after_delete = mc.get_configuration_activation(
-            client_activation_id=client_activation_id
-        )
+        get_after_delete = mc.get_configuration_activation(client_activation_id=client_activation_id)
         self.assertTrue(
             get_after_delete.result_status.is_error,
             "getConfigurationActivation after delete should return an error",
@@ -311,9 +293,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             delete_config.result_status.is_error,
             f"deleteConfiguration (cleanup) failed: {delete_config.result_status.message}",
         )
-        self.logger.info(
-            "Machine config activation round-trip integration test completed successfully"
-        )
+        self.logger.info("Machine config activation round-trip integration test completed successfully")
 
     def test_open_ended_activation_round_trip(self):
         """
@@ -364,9 +344,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             save_act.result_status.is_error,
             f"saveConfigurationActivation (open-ended) failed: {save_act.result_status.message}",
         )
-        self.logger.info(
-            "Saved open-ended configuration activation: %s", save_act.client_activation_id
-        )
+        self.logger.info("Saved open-ended configuration activation: %s", save_act.client_activation_id)
 
         # --- read back: endTime must be genuinely absent, not zero ---
         get_open = mc.get_configuration_activation(client_activation_id=client_activation_id)
@@ -375,9 +353,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             f"getConfigurationActivation (open-ended) failed: {get_open.result_status.message}",
         )
         activation = get_open.configuration_activation
-        self.assertIsNotNone(
-            activation, "getConfigurationActivation should return the open-ended record"
-        )
+        self.assertIsNotNone(activation, "getConfigurationActivation should return the open-ended record")
         self.assertEqual(activation.startTime.epochSeconds, start_time)
         self.assertFalse(
             activation.HasField("endTime"),
@@ -431,8 +407,7 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
         active_after_close = mc.get_active_configurations(timestamp=far_future)
         self.assertFalse(
             active_after_close.result_status.is_error,
-            f"getActiveConfigurations (after close) failed: "
-            f"{active_after_close.result_status.message}",
+            f"getActiveConfigurations (after close) failed: {active_after_close.result_status.message}",
         )
         self.assertNotIn(
             client_activation_id,

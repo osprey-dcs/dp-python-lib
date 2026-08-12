@@ -1,7 +1,9 @@
-from abc import ABC
-from typing import Any, Callable
-import grpc
 import logging
+from abc import ABC
+from collections.abc import Callable
+from typing import Any
+
+import grpc
 
 
 class ServiceApiClientBase(ABC):
@@ -20,6 +22,4 @@ class ServiceApiClientBase(ABC):
         self.logger = logging.getLogger(__name__)
         self._channel = channel
         self._stub = stub_class(channel)
-        self.logger.debug(
-            "Initialized service client with channel: %s, stub: %s", channel, stub_class.__name__
-        )
+        self.logger.debug("Initialized service client with channel: %s, stub: %s", channel, stub_class.__name__)

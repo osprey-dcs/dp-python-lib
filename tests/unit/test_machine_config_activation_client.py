@@ -1,26 +1,21 @@
-import unittest
-from unittest.mock import Mock
-from datetime import datetime, timezone
-import sys
 import os
+import sys
+import unittest
+from datetime import datetime, timezone
+from unittest.mock import Mock
+
 import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.machine_config_client import (
-    MachineConfigClient,
     ConfigurationActivationQuery,
-    SaveConfigurationActivationRequestParams,
-    SaveConfigurationActivationApiResult,
-    GetConfigurationActivationApiResult,
+    MachineConfigClient,
     QueryConfigurationActivationsApiResult,
-    DeleteConfigurationActivationApiResult,
-    GetActiveConfigurationsApiResult,
-    to_timestamp,
+    SaveConfigurationActivationRequestParams,
 )
-from dp_python_lib.grpc import annotation_pb2
-from dp_python_lib.grpc import common_pb2
+from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
 def _response_with_field(field_name):
@@ -119,9 +114,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
         self.assertEqual({(a.name, a.value) for a in request.attributes}, {("owner", "ops")})
 
     def test_minimal_fields(self):
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=100, end_time=200
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=100, end_time=200)
         request = self.client._build_save_configuration_activation_request(params)
 
         self.assertEqual(request.configurationName, "cfg-1")
@@ -134,9 +127,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
     def test_datetime_inputs(self):
         start = datetime(2023, 1, 1, tzinfo=timezone.utc)
         end = datetime(2023, 1, 2, tzinfo=timezone.utc)
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=start, end_time=end
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=start, end_time=end)
         request = self.client._build_save_configuration_activation_request(params)
         self.assertEqual(request.startTime.epochSeconds, int(start.timestamp()))
         self.assertEqual(request.endTime.epochSeconds, int(end.timestamp()))
@@ -150,9 +141,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
     def test_open_ended_omits_end_time(self):
         """end_time=None leaves endTime genuinely absent, meaning "still in effect"."""
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=100, end_time=None
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=100, end_time=None)
         request = self.client._build_save_configuration_activation_request(params)
 
         self.assertEqual(request.startTime.epochSeconds, 100)
@@ -160,9 +149,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
     def test_end_time_defaults_to_open_ended(self):
         """end_time may be omitted entirely, not just passed as None."""
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=100
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=100)
         request = self.client._build_save_configuration_activation_request(params)
 
         self.assertEqual(request.configurationName, "cfg-1")
@@ -181,9 +168,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
     def test_bounded_activation_still_sets_end_time(self):
         """The bounded case is unchanged: endTime is present when supplied."""
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=100, end_time=200
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=100, end_time=200)
         request = self.client._build_save_configuration_activation_request(params)
 
         self.assertTrue(request.HasField("endTime"))
@@ -191,9 +176,7 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
     def test_end_time_zero_is_not_treated_as_absent(self):
         """Epoch 0 is a real timestamp; only None means open-ended."""
-        params = SaveConfigurationActivationRequestParams(
-            configuration_name="cfg-1", start_time=0, end_time=0
-        )
+        params = SaveConfigurationActivationRequestParams(configuration_name="cfg-1", start_time=0, end_time=0)
         request = self.client._build_save_configuration_activation_request(params)
 
         self.assertTrue(request.HasField("endTime"))
@@ -327,9 +310,7 @@ class TestGetConfigurationActivation(unittest.TestCase):
 
     def test_success(self):
         response = _response_with_field("getConfigurationActivationResult")
-        response.getConfigurationActivationResult.configurationActivation.clientActivationId = (
-            "act-1"
-        )
+        response.getConfigurationActivationResult.configurationActivation.clientActivationId = "act-1"
         self.mock_stub.getConfigurationActivation.return_value = response
         result = self.client._send_get_configuration_activation(self.request)
         self.assertFalse(result.result_status.is_error)
@@ -371,9 +352,7 @@ class TestDeleteConfigurationActivation(unittest.TestCase):
         self.client = MachineConfigClient(Mock())
         self.mock_stub = Mock()
         self.client._stub = self.mock_stub
-        self.request = annotation_pb2.DeleteConfigurationActivationRequest(
-            clientActivationId="act-1"
-        )
+        self.request = annotation_pb2.DeleteConfigurationActivationRequest(clientActivationId="act-1")
 
     def test_success(self):
         response = _response_with_field("deleteConfigurationActivationResult")
@@ -431,9 +410,7 @@ class TestQueryConfigurationActivations(unittest.TestCase):
 
     def test_build_request(self):
         criteria = [ConfigurationActivationQuery.configuration_name(["cfg-1"])]
-        request = self.client._build_query_configuration_activations_request(
-            criteria, limit=25, page_token="tok"
-        )
+        request = self.client._build_query_configuration_activations_request(criteria, limit=25, page_token="tok")
         self.assertEqual(len(request.criteria), 1)
         self.assertEqual(request.limit, 25)
         self.assertEqual(request.pageToken, "tok")
@@ -445,14 +422,10 @@ class TestQueryConfigurationActivations(unittest.TestCase):
         self.assertEqual(request.limit, 0)
 
     def test_success(self):
-        self.mock_stub.queryConfigurationActivations.return_value = self._result_response(
-            ["a", "b"], "tok"
-        )
+        self.mock_stub.queryConfigurationActivations.return_value = self._result_response(["a", "b"], "tok")
         result = self.client._send_query_configuration_activations(self.request)
         self.assertFalse(result.result_status.is_error)
-        self.assertEqual(
-            [c.clientActivationId for c in result.configuration_activations], ["a", "b"]
-        )
+        self.assertEqual([c.clientActivationId for c in result.configuration_activations], ["a", "b"])
         self.assertEqual(result.next_page_token, "tok")
 
     def test_exceptional_result(self):
@@ -504,9 +477,7 @@ class TestIterConfigurationActivations(unittest.TestCase):
         self.client.query_configuration_activations = Mock(side_effect=pages)
         ids = [
             c.clientActivationId
-            for c in self.client.iter_configuration_activations(
-                [ConfigurationActivationQuery.tags(["x"])]
-            )
+            for c in self.client.iter_configuration_activations([ConfigurationActivationQuery.tags(["x"])])
         ]
         self.assertEqual(ids, ["a", "b", "c"])
         self.assertEqual(self.client.query_configuration_activations.call_count, 2)
@@ -515,11 +486,7 @@ class TestIterConfigurationActivations(unittest.TestCase):
         err_result = QueryConfigurationActivationsApiResult(is_error=True, message="query failed")
         self.client.query_configuration_activations = Mock(return_value=err_result)
         with self.assertRaises(RuntimeError) as ctx:
-            list(
-                self.client.iter_configuration_activations(
-                    [ConfigurationActivationQuery.tags(["x"])]
-                )
-            )
+            list(self.client.iter_configuration_activations([ConfigurationActivationQuery.tags(["x"])]))
         self.assertIn("query failed", str(ctx.exception))
 
 
@@ -548,17 +515,13 @@ class TestGetActiveConfigurations(unittest.TestCase):
         request = annotation_pb2.GetActiveConfigurationsRequest()
         result = self.client._send_get_active_configurations(request)
         self.assertFalse(result.result_status.is_error)
-        self.assertEqual(
-            [c.clientActivationId for c in result.configuration_activations], ["a", "b"]
-        )
+        self.assertEqual([c.clientActivationId for c in result.configuration_activations], ["a", "b"])
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")
         response.exceptionalResult.message = "bad time"
         self.mock_stub.getActiveConfigurations.return_value = response
-        result = self.client._send_get_active_configurations(
-            annotation_pb2.GetActiveConfigurationsRequest()
-        )
+        result = self.client._send_get_active_configurations(annotation_pb2.GetActiveConfigurationsRequest())
         self.assertTrue(result.result_status.is_error)
         self.assertEqual(result.configuration_activations, [])
 
@@ -566,9 +529,7 @@ class TestGetActiveConfigurations(unittest.TestCase):
         response = Mock()
         response.HasField = Mock(return_value=False)
         self.mock_stub.getActiveConfigurations.return_value = response
-        result = self.client._send_get_active_configurations(
-            annotation_pb2.GetActiveConfigurationsRequest()
-        )
+        result = self.client._send_get_active_configurations(annotation_pb2.GetActiveConfigurationsRequest())
         self.assertTrue(result.result_status.is_error)
         self.assertIn("Unexpected response format", result.result_status.message)
 
@@ -576,17 +537,13 @@ class TestGetActiveConfigurations(unittest.TestCase):
         err = grpc.RpcError()
         err.details = Mock(return_value="refused")
         self.mock_stub.getActiveConfigurations.side_effect = err
-        result = self.client._send_get_active_configurations(
-            annotation_pb2.GetActiveConfigurationsRequest()
-        )
+        result = self.client._send_get_active_configurations(annotation_pb2.GetActiveConfigurationsRequest())
         self.assertTrue(result.result_status.is_error)
         self.assertIn("gRPC error: refused", result.result_status.message)
 
     def test_general_exception(self):
         self.mock_stub.getActiveConfigurations.side_effect = ValueError("boom")
-        result = self.client._send_get_active_configurations(
-            annotation_pb2.GetActiveConfigurationsRequest()
-        )
+        result = self.client._send_get_active_configurations(annotation_pb2.GetActiveConfigurationsRequest())
         self.assertTrue(result.result_status.is_error)
         self.assertIn("Unexpected error: boom", result.result_status.message)
 

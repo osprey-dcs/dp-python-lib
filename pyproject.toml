@@ -38,7 +38,11 @@ dev = [
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 100
+# 120 matches the margin this codebase was already written to: at line-length 100 there were
+# 307 violations, nearly all docstrings and long string literals that the formatter will not
+# rewrap; at 120 there are 3.  Reflowing that much prose by hand would be a large diff with no
+# readability gain.
+line-length = 120
 target-version = "py310"
 # The gRPC stubs are generated from the upstream dp-grpc protos and regenerated wholesale;
 # linting or formatting them would be overwritten on the next regeneration.

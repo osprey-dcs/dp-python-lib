@@ -1,25 +1,23 @@
-import unittest
-from unittest.mock import Mock
-from datetime import datetime, timezone, timedelta
-import sys
 import os
+import sys
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
+
 import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.machine_config_client import (
-    MachineConfigClient,
     ConfigurationQuery,
-    to_timestamp,
-    SaveConfigurationRequestParams,
-    SaveConfigurationApiResult,
-    GetConfigurationApiResult,
+    MachineConfigClient,
     QueryConfigurationsApiResult,
-    DeleteConfigurationApiResult,
+    SaveConfigurationApiResult,
+    SaveConfigurationRequestParams,
+    to_timestamp,
 )
-from dp_python_lib.grpc import annotation_pb2
-from dp_python_lib.grpc import common_pb2
+from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
 def _response_with_field(field_name):
@@ -164,9 +162,7 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
         self.assertEqual(request.parentConfigurationName, "root-cfg")
         self.assertEqual(list(request.tags), ["production", "stable"])
         self.assertEqual(request.modifiedBy, "tester")
-        self.assertEqual(
-            {(a.name, a.value) for a in request.attributes}, {("owner", "ops"), ("rev", "3")}
-        )
+        self.assertEqual({(a.name, a.value) for a in request.attributes}, {("owner", "ops"), ("rev", "3")})
 
     def test_build_save_request_name_only(self):
         params = SaveConfigurationRequestParams(configuration_name="cfg-1")
@@ -193,9 +189,7 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
             ConfigurationQuery.name(prefix=["beamline-"]),
             ConfigurationQuery.tags(["production"]),
         ]
-        request = self.client._build_query_configurations_request(
-            criteria, limit=50, page_token="tok"
-        )
+        request = self.client._build_query_configurations_request(criteria, limit=50, page_token="tok")
         self.assertEqual(len(request.criteria), 2)
         self.assertEqual(request.limit, 50)
         self.assertEqual(request.pageToken, "tok")
@@ -209,9 +203,7 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
 
     def test_build_query_request_limit_zero_is_set(self):
         # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression.
-        request = self.client._build_query_configurations_request(
-            [ConfigurationQuery.tags(["x"])], limit=0
-        )
+        request = self.client._build_query_configurations_request([ConfigurationQuery.tags(["x"])], limit=0)
         self.assertEqual(request.limit, 0)
 
 
@@ -468,20 +460,14 @@ class TestIterConfigurations(unittest.TestCase):
         pages = [self._page(["a", "b"], "tok1"), self._page(["c"], "")]
         self.client.query_configurations = Mock(side_effect=pages)
 
-        names = [
-            c.configurationName
-            for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])
-        ]
+        names = [c.configurationName for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])]
 
         self.assertEqual(names, ["a", "b", "c"])
         self.assertEqual(self.client.query_configurations.call_count, 2)
 
     def test_single_page(self):
         self.client.query_configurations = Mock(return_value=self._page(["only"], ""))
-        names = [
-            c.configurationName
-            for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])
-        ]
+        names = [c.configurationName for c in self.client.iter_configurations([ConfigurationQuery.tags(["x"])])]
         self.assertEqual(names, ["only"])
 
     def test_error_page_raises(self):

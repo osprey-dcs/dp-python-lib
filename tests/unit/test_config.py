@@ -1,16 +1,15 @@
-import unittest
-from unittest.mock import patch, mock_open
-import tempfile
 import os
 import sys
-from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
-from dp_python_lib.config import ServiceConfig, MldpConfig, load_config
+
+from dp_python_lib.config import MldpConfig, ServiceConfig, load_config
 from dp_python_lib.config.loader import find_config_file, get_default_config
-import grpc
 
 
 class TestServiceConfig(unittest.TestCase):

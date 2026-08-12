@@ -1,22 +1,21 @@
+import os
+import sys
+import tempfile
 import unittest
 from unittest.mock import Mock
-import sys
-import os
-import tempfile
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client import query_conversions as conv
 from dp_python_lib.client.query_conversions import Image, data_value_to_python
-from dp_python_lib.grpc import common_pb2
-from dp_python_lib.grpc import query_pb2
+from dp_python_lib.grpc import common_pb2, query_pb2
 
 # The conversion layer depends on the optional [analysis] extra; skip the DataFrame/NumPy/Excel tests cleanly when
 # it is not installed.  The pure DataValue-extraction tests need no optional deps and always run.
 try:
-    import pandas as pd
     import numpy as np
+    import pandas as pd
 
     _HAVE_ANALYSIS = True
 except ImportError:
@@ -260,9 +259,7 @@ class TestColumnTableToNumpy(unittest.TestCase):
         self.assertEqual(list(out["temp"]), [1.5, 2.5])
 
     def test_complex_column_object_array(self):
-        ct = _column_table(
-            [1, 2], [("arr", [_array_value(_scalar(intValue=1)), common_pb2.DataValue()])]
-        )
+        ct = _column_table([1, 2], [("arr", [_array_value(_scalar(intValue=1)), common_pb2.DataValue()])])
         out = conv.column_table_to_numpy(ct)
         self.assertEqual(out["arr"].dtype, object)
         self.assertEqual(out["arr"][0], [1])
@@ -413,9 +410,7 @@ class TestDataFrameToExcel(unittest.TestCase):
             self.assertTrue(os.path.exists(path))
 
     def test_image_cells_stringified_via_repr(self):
-        ct = _column_table(
-            [1704067200], [("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG)])]
-        )
+        ct = _column_table([1704067200], [("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG)])])
         df = conv.column_table_to_dataframe(ct)
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "out.xlsx")
@@ -471,9 +466,7 @@ class TestQuerySamplesToDataFrame(unittest.TestCase):
         self.assertTrue(df.empty)
 
     def test_max_rows_exceeded_raises(self):
-        ct = _column_table(
-            [1, 2, 3], [("a", [_scalar(intValue=1), _scalar(intValue=2), _scalar(intValue=3)])]
-        )
+        ct = _column_table([1, 2, 3], [("a", [_scalar(intValue=1), _scalar(intValue=2), _scalar(intValue=3)])])
         client = self._client([self._page(ct)])
         with self.assertRaises(ValueError):
             conv.query_samples_to_dataframe(client, self._params(), max_rows=2)

@@ -136,10 +136,7 @@ def extract(path: Path) -> list[Snippet]:
         # Strip the fence's indentation from each line so indented blocks (inside list items)
         # parse as top-level code.
         if indent:
-            body = "\n".join(
-                line[len(indent) :] if line.startswith(indent) else line
-                for line in body.split("\n")
-            )
+            body = "\n".join(line[len(indent) :] if line.startswith(indent) else line for line in body.split("\n"))
 
         # The opening fence occupies one line, so code starts on the next.
         start_line = text[: match.start()].count("\n") + 2
@@ -183,10 +180,7 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
         return []
 
     if not VENV_MYPY.exists():
-        return [
-            f"mypy not found at {VENV_MYPY}. Install the dev extra:\n"
-            f"    .venv/bin/python -m pip install mypy"
-        ]
+        return [f"mypy not found at {VENV_MYPY}. Install the dev extra:\n    .venv/bin/python -m pip install mypy"]
 
     errors: list[str] = []
 
@@ -298,9 +292,7 @@ def self_test(verbose: bool) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument(
-        "files", nargs="*", type=Path, help="markdown files (default: doc/cookbook/*.md)"
-    )
+    parser.add_argument("files", nargs="*", type=Path, help="markdown files (default: doc/cookbook/*.md)")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument(
         "--no-self-test",
@@ -314,9 +306,7 @@ def main() -> int:
     elif COOKBOOK_DIR.is_dir():
         paths = sorted(COOKBOOK_DIR.glob("*.md"))
     else:
-        print(
-            f"No cookbook directory at {COOKBOOK_DIR.relative_to(REPO_ROOT)} -- nothing to check."
-        )
+        print(f"No cookbook directory at {COOKBOOK_DIR.relative_to(REPO_ROOT)} -- nothing to check.")
         return 0
 
     missing = [p for p in paths if not p.is_file()]
@@ -338,11 +328,7 @@ def main() -> int:
 
     if args.verbose:
         for s in all_snippets:
-            flags = ",".join(
-                f
-                for f, on in (("partial", s.partial), ("skip", s.skip), ("no-mypy", s.no_mypy))
-                if on
-            )
+            flags = ",".join(f for f, on in (("partial", s.partial), ("skip", s.skip), ("no-mypy", s.no_mypy)) if on)
             print(f"  {s.location}{f'  [{flags}]' if flags else ''}", file=sys.stderr)
 
     errors: list[str] = []
@@ -353,7 +339,7 @@ def main() -> int:
             print("  running self-test (canary)...", file=sys.stderr)
         canary_errors = self_test(args.verbose)
         if canary_errors:
-            print(f"\nFAIL: checker self-test failed\n")
+            print("\nFAIL: checker self-test failed\n")
             for err in canary_errors:
                 print(f"  {err}")
             print()

@@ -1,23 +1,23 @@
+import os
+import sys
 import unittest
 from unittest.mock import Mock
-import sys
-import os
+
 import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.pv_metadata_client import (
+    DeletePvMetadataApiResult,
+    GetPvMetadataApiResult,
     PvMetadataClient,
     PvMetadataQuery,
-    SavePvMetadataRequestParams,
-    SavePvMetadataApiResult,
-    GetPvMetadataApiResult,
     QueryPvMetadataApiResult,
-    DeletePvMetadataApiResult,
+    SavePvMetadataApiResult,
+    SavePvMetadataRequestParams,
 )
-from dp_python_lib.grpc import annotation_pb2
-from dp_python_lib.grpc import common_pb2
+from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
 def _response_with_field(field_name):
@@ -53,9 +53,7 @@ class TestPvMetadataClientBuildRequests(unittest.TestCase):
         self.assertEqual(list(request.tags), ["vacuum", "beam"])
         self.assertEqual(request.modifiedBy, "tester")
         self.assertEqual(request.description, "a test PV")
-        self.assertEqual(
-            {(a.name, a.value) for a in request.attributes}, {("unit", "V"), ("system", "vac")}
-        )
+        self.assertEqual({(a.name, a.value) for a in request.attributes}, {("unit", "V"), ("system", "vac")})
 
     def test_build_save_request_name_only(self):
         params = SavePvMetadataRequestParams(pv_name="ABC:1")

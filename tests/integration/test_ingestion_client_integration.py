@@ -1,15 +1,16 @@
-import unittest
-import time
 import logging
-import grpc
-import sys
 import os
+import sys
+import time
+import unittest
+
+import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
-from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.ingestion_client import RegisterProviderRequestParams
+from dp_python_lib.client.mldp_client import MldpClient
 
 
 class TestIngestionClientIntegration(unittest.TestCase):
@@ -30,9 +31,7 @@ class TestIngestionClientIntegration(unittest.TestCase):
     def setUpClass(cls):
         """Set up integration test environment and verify services are reachable."""
         # Configure logging to see detailed operation info
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         cls.logger = logging.getLogger(__name__)
 
         cls.logger.info("Setting up integration test environment")
@@ -67,8 +66,7 @@ class TestIngestionClientIntegration(unittest.TestCase):
         except Exception as e:
             cls.logger.error("Failed to connect to ingestion service: %s", e)
             raise unittest.SkipTest(
-                f"Cannot connect to MLDP services: {e}. "
-                "Please ensure the MLDP ecosystem is running."
+                f"Cannot connect to MLDP services: {e}. Please ensure the MLDP ecosystem is running."
             )
 
     def test_register_provider_integration_success_or_known_error(self):
@@ -119,14 +117,10 @@ class TestIngestionClientIntegration(unittest.TestCase):
             is_known_error = any(known_err in error_msg for known_err in known_errors)
 
             if is_known_error:
-                self.logger.info(
-                    "Received expected business error - this is normal for integration tests"
-                )
+                self.logger.info("Received expected business error - this is normal for integration tests")
             else:
                 # Unexpected error - might indicate real issues
-                self.logger.error(
-                    "Unexpected error from registerProvider: %s", result.result_status.message
-                )
+                self.logger.error("Unexpected error from registerProvider: %s", result.result_status.message)
                 # Still don't fail the test - log for investigation
 
         else:

@@ -17,18 +17,17 @@ Design decisions (see .dev/plan/issue-7/plan.md, Q6 and section 2):
     NotImplementedError.
 """
 
-from typing import Any, Dict, List, Optional, Iterator
-from dp_python_lib.grpc import common_pb2
-from dp_python_lib.grpc import query_pb2
+from collections.abc import Iterator
+from typing import Any
 
+from dp_python_lib.grpc import common_pb2, query_pb2
 
 # Excel's hard row ceiling (1,048,576 rows including a header row).
 _EXCEL_MAX_ROWS = 1_048_576 - 1
 
 # Mapping from the Image.FileType enum number to its name, resolved once from the descriptor.
 _IMAGE_FILE_TYPE_NAMES = {
-    v.number: v.name
-    for v in common_pb2.Image.DESCRIPTOR.fields_by_name["fileType"].enum_type.values
+    v.number: v.name for v in common_pb2.Image.DESCRIPTOR.fields_by_name["fileType"].enum_type.values
 }
 
 
@@ -50,11 +49,7 @@ class Image:
         return f"Image(file_type={self.file_type!r}, bytes={len(self.data)})"
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, Image)
-            and self.data == other.data
-            and self.file_type == other.file_type
-        )
+        return isinstance(other, Image) and self.data == other.data and self.file_type == other.file_type
 
 
 def _require_pandas():
@@ -129,13 +124,9 @@ def data_value_to_python(value: common_pb2.DataValue) -> Any:
     if arm == "arrayValue":
         return [data_value_to_python(v) for v in value.arrayValue.dataValues]
     if arm == "structureValue":
-        return {
-            field.name: data_value_to_python(field.value) for field in value.structureValue.fields
-        }
+        return {field.name: data_value_to_python(field.value) for field in value.structureValue.fields}
     if arm == "imageValue":
-        file_type = _IMAGE_FILE_TYPE_NAMES.get(
-            value.imageValue.fileType, str(value.imageValue.fileType)
-        )
+        file_type = _IMAGE_FILE_TYPE_NAMES.get(value.imageValue.fileType, str(value.imageValue.fileType))
         return Image(value.imageValue.image, file_type)
     raise ValueError(f"Unhandled DataValue arm: {arm!r}")
 
@@ -205,7 +196,7 @@ def _check_no_duplicate_column_names(column_table: query_pb2.ColumnTable) -> Non
         )
 
 
-def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> Dict[str, Any]:
+def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> dict[str, Any]:
     """Flattens a ColumnMetadata into a plain dict (tags list + attribute name/value pairs)."""
     return {
         "tags": list(metadata.tags),
@@ -213,9 +204,7 @@ def _column_metadata_dict(metadata: common_pb2.ColumnMetadata) -> Dict[str, Any]
     }
 
 
-def column_table_to_dataframe(
-    column_table: Optional[query_pb2.ColumnTable], exclude_column_metadata: bool = False
-) -> Any:
+def column_table_to_dataframe(column_table: query_pb2.ColumnTable | None, exclude_column_metadata: bool = False) -> Any:
     """
     Converts a ColumnTable into a pandas DataFrame: a UTC datetime index built from the timestampList, and one column
     per DataColumn (column label = DataColumn.name).
@@ -246,21 +235,17 @@ def column_table_to_dataframe(
 
     timestamps = column_table.timestampList.timestamps
     n_rows = len(timestamps)
-    index = pd.to_datetime(
-        [_timestamp_to_epoch_nanos(ts) for ts in timestamps], utc=True, unit="ns"
-    )
+    index = pd.to_datetime([_timestamp_to_epoch_nanos(ts) for ts in timestamps], utc=True, unit="ns")
 
-    data: Dict[str, Any] = {}
-    metadata: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     for column in column_table.dataColumns:
         _check_column_alignment(column, n_rows)
 
         if _column_has_timestamp_arm(column):
             # Build a UTC datetime column from epoch-nanos, preserving None gaps as NaT.
             epoch_nanos = [data_value_to_python(v) for v in column.dataValues]
-            data[column.name] = pd.to_datetime(
-                pd.Series(epoch_nanos, index=index), utc=True, unit="ns"
-            )
+            data[column.name] = pd.to_datetime(pd.Series(epoch_nanos, index=index), utc=True, unit="ns")
         else:
             data[column.name] = [data_value_to_python(v) for v in column.dataValues]
 
@@ -278,7 +263,7 @@ def column_table_to_dataframe(
 # ----------------------------------------------------------------------
 
 
-def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict[str, Any]:
+def column_table_to_numpy(column_table: query_pb2.ColumnTable | None) -> dict[str, Any]:
     """
     Converts a ColumnTable into NumPy arrays: a dict of column name -> ndarray, plus a "timestamps" entry holding the
     datetime64[ns] index.  A dict-of-arrays is used (rather than a single structured/2-D array) so mixed and object
@@ -311,10 +296,8 @@ def column_table_to_numpy(column_table: Optional[query_pb2.ColumnTable]) -> Dict
     timestamps = column_table.timestampList.timestamps
     n_rows = len(timestamps)
 
-    result: Dict[str, Any] = {
-        "timestamps": np.array(
-            [_timestamp_to_epoch_nanos(ts) for ts in timestamps], dtype="datetime64[ns]"
-        )
+    result: dict[str, Any] = {
+        "timestamps": np.array([_timestamp_to_epoch_nanos(ts) for ts in timestamps], dtype="datetime64[ns]")
     }
     for column in column_table.dataColumns:
         _check_column_alignment(column, n_rows)
@@ -353,7 +336,7 @@ def _stringify_complex_cell(value: Any) -> Any:
     return value
 
 
-def dataframe_to_excel(df: Any, path: str, max_rows: Optional[int] = None) -> None:
+def dataframe_to_excel(df: Any, path: str, max_rows: int | None = None) -> None:
     """
     Writes a DataFrame to an Excel .xlsx file: a thin wrapper over df.to_excel() (openpyxl engine) that guards
     Excel's row ceiling and stringifies complex cells (Excel has no cell type for lists/dicts/images).
@@ -370,9 +353,7 @@ def dataframe_to_excel(df: Any, path: str, max_rows: Optional[int] = None) -> No
 
     n_rows = len(df)
     if max_rows is not None and n_rows > max_rows:
-        raise ValueError(
-            f"DataFrame has {n_rows} rows, exceeding the requested max_rows={max_rows}"
-        )
+        raise ValueError(f"DataFrame has {n_rows} rows, exceeding the requested max_rows={max_rows}")
     if n_rows > _EXCEL_MAX_ROWS:
         raise ValueError(
             f"DataFrame has {n_rows} rows, exceeding Excel's ceiling of {_EXCEL_MAX_ROWS}; "
@@ -398,9 +379,7 @@ def dataframe_to_excel(df: Any, path: str, max_rows: Optional[int] = None) -> No
 # ----------------------------------------------------------------------
 
 
-def query_samples_to_dataframe(
-    query_client: Any, request_params: Any, max_rows: Optional[int] = None
-) -> Any:
+def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows: int | None = None) -> Any:
     """
     Runs a unary query, pages through the entire result via iter_query_samples(), and concatenates the pages into a
     single DataFrame.  Pages are concatenated on the row axis (axis=0) and aligned by column NAME (an outer join,
@@ -421,7 +400,7 @@ def query_samples_to_dataframe(
     """
     pd = _require_pandas()
 
-    frames: List[Any] = []
+    frames: list[Any] = []
     total = 0
     for page in query_client.iter_query_samples(request_params):
         frame = column_table_to_dataframe(
@@ -430,8 +409,7 @@ def query_samples_to_dataframe(
         total += len(frame)
         if max_rows is not None and total > max_rows:
             raise ValueError(
-                f"query result exceeds max_rows={max_rows} (at least {total} rows); "
-                f"narrow the range or raise max_rows"
+                f"query result exceeds max_rows={max_rows} (at least {total} rows); narrow the range or raise max_rows"
             )
         frames.append(frame)
 

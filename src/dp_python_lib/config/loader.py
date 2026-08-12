@@ -1,11 +1,11 @@
-import os
 import logging
+import os
 from pathlib import Path
-from typing import Optional, Union
+
 from .config import MldpConfig
 
 
-def find_config_file(config_file: Optional[str] = None) -> Optional[str]:
+def find_config_file(config_file: str | None = None) -> str | None:
     """
     Find configuration file in order of priority:
     1. Explicitly provided config_file parameter
@@ -57,9 +57,7 @@ def find_config_file(config_file: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def load_config(
-    config_file: Optional[str] = None, config_object: Optional[MldpConfig] = None
-) -> MldpConfig:
+def load_config(config_file: str | None = None, config_object: MldpConfig | None = None) -> MldpConfig:
     """
     Load MLDP configuration with priority handling:
     1. Explicit config_object parameter (highest priority)
@@ -108,9 +106,7 @@ def load_config(
         # Load from YAML, with environment variable overrides
         return MldpConfig.from_yaml(yaml_file)
     else:
-        logger.info(
-            "No YAML file found, using default configuration with environment variable overrides"
-        )
+        logger.info("No YAML file found, using default configuration with environment variable overrides")
         # No YAML file, use defaults with environment variable overrides
         return MldpConfig()
 

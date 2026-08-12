@@ -1,8 +1,8 @@
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
-import grpc
 import logging
+
+import grpc
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ServiceConfig(BaseModel):
@@ -52,9 +52,7 @@ class MldpConfig(BaseSettings):
     @property
     def ingestion(self) -> ServiceConfig:
         """Get ingestion service configuration."""
-        return ServiceConfig(
-            host=self.ingestion_host, port=self.ingestion_port, use_tls=self.ingestion_use_tls
-        )
+        return ServiceConfig(host=self.ingestion_host, port=self.ingestion_port, use_tls=self.ingestion_use_tls)
 
     @property
     def query(self) -> ServiceConfig:
@@ -64,9 +62,7 @@ class MldpConfig(BaseSettings):
     @property
     def annotation(self) -> ServiceConfig:
         """Get annotation service configuration."""
-        return ServiceConfig(
-            host=self.annotation_host, port=self.annotation_port, use_tls=self.annotation_use_tls
-        )
+        return ServiceConfig(host=self.annotation_host, port=self.annotation_port, use_tls=self.annotation_use_tls)
 
     @classmethod
     def from_yaml(cls, yaml_file: str) -> "MldpConfig":
@@ -77,7 +73,7 @@ class MldpConfig(BaseSettings):
 
         try:
             logger.info("Loading configuration from YAML file: %s", yaml_file)
-            with open(yaml_file, "r") as f:
+            with open(yaml_file) as f:
                 data = yaml.safe_load(f)
 
             # Convert nested YAML structure to flat fields
@@ -96,9 +92,7 @@ class MldpConfig(BaseSettings):
                         flat_data[f"{service}_use_tls"] = service_config["use_tls"]
                         logger.debug("Loaded %s_use_tls: %s", service, service_config["use_tls"])
 
-            logger.debug(
-                "Successfully loaded configuration from YAML, creating MldpConfig instance"
-            )
+            logger.debug("Successfully loaded configuration from YAML, creating MldpConfig instance")
             return cls(**flat_data)
 
         except FileNotFoundError:

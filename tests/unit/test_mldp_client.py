@@ -1,14 +1,14 @@
+import os
+import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
-import sys
-import os
-import tempfile
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.mldp_client import MldpClient
-from dp_python_lib.config import MldpConfig, ServiceConfig
+from dp_python_lib.config import MldpConfig
 
 
 class TestMldpClient(unittest.TestCase):
@@ -108,16 +108,12 @@ class TestMldpClient(unittest.TestCase):
             with self.assertRaises(ValueError) as context:
                 MldpClient(ingestion_channel=None, config=None, config_file=None)
 
-            self.assertIn(
-                "Either ingestion_channel or config must be provided", str(context.exception)
-            )
+            self.assertIn("Either ingestion_channel or config must be provided", str(context.exception))
 
     @patch("dp_python_lib.config.config.MldpConfig.create_ingestion_channel")
     @patch("dp_python_lib.config.config.MldpConfig.create_query_channel")
     @patch("dp_python_lib.config.config.MldpConfig.create_annotation_channel")
-    def test_init_with_no_arguments_succeeds(
-        self, mock_annotation_channel, mock_query_channel, mock_ingestion_channel
-    ):
+    def test_init_with_no_arguments_succeeds(self, mock_annotation_channel, mock_query_channel, mock_ingestion_channel):
         """A client constructed with no arguments is valid and fully populated.
 
         Omitting ingestion_channel does not raise -- configuration is loaded and the channel is

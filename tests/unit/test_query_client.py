@@ -1,22 +1,22 @@
-import unittest
-from unittest.mock import Mock
-from datetime import datetime, timezone
-import sys
 import os
+import sys
+import unittest
+from datetime import datetime, timezone
+from unittest.mock import Mock
+
 import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.query_client import (
+    ConfigQuery,
+    PvQuery,
     QueryClient,
     QueryParams,
-    PvQuery,
-    ConfigQuery,
     QuerySamplesApiResult,
 )
 from dp_python_lib.grpc import query_pb2
-
 
 BEGIN = datetime(2024, 1, 1, tzinfo=timezone.utc)
 END = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -208,12 +208,8 @@ class TestQueryParams(unittest.TestCase):
 
     def test_zero_and_positive_limits_accepted(self):
         # limit=0 is meaningful per the proto ("the server selects an appropriate default"), not an error.
-        self.assertEqual(
-            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0).limit, 0
-        )
-        self.assertEqual(
-            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=10).limit, 10
-        )
+        self.assertEqual(QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0).limit, 0)
+        self.assertEqual(QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=10).limit, 10)
 
     def test_validated_timestamps_exposed(self):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
@@ -234,9 +230,7 @@ class TestBuildRequest(unittest.TestCase):
         p = QueryParams(
             BEGIN,
             END,
-            pv_selector=PvQuery.metadata(
-                [PvQuery.pv_name(prefix=["ABC:"]), PvQuery.tags(["vacuum"])]
-            ),
+            pv_selector=PvQuery.metadata([PvQuery.pv_name(prefix=["ABC:"]), PvQuery.tags(["vacuum"])]),
             config_criteria=[ConfigQuery.configuration_name(["beamline-optics"])],
             limit=100,
         )
@@ -396,9 +390,7 @@ class TestQuerySamplesStream(unittest.TestCase):
         self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
 
     def test_stream_yields_pages(self):
-        self.mock_stub.querySamplesStream.return_value = iter(
-            [_result_response(), _result_response()]
-        )
+        self.mock_stub.querySamplesStream.return_value = iter([_result_response(), _result_response()])
         results = list(self.client.iter_query_samples_stream(self.params))
         self.assertEqual(len(results), 2)
         self.assertTrue(all(not r.result_status.is_error for r in results))

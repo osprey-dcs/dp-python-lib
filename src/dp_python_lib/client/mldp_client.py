@@ -1,9 +1,9 @@
-from typing import Optional
-import grpc
 import logging
 
-from dp_python_lib.client.ingestion_client import IngestionClient
+import grpc
+
 from dp_python_lib.client.annotation_client import AnnotationClient
+from dp_python_lib.client.ingestion_client import IngestionClient
 from dp_python_lib.client.query_client import QueryClient
 from dp_python_lib.config import MldpConfig, load_config
 
@@ -16,11 +16,11 @@ class MldpClient:
 
     def __init__(
         self,
-        ingestion_channel: Optional[grpc.Channel] = None,
-        query_channel: Optional[grpc.Channel] = None,
-        annotation_channel: Optional[grpc.Channel] = None,
-        config: Optional[MldpConfig] = None,
-        config_file: Optional[str] = None,
+        ingestion_channel: grpc.Channel | None = None,
+        query_channel: grpc.Channel | None = None,
+        annotation_channel: grpc.Channel | None = None,
+        config: MldpConfig | None = None,
+        config_file: str | None = None,
     ) -> None:
         """
         Initialize MLDP client with either explicit channels or configuration.
