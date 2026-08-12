@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+# Superseded runs are cancelled: force-pushing to a PR branch should not leave the previous
+# run burning minutes on a result nobody will read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every failing interpreter, not just the first.
+      fail-fast: false
+      matrix:
+        # requires-python is ">=3.10"; test the whole range that claim covers.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # setuptools-scm derives the version from tags, so it needs full history.
+          # Without this the build fails or produces a 0.1.dev1 placeholder.
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package and dependencies
+        # The [analysis] extra is required, not optional, for a meaningful test run: the
+        # query-conversion tests skip themselves when pandas/numpy are absent, so a run
+        # without it would pass while silently testing nothing.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[analysis,dev]"
+
+      - name: Run unit tests
+        # Integration tests need a live MLDP ecosystem on localhost:50051-50053 and are
+        # deselected by marker.  They self-skip without a backend, but deselecting them
+        # outright means a missing backend can never be mistaken for a passing run.
+        run: pytest tests/unit -v -m "not integration"
+
+  quality:
+    name: Lint, format, and docs
+    runs-on: ubuntu-latest
+    # These checks are interpreter-independent, so they run once rather than on all four
+    # matrix legs -- no added signal, 4x the runtime.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[analysis,dev]"
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Check cookbook snippets
+        # Type-checks every Python example in doc/cookbook against this package, so a recipe
+        # referencing a renamed attribute or method fails here rather than in a user's hands.
+        run: python .dev/tools/check-cookbook-snippets.py
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    # Catches packaging breakage (bad metadata, missing files, an sdist that will not build)
+    # at PR time rather than at tag time, when the tag is already public.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Verify distribution metadata
+        run: twine check --strict dist/*
+
+      - name: Verify the wheel installs and imports cleanly
+        # A wheel that builds but does not import is a release-day surprise; a fresh venv
+        # with no dev dependencies present is the honest test of that.
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install dist/*.whl
+          /tmp/wheel-check/bin/python -c "
+          from dp_python_lib.client import MldpClient, QueryParams
+          from importlib.metadata import version
+          print('installed version:', version('dp-python-lib'))
+          "
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7

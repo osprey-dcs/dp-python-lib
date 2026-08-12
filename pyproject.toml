@@ -1,19 +1,49 @@
+[build-system]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dp-python-lib"
-version = "1.15.0"
+# Version is derived from the git tag by setuptools-scm (see [tool.setuptools_scm]); it is
+# deliberately NOT hardcoded here, so the tag is the single source of truth at release time.
+dynamic = ["version"]
 description = "Python client library for the MLDP gRPC API"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+authors = [{ name = "Osprey Distributed Control Systems" }]
+keywords = ["mldp", "grpc", "data-platform", "time-series", "epics"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
 
 dependencies = [
   # Minimums match what the generated gRPC stubs hard-require at import time
   # (see GRPC_GENERATED_VERSION / ValidateProtobufRuntimeVersion in src/dp_python_lib/grpc);
   # keep these in sync with the stub generator when regenerating.
+  #
+  # NOTE: grpcio-tools is deliberately NOT here.  It is the protoc toolchain used to *generate*
+  # the stubs, not to run them -- nothing under src/ imports grpc_tools.  Requiring it at runtime
+  # would force every consumer to install the compiler.  It lives in the [codegen] extra instead.
   "grpcio>=1.82.1",
-  "grpcio-tools>=1.82.1",
   "protobuf>=7.35.0",
   "pydantic-settings",
   "PyYAML",
 ]
+
+[project.urls]
+Homepage = "https://github.com/osprey-dcs/dp-python-lib"
+Repository = "https://github.com/osprey-dcs/dp-python-lib"
+Issues = "https://github.com/osprey-dcs/dp-python-lib/issues"
 
 [project.optional-dependencies]
 # Pythonic query-result conversions (query_conversions): DataFrame / NumPy / Excel.  Kept out of the core
@@ -32,10 +62,35 @@ dev = [
   "mypy",
   "pytest",
   "ruff",
+  "build",
+  "twine",
 ]
+
+# Toolchain for regenerating the gRPC stubs in src/dp_python_lib/grpc from the upstream
+# dp-grpc protos.  Not needed to use or develop against the library.
+codegen = [
+  "grpcio-tools>=1.82.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+# Release tags are `rel-X.Y.Z`; the default regex expects `v` or a bare number, so it is
+# overridden here.  Without this, setuptools-scm cannot parse the project's tags at all.
+tag_regex = '^rel-(?P<version>[0-9]+\.[0-9]+\.[0-9]+.*)$'
+# Only `rel-*` tags define versions.  Other tags in this repo (e.g. the legacy `v1.13`) are
+# ignored rather than being misread as releases.
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "rel-*"]
+# Non-tagged commits get the NEXT patch version with a .devN suffix, rather than appearing to
+# be a later release than they are.
+version_scheme = "guess-next-dev"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "integration: requires a live MLDP ecosystem on localhost:50051-50053 (deselect with '-m \"not integration\"')",
+]
 
 [tool.ruff]
 # 120 matches the margin this codebase was already written to: at line-length 100 there were

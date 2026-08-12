@@ -48,6 +48,30 @@ a comment saying why, rather than reshaping correct code to satisfy the linter. 
 examples: the naive-datetime test inputs (`DTZ001`) that exist precisely to assert a
 `ValueError`, and the numpy import that doubles as the `[analysis]` availability probe (`F401`).
 
+### Continuous Integration and Releases
+GitHub Actions workflows live in `.github/workflows/`:
+
+- **`ci.yml`** — runs on PRs targeting `main` and on pushes to `main`.  Three jobs:
+  unit tests across Python 3.10–3.13; a single-interpreter quality job (ruff lint,
+  ruff format check, cookbook snippet checker); and a build job that produces the
+  wheel/sdist, runs `twine check --strict`, and verifies the wheel imports in a
+  clean venv.  Integration tests are deselected with `-m "not integration"`.
+- **`release.yml`** — runs on `rel-X.Y.Z` tag pushes.  Builds the wheel and sdist,
+  asserts the setuptools-scm version matches the tag, emits a `SHA256SUMS` file,
+  signs everything with keyless Sigstore, and publishes a GitHub Release.  A
+  `workflow_dispatch` trigger allows rehearsing the whole path without cutting a
+  tag: publishing is gated on a `rel-` tag push, so a manual run always stops after
+  build/verify/sign.  A PyPI publish job is wired up but disabled (`if: false`); the
+  comment block above it lists the steps to enable it.  Actions in `release.yml` are
+  pinned to commit SHAs (this pipeline holds an OIDC signing token and release write
+  access); `ci.yml` uses floating major tags, and Dependabot updates both.
+
+**Cutting a release**: the version comes from the git tag alone (setuptools-scm),
+so there is no version to bump in a file.  Tag `rel-X.Y.Z` and push the tag.
+The tag must be exactly `rel-X.Y.Z` with no suffix — prerelease shapes like
+`rel-1.15.0-rc1` are rejected up front, because setuptools-scm would normalize them
+(`1.15.0rc1`) and fail the tag-vs-built version assertion with a confusing error.
+
 ### Dependencies
 Core dependencies are managed in `pyproject.toml`:
 - `grpcio` - gRPC runtime
