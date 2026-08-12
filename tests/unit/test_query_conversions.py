@@ -1,22 +1,24 @@
+import os
+import sys
+import tempfile
 import unittest
 from unittest.mock import Mock
-import sys
-import os
-import tempfile
 
 # Add src directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client import query_conversions as conv
 from dp_python_lib.client.query_conversions import Image, data_value_to_python
-from dp_python_lib.grpc import common_pb2
-from dp_python_lib.grpc import query_pb2
+from dp_python_lib.grpc import common_pb2, query_pb2
 
 # The conversion layer depends on the optional [analysis] extra; skip the DataFrame/NumPy/Excel tests cleanly when
 # it is not installed.  The pure DataValue-extraction tests need no optional deps and always run.
 try:
+    # F401: numpy is imported both as an availability probe for the [analysis] extra and for
+    # use in the guarded tests below; find_spec() would not bind the name.
+    import numpy as np  # noqa: F401
     import pandas as pd
-    import numpy as np
+
     _HAVE_ANALYSIS = True
 except ImportError:
     _HAVE_ANALYSIS = False
@@ -96,8 +98,8 @@ def _column_table(timestamps, columns):
 # DataValue extraction (no optional deps)
 # ----------------------------------------------------------------------
 
-class TestDataValueToPython(unittest.TestCase):
 
+class TestDataValueToPython(unittest.TestCase):
     def test_unset_returns_none(self):
         self.assertIsNone(data_value_to_python(common_pb2.DataValue()))
 
@@ -124,7 +126,8 @@ class TestDataValueToPython(unittest.TestCase):
         # 1704067200 s + 500 ns
         self.assertEqual(
             data_value_to_python(_timestamp_value(1704067200, 500)),
-            1704067200 * 1_000_000_000 + 500)
+            1704067200 * 1_000_000_000 + 500,
+        )
 
     def test_array_recurses_to_list(self):
         v = _array_value(_scalar(intValue=1), _scalar(intValue=2))
@@ -149,9 +152,9 @@ class TestDataValueToPython(unittest.TestCase):
 # ColumnTable -> DataFrame
 # ----------------------------------------------------------------------
 
+
 @unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas/numpy)")
 class TestColumnTableToDataFrame(unittest.TestCase):
-
     def test_none_yields_empty(self):
         df = conv.column_table_to_dataframe(None)
         self.assertTrue(df.empty)
@@ -159,7 +162,8 @@ class TestColumnTableToDataFrame(unittest.TestCase):
     def test_basic_scalar_columns(self):
         ct = _column_table(
             [1704067200, 1704067201],
-            [("temp", [_scalar(doubleValue=1.5), _scalar(doubleValue=2.5)])])
+            [("temp", [_scalar(doubleValue=1.5), _scalar(doubleValue=2.5)])],
+        )
         df = conv.column_table_to_dataframe(ct)
         self.assertEqual(list(df.columns), ["temp"])
         self.assertEqual(list(df["temp"]), [1.5, 2.5])
@@ -168,48 +172,45 @@ class TestColumnTableToDataFrame(unittest.TestCase):
         self.assertEqual(str(df.index.tz), "UTC")
 
     def test_int_gap_upcasts_to_float(self):
-        ct = _column_table(
-            [1, 2],
-            [("count", [_scalar(intValue=10), common_pb2.DataValue()])])
+        ct = _column_table([1, 2], [("count", [_scalar(intValue=10), common_pb2.DataValue()])])
         df = conv.column_table_to_dataframe(ct)
         self.assertEqual(str(df["count"].dtype), "float64")
         self.assertEqual(df["count"].iloc[0], 10.0)
         self.assertTrue(pd.isna(df["count"].iloc[1]))
 
     def test_complex_arms_preserved_as_objects(self):
-        ct = _column_table(
-            [1],
-            [("arr", [_array_value(_scalar(intValue=1), _scalar(intValue=2))])])
+        ct = _column_table([1], [("arr", [_array_value(_scalar(intValue=1), _scalar(intValue=2))])])
         df = conv.column_table_to_dataframe(ct)
         self.assertEqual(str(df["arr"].dtype), "object")
         self.assertEqual(df["arr"].iloc[0], [1, 2])
 
     def test_timestamp_column_is_datetime(self):
-        ct = _column_table(
-            [1704067200],
-            [("event_time", [_timestamp_value(1704070800)])])
+        ct = _column_table([1704067200], [("event_time", [_timestamp_value(1704070800)])])
         df = conv.column_table_to_dataframe(ct)
         self.assertIsInstance(df["event_time"].dtype, pd.DatetimeTZDtype)
 
     def test_metadata_attached_to_attrs(self):
         ct = _column_table(
             [1],
-            [("temp", [_scalar(doubleValue=1.5)], {"tags": ["vacuum"], "attributes": {"unit": "V"}})])
+            [
+                (
+                    "temp",
+                    [_scalar(doubleValue=1.5)],
+                    {"tags": ["vacuum"], "attributes": {"unit": "V"}},
+                )
+            ],
+        )
         df = conv.column_table_to_dataframe(ct)
         self.assertEqual(df.attrs["column_metadata"]["temp"]["tags"], ["vacuum"])
         self.assertEqual(df.attrs["column_metadata"]["temp"]["attributes"], {"unit": "V"})
 
     def test_metadata_excluded(self):
-        ct = _column_table(
-            [1],
-            [("temp", [_scalar(doubleValue=1.5)], {"tags": ["vacuum"]})])
+        ct = _column_table([1], [("temp", [_scalar(doubleValue=1.5)], {"tags": ["vacuum"]})])
         df = conv.column_table_to_dataframe(ct, exclude_column_metadata=True)
         self.assertNotIn("column_metadata", df.attrs)
 
     def test_alignment_mismatch_raises(self):
-        ct = _column_table(
-            [1, 2],
-            [("short", [_scalar(intValue=1)])])  # 1 value, 2 timestamps
+        ct = _column_table([1, 2], [("short", [_scalar(intValue=1)])])  # 1 value, 2 timestamps
         with self.assertRaises(ValueError):
             conv.column_table_to_dataframe(ct)
 
@@ -228,19 +229,13 @@ class TestColumnTableToDataFrame(unittest.TestCase):
     def test_duplicate_column_names_raise(self):
         # Columns are keyed by name, so a duplicate would silently overwrite the earlier column and drop a
         # whole PV's data.  Fail loud instead, and name the offending column.
-        ct = _column_table(
-            [1],
-            [("dup", [_scalar(intValue=10)]),
-             ("dup", [_scalar(intValue=20)])])
+        ct = _column_table([1], [("dup", [_scalar(intValue=10)]), ("dup", [_scalar(intValue=20)])])
         with self.assertRaises(ValueError) as cm:
             conv.column_table_to_dataframe(ct)
         self.assertIn("dup", str(cm.exception))
 
     def test_distinct_column_names_do_not_raise(self):
-        ct = _column_table(
-            [1],
-            [("a", [_scalar(intValue=10)]),
-             ("b", [_scalar(intValue=20)])])
+        ct = _column_table([1], [("a", [_scalar(intValue=10)]), ("b", [_scalar(intValue=20)])])
         df = conv.column_table_to_dataframe(ct)
         self.assertEqual(list(df.columns), ["a", "b"])
 
@@ -249,25 +244,24 @@ class TestColumnTableToDataFrame(unittest.TestCase):
 # ColumnTable -> NumPy
 # ----------------------------------------------------------------------
 
+
 @unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas/numpy)")
 class TestColumnTableToNumpy(unittest.TestCase):
-
     def test_none_yields_empty(self):
         self.assertEqual(conv.column_table_to_numpy(None), {})
 
     def test_dict_of_arrays(self):
         ct = _column_table(
             [1704067200, 1704067201],
-            [("temp", [_scalar(doubleValue=1.5), _scalar(doubleValue=2.5)])])
+            [("temp", [_scalar(doubleValue=1.5), _scalar(doubleValue=2.5)])],
+        )
         out = conv.column_table_to_numpy(ct)
         self.assertIn("timestamps", out)
         self.assertEqual(str(out["timestamps"].dtype), "datetime64[ns]")
         self.assertEqual(list(out["temp"]), [1.5, 2.5])
 
     def test_complex_column_object_array(self):
-        ct = _column_table(
-            [1, 2],
-            [("arr", [_array_value(_scalar(intValue=1)), common_pb2.DataValue()])])
+        ct = _column_table([1, 2], [("arr", [_array_value(_scalar(intValue=1)), common_pb2.DataValue()])])
         out = conv.column_table_to_numpy(ct)
         self.assertEqual(out["arr"].dtype, object)
         self.assertEqual(out["arr"][0], [1])
@@ -289,8 +283,16 @@ class TestColumnTableToNumpy(unittest.TestCase):
         # int64 array, so a column's shape depended on whether its rows happened to match in length.
         ct = _column_table(
             [1, 2],
-            [("arr", [_array_value(_scalar(intValue=1), _scalar(intValue=2)),
-                      _array_value(_scalar(intValue=3), _scalar(intValue=4))])])
+            [
+                (
+                    "arr",
+                    [
+                        _array_value(_scalar(intValue=1), _scalar(intValue=2)),
+                        _array_value(_scalar(intValue=3), _scalar(intValue=4)),
+                    ],
+                )
+            ],
+        )
         out = conv.column_table_to_numpy(ct)
         self.assertEqual(out["arr"].shape, (2,))
         self.assertEqual(out["arr"].dtype, object)
@@ -300,8 +302,16 @@ class TestColumnTableToNumpy(unittest.TestCase):
     def test_ragged_arrays_stay_1d_object(self):
         ct = _column_table(
             [1, 2],
-            [("arr", [_array_value(_scalar(intValue=1)),
-                      _array_value(_scalar(intValue=2), _scalar(intValue=3))])])
+            [
+                (
+                    "arr",
+                    [
+                        _array_value(_scalar(intValue=1)),
+                        _array_value(_scalar(intValue=2), _scalar(intValue=3)),
+                    ],
+                )
+            ],
+        )
         out = conv.column_table_to_numpy(ct)
         self.assertEqual(out["arr"].shape, (2,))
         self.assertEqual(out["arr"].dtype, object)
@@ -310,10 +320,23 @@ class TestColumnTableToNumpy(unittest.TestCase):
     def test_structure_and_image_columns_stay_1d_object(self):
         ct = _column_table(
             [1, 2],
-            [("st", [_structure_value(a=_scalar(intValue=1)),
-                     _structure_value(a=_scalar(intValue=2))]),
-             ("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG),
-                      _image_value(b"\xff\xd8", common_pb2.Image.JPEG)])])
+            [
+                (
+                    "st",
+                    [
+                        _structure_value(a=_scalar(intValue=1)),
+                        _structure_value(a=_scalar(intValue=2)),
+                    ],
+                ),
+                (
+                    "img",
+                    [
+                        _image_value(b"\x89PNG", common_pb2.Image.PNG),
+                        _image_value(b"\xff\xd8", common_pb2.Image.JPEG),
+                    ],
+                ),
+            ],
+        )
         out = conv.column_table_to_numpy(ct)
         for name in ("st", "img"):
             self.assertEqual(out[name].shape, (2,))
@@ -323,18 +346,13 @@ class TestColumnTableToNumpy(unittest.TestCase):
 
     def test_scalar_columns_keep_native_dtype(self):
         # The complex-arm branch must not swallow ordinary scalar columns into object arrays.
-        ct = _column_table(
-            [1, 2],
-            [("i", [_scalar(intValue=1), _scalar(intValue=2)])])
+        ct = _column_table([1, 2], [("i", [_scalar(intValue=1), _scalar(intValue=2)])])
         out = conv.column_table_to_numpy(ct)
         self.assertEqual(out["i"].shape, (2,))
         self.assertNotEqual(out["i"].dtype, object)
 
     def test_duplicate_column_names_raise(self):
-        ct = _column_table(
-            [1],
-            [("dup", [_scalar(intValue=10)]),
-             ("dup", [_scalar(intValue=20)])])
+        ct = _column_table([1], [("dup", [_scalar(intValue=10)]), ("dup", [_scalar(intValue=20)])])
         with self.assertRaises(ValueError) as cm:
             conv.column_table_to_numpy(ct)
         self.assertIn("dup", str(cm.exception))
@@ -344,14 +362,14 @@ class TestColumnTableToNumpy(unittest.TestCase):
 # Excel export
 # ----------------------------------------------------------------------
 
+
 @unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas/numpy/openpyxl)")
 class TestDataFrameToExcel(unittest.TestCase):
-
     def _sample_df(self):
         ct = _column_table(
             [1704067200],
-            [("v", [_scalar(doubleValue=1.5)]),
-             ("arr", [_array_value(_scalar(intValue=1))])])
+            [("v", [_scalar(doubleValue=1.5)]), ("arr", [_array_value(_scalar(intValue=1))])],
+        )
         return conv.column_table_to_dataframe(ct)
 
     def test_writes_file(self):
@@ -394,8 +412,7 @@ class TestDataFrameToExcel(unittest.TestCase):
             self.assertTrue(os.path.exists(path))
 
     def test_image_cells_stringified_via_repr(self):
-        ct = _column_table(
-            [1704067200], [("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG)])])
+        ct = _column_table([1704067200], [("img", [_image_value(b"\x89PNG", common_pb2.Image.PNG)])])
         df = conv.column_table_to_dataframe(ct)
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "out.xlsx")
@@ -408,9 +425,9 @@ class TestDataFrameToExcel(unittest.TestCase):
 # Whole-query conveniences (page internally; concat by name)
 # ----------------------------------------------------------------------
 
+
 @unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas/numpy)")
 class TestQuerySamplesToDataFrame(unittest.TestCase):
-
     def _page(self, ct):
         page = Mock()
         page.column_table = ct

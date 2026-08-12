@@ -1,7 +1,9 @@
-from abc import ABC
-from typing import Any, Callable
-import grpc
 import logging
+from abc import ABC
+from collections.abc import Callable
+from typing import Any
+
+import grpc
 
 
 class ServiceApiClientBase(ABC):

@@ -1,7 +1,7 @@
 from abc import ABC
 
 
-class ResultStatus():
+class ResultStatus:
     """
     Encapsulates status information for a call to a service API method including flag indicating success or failure
     of the operation, and a corresponding error message.
@@ -14,6 +14,7 @@ class ResultStatus():
         """
         self.is_error = is_error
         self.message = message
+
 
 class ApiResultBase(ABC):
     """

@@ -1,8 +1,9 @@
-import grpc
 import logging
 
-from dp_python_lib.client.pv_metadata_client import PvMetadataClient
+import grpc
+
 from dp_python_lib.client.machine_config_client import MachineConfigClient
+from dp_python_lib.client.pv_metadata_client import PvMetadataClient
 
 
 class AnnotationClient:

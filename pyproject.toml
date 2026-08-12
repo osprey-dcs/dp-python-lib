@@ -31,8 +31,56 @@ analysis = [
 dev = [
   "mypy",
   "pytest",
+  "ruff",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# 120 matches the margin this codebase was already written to: at line-length 100 there were
+# 307 violations, nearly all docstrings and long string literals that the formatter will not
+# rewrap; at 120 there are 3.  Reflowing that much prose by hand would be a large diff with no
+# readability gain.
+line-length = 120
+target-version = "py310"
+# The gRPC stubs are generated from the upstream dp-grpc protos and regenerated wholesale;
+# linting or formatting them would be overwritten on the next regeneration.
+#
+# Markdown is excluded because ruff would reformat the Python snippets embedded in CLAUDE.md
+# and doc/cookbook/*.md.  Those snippets are hand-wrapped for readability as documentation,
+# and the cookbook examples are already verified independently by
+# .dev/tools/check-cookbook-snippets.py, which type-checks them against this package.
+extend-exclude = ["src/dp_python_lib/grpc", "*.md"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",    # pycodestyle
+  "F",         # pyflakes
+  "I",         # isort
+  "UP",        # pyupgrade -- requires-python is >=3.10, so modern syntax is available
+  "B",         # flake8-bugbear
+  "SIM",       # flake8-simplify
+  "G",         # flake8-logging-format
+  "DTZ",       # flake8-datetimez -- this library rejects naive datetimes, so they matter here
+  "RUF",
+]
+ignore = [
+  # The documented three-tier error handling deliberately ends with a broad `except Exception`
+  # as the outermost tier (see CLAUDE.md, "gRPC Error Handling"), and config loading catches
+  # broadly to re-raise as ValueError.  This is the intended design, not an oversight.
+  "BLE001",
+  # `int(round(x))` reads as deliberate in the nanosecond arithmetic in to_timestamp(); the
+  # redundant cast documents the intent to land on an int.
+  "RUF046",
+  # ServiceApiClientBase and ApiResultBase inherit ABC to mark them as not-directly-instantiable
+  # shared-implementation bases.  They intentionally have no abstract methods; adding one purely
+  # to satisfy this rule would be worse than the warning.
+  "B024",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately catch broadly in setUpClass to skip when no live server is present,
+# and assert on private/underscore internals.
+"tests/**" = ["BLE001"]
 

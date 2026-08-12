@@ -19,15 +19,34 @@ This is the `dp-python-lib` repository, a Python client library for the Machine 
 
 ### Testing
 ```bash
-# Run all tests
-pytest tests/
-
-# Run unit tests only
+# Run unit tests only -- no external services required.  This is what CI runs.
 pytest tests/unit/
 
 # Run specific test file
 pytest tests/unit/test_ingestion_client.py -v
+
+# Run everything, INCLUDING integration tests.  These need a live MLDP ecosystem
+# (docker compose up -d) on localhost:50051-50053; without it they self-skip.
+pytest tests/
 ```
+
+### Linting and Formatting
+The project uses [ruff](https://docs.astral.sh/ruff/) for both linting and formatting,
+configured under `[tool.ruff]` in `pyproject.toml` (line length 120, target py310).
+```bash
+ruff check .              # lint
+ruff check . --fix        # lint, applying safe autofixes
+ruff format .             # format
+ruff format --check .     # verify formatting without writing (what CI runs)
+```
+Two paths are excluded deliberately: `src/dp_python_lib/grpc/` (generated, regenerated
+wholesale) and `*.md` (ruff would reformat the hand-wrapped Python snippets in this file
+and `doc/cookbook/`; those are verified instead by `.dev/tools/check-cookbook-snippets.py`).
+
+When a rule fires on something intentional, suppress it with a per-line `# noqa: RULE` plus
+a comment saying why, rather than reshaping correct code to satisfy the linter.  Existing
+examples: the naive-datetime test inputs (`DTZ001`) that exist precisely to assert a
+`ValueError`, and the numpy import that doubles as the `[analysis]` availability probe (`F401`).
 
 ### Dependencies
 Core dependencies are managed in `pyproject.toml`:
@@ -36,6 +55,10 @@ Core dependencies are managed in `pyproject.toml`:
 - `protobuf` - Protocol Buffers runtime
 - `pydantic-settings` - Type-safe configuration with environment variable support
 - `PyYAML` - YAML file parsing
+
+Optional extras:
+- `[analysis]` - `pandas`, `numpy`, `openpyxl` for the query-result conversions
+- `[dev]` - `pytest`, `mypy`, `ruff`; install with `pip install -e ".[analysis,dev]"`
 
 ## Architecture Notes
 
@@ -101,11 +124,17 @@ Core dependencies are managed in `pyproject.toml`:
 - Test all error scenarios: success, business errors, gRPC exceptions, and unexpected cases
 
 ### Type Hints and Modern Python
-- **All framework classes use comprehensive type hints** with Python 3.5+ syntax
-- Parameter types: `str`, `bool`, `Optional[str]`, `List[str]`, `Dict[str, str]`
+- **All framework classes use comprehensive type hints.**  The project targets Python 3.10+
+  (`requires-python = ">=3.10"`), so use the modern built-in spellings — ruff enforces this
+  via the `UP` (pyupgrade) rules:
+  - `str | None`, **not** `Optional[str]`
+  - `list[str]`, `dict[str, str]`, **not** `List[str]` / `Dict[str, str]`
+  - `int | str` unions, **not** `Union[int, str]`
+- Most of `typing` is therefore unnecessary; `from typing import Optional, Dict, List` should
+  not appear in new code.  `typing` is still needed for things with no builtin equivalent
+  (e.g. `Any`, `TYPE_CHECKING`), and `collections.abc` supplies `Callable`, `Iterator`, etc.
 - gRPC-specific types: `grpc.Channel`, `ingestion_pb2.RegisterProviderRequest`
 - Return type annotations: `-> None`, `-> RegisterProviderApiResult`
-- Import required types: `from typing import Optional, Dict, List`
 
 ### Logging System
 **Architecture**: Uses Python's standard `logging` module with hierarchical logger names
@@ -122,7 +151,12 @@ class MyClient:
         self.logger.info("Starting operation")
         self.logger.debug("Technical details: %s", details)
         self.logger.warning("Recoverable issue: %s", issue)
-        self.logger.error("Serious problem: %s", error, exc_info=True)
+        try:
+            ...
+        except Exception as e:
+            # Inside an except block use .exception(), which captures the traceback
+            # automatically.  ruff's G201 rule rejects .error(..., exc_info=True).
+            self.logger.exception("Serious problem: %s", str(e))
 ```
 
 **Logger Hierarchy**:

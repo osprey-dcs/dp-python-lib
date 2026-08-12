@@ -56,7 +56,7 @@ DIRECTIVE_RE = re.compile(r"#\s*cookbook:(partial|skip|no-mypy)\b")
 #
 # Keep this minimal and honest: every name here should be one a recipe legitimately uses
 # without re-establishing it.  Adding a name to paper over a broken snippet defeats the point.
-PREAMBLE = '''\
+PREAMBLE = """\
 # --- checker preamble (not part of the recipe) ---
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
@@ -97,7 +97,7 @@ end: datetime = datetime(2024, 1, 2, tzinfo=timezone.utc)
 params: QueryParams = QueryParams(
     begin_time=begin, end_time=end, pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))
 # --- end preamble ---
-'''
+"""
 
 PREAMBLE_LINES = PREAMBLE.count("\n")
 
@@ -136,10 +136,7 @@ def extract(path: Path) -> list[Snippet]:
         # Strip the fence's indentation from each line so indented blocks (inside list items)
         # parse as top-level code.
         if indent:
-            body = "\n".join(
-                line[len(indent):] if line.startswith(indent) else line
-                for line in body.split("\n")
-            )
+            body = "\n".join(line[len(indent) :] if line.startswith(indent) else line for line in body.split("\n"))
 
         # The opening fence occupies one line, so code starts on the next.
         start_line = text[: match.start()].count("\n") + 2
@@ -183,10 +180,7 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
         return []
 
     if not VENV_MYPY.exists():
-        return [
-            f"mypy not found at {VENV_MYPY}. Install the dev extra:\n"
-            f"    .venv/bin/python -m pip install mypy"
-        ]
+        return [f"mypy not found at {VENV_MYPY}. Install the dev extra:\n    .venv/bin/python -m pip install mypy"]
 
     errors: list[str] = []
 
@@ -254,15 +248,11 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
 
             if snippet_line < 1:
                 # An error inside the preamble itself means the preamble is broken, not the recipe.
-                errors.append(
-                    f"{snippet.location}: [checker preamble] {match.group('rest')}"
-                )
+                errors.append(f"{snippet.location}: [checker preamble] {match.group('rest')}")
                 continue
 
             md_line = snippet.start_line + snippet_line - 1
-            errors.append(
-                f"{display_path(snippet.path)}:{md_line}: {match.group('rest')}"
-            )
+            errors.append(f"{display_path(snippet.path)}:{md_line}: {match.group('rest')}")
 
     return errors
 
@@ -270,11 +260,11 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
 # A snippet that MUST fail.  If mypy stops resolving dp_python_lib -- a moved src layout, a
 # missing MYPYPATH, an uninstalled package -- it reports success on everything and the checker
 # becomes a rubber stamp that looks exactly like clean docs.  This canary makes that loud.
-CANARY = '''\
+CANARY = """\
 # cookbook:partial
 result = client.annotation.pv_metadata.get_pv_metadata("ABC:1")
 print(result.definitely_not_a_real_attribute_canary)
-'''
+"""
 
 
 def self_test(verbose: bool) -> list[str]:
@@ -338,10 +328,7 @@ def main() -> int:
 
     if args.verbose:
         for s in all_snippets:
-            flags = ",".join(
-                f for f, on in
-                (("partial", s.partial), ("skip", s.skip), ("no-mypy", s.no_mypy)) if on
-            )
+            flags = ",".join(f for f, on in (("partial", s.partial), ("skip", s.skip), ("no-mypy", s.no_mypy)) if on)
             print(f"  {s.location}{f'  [{flags}]' if flags else ''}", file=sys.stderr)
 
     errors: list[str] = []
@@ -352,7 +339,7 @@ def main() -> int:
             print("  running self-test (canary)...", file=sys.stderr)
         canary_errors = self_test(args.verbose)
         if canary_errors:
-            print(f"\nFAIL: checker self-test failed\n")
+            print("\nFAIL: checker self-test failed\n")
             for err in canary_errors:
                 print(f"  {err}")
             print()
@@ -367,9 +354,7 @@ def main() -> int:
             syntax_failed.add(id(snippet))
 
     # Pass 2, excluding anything that already failed to parse.
-    errors.extend(
-        check_types([s for s in checked if id(s) not in syntax_failed], args.verbose)
-    )
+    errors.extend(check_types([s for s in checked if id(s) not in syntax_failed], args.verbose))
 
     files_desc = f"{len(paths)} file{'s' if len(paths) != 1 else ''}"
     counts = f"{len(checked)} snippet{'s' if len(checked) != 1 else ''} in {files_desc}"

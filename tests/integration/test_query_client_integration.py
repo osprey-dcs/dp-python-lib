@@ -1,16 +1,16 @@
-import unittest
-import time
 import logging
-import grpc
-import sys
 import os
-from datetime import datetime, timezone
+import sys
+import time
+import unittest
+
+import grpc
 
 # Add src directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.mldp_client import MldpClient
-from dp_python_lib.client.query_client import QueryParams, PvQuery, ConfigQuery
+from dp_python_lib.client.query_client import PvQuery, QueryParams
 
 
 class TestQueryClientIntegration(unittest.TestCase):
@@ -37,14 +37,11 @@ class TestQueryClientIntegration(unittest.TestCase):
         that reference rather than silently omitted.
     """
 
-    QUERY_ADDRESS = 'localhost:50052'
+    QUERY_ADDRESS = "localhost:50052"
 
     @classmethod
     def setUpClass(cls):
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         cls.logger = logging.getLogger(__name__)
         cls.logger.info("Setting up query integration test environment")
 
@@ -65,12 +62,11 @@ class TestQueryClientIntegration(unittest.TestCase):
             raise unittest.SkipTest(
                 f"MLDP query service not available at {cls.QUERY_ADDRESS}. "
                 "Please start the MLDP ecosystem before running integration tests."
-            )
+            ) from None
         except Exception as e:
             raise unittest.SkipTest(
-                f"Cannot connect to MLDP query service: {e}. "
-                "Please ensure the MLDP ecosystem is running."
-            )
+                f"Cannot connect to MLDP query service: {e}. Please ensure the MLDP ecosystem is running."
+            ) from None
 
     def _params(self):
         """A bounded, well-formed query over a recent one-hour window for a broad name pattern."""
@@ -95,8 +91,7 @@ class TestQueryClientIntegration(unittest.TestCase):
         wire path, request construction, and response handling all work end-to-end.
         """
         result = self.client.query.query_samples(self._params())
-        self.assertFalse(result.result_status.is_error,
-                         f"querySamples failed: {result.result_status.message}")
+        self.assertFalse(result.result_status.is_error, f"querySamples failed: {result.result_status.message}")
 
         table = result.column_table
         self.assertIsNotNone(table, "a successful querySamples should carry a ColumnTable")
@@ -105,8 +100,10 @@ class TestQueryClientIntegration(unittest.TestCase):
         n_rows = len(table.timestampList.timestamps)
         for column in table.dataColumns:
             self.assertEqual(
-                len(column.dataValues), n_rows,
-                f"column {column.name!r} is not index-aligned with the timestampList")
+                len(column.dataValues),
+                n_rows,
+                f"column {column.name!r} is not index-aligned with the timestampList",
+            )
         self.logger.info("querySamples returned %d row(s), %d column(s)", n_rows, len(table.dataColumns))
 
     def test_iter_query_samples_paging(self):
@@ -153,5 +150,5 @@ class TestQueryClientIntegration(unittest.TestCase):
         raise NotImplementedError
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)

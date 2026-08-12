@@ -1,22 +1,22 @@
-import unittest
-from unittest.mock import Mock
-from datetime import datetime, timezone
-import sys
 import os
+import sys
+import unittest
+from datetime import datetime, timezone
+from unittest.mock import Mock
+
 import grpc
 
 # Add src directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.query_client import (
+    ConfigQuery,
+    PvQuery,
     QueryClient,
     QueryParams,
-    PvQuery,
-    ConfigQuery,
     QuerySamplesApiResult,
 )
 from dp_python_lib.grpc import query_pb2
-
 
 BEGIN = datetime(2024, 1, 1, tzinfo=timezone.utc)
 END = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -52,8 +52,8 @@ def _exceptional_response(message):
 # PvQuery helpers
 # ----------------------------------------------------------------------
 
-class TestPvQuery(unittest.TestCase):
 
+class TestPvQuery(unittest.TestCase):
     def test_name_list(self):
         selector = PvQuery.name_list(["ABC:1", "ABC:2"])
         self.assertEqual(list(selector.pvNameList.pvNames), ["ABC:1", "ABC:2"])
@@ -129,8 +129,8 @@ class TestPvQuery(unittest.TestCase):
 # ConfigQuery helpers
 # ----------------------------------------------------------------------
 
-class TestConfigQuery(unittest.TestCase):
 
+class TestConfigQuery(unittest.TestCase):
     def test_configuration_name(self):
         c = ConfigQuery.configuration_name(["beamline-optics"])
         self.assertEqual(list(c.configurationNameCriterion.values), ["beamline-optics"])
@@ -157,11 +157,13 @@ class TestConfigQuery(unittest.TestCase):
         self.assertEqual(list(c.attributesCriterion.values), ["ops"])
 
     def test_empties_raise(self):
-        for call in (lambda: ConfigQuery.client_activation_id([]),
-                     lambda: ConfigQuery.category([]),
-                     lambda: ConfigQuery.tags([]),
-                     lambda: ConfigQuery.attr("k", []),
-                     lambda: ConfigQuery.attr("", ["v"])):
+        for call in (
+            lambda: ConfigQuery.client_activation_id([]),
+            lambda: ConfigQuery.category([]),
+            lambda: ConfigQuery.tags([]),
+            lambda: ConfigQuery.attr("k", []),
+            lambda: ConfigQuery.attr("", ["v"]),
+        ):
             with self.assertRaises(ValueError):
                 call()
 
@@ -170,8 +172,8 @@ class TestConfigQuery(unittest.TestCase):
 # QueryParams validation
 # ----------------------------------------------------------------------
 
-class TestQueryParams(unittest.TestCase):
 
+class TestQueryParams(unittest.TestCase):
     def test_valid_with_pv_selector(self):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("ABC:.*"))
         self.assertIsNotNone(p.pv_selector)
@@ -206,10 +208,8 @@ class TestQueryParams(unittest.TestCase):
 
     def test_zero_and_positive_limits_accepted(self):
         # limit=0 is meaningful per the proto ("the server selects an appropriate default"), not an error.
-        self.assertEqual(
-            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0).limit, 0)
-        self.assertEqual(
-            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=10).limit, 10)
+        self.assertEqual(QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0).limit, 0)
+        self.assertEqual(QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=10).limit, 10)
 
     def test_validated_timestamps_exposed(self):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
@@ -221,17 +221,19 @@ class TestQueryParams(unittest.TestCase):
 # Request building (_build_query_spec / _build_query_samples_request)
 # ----------------------------------------------------------------------
 
-class TestBuildRequest(unittest.TestCase):
 
+class TestBuildRequest(unittest.TestCase):
     def setUp(self):
         self.client = QueryClient(Mock())
 
     def test_build_spec_roundtrip_full(self):
         p = QueryParams(
-            BEGIN, END,
+            BEGIN,
+            END,
             pv_selector=PvQuery.metadata([PvQuery.pv_name(prefix=["ABC:"]), PvQuery.tags(["vacuum"])]),
             config_criteria=[ConfigQuery.configuration_name(["beamline-optics"])],
-            limit=100)
+            limit=100,
+        )
         req = self.client._build_query_samples_request(p, page_token="tok")
 
         # time range
@@ -245,7 +247,8 @@ class TestBuildRequest(unittest.TestCase):
         # config selector
         self.assertEqual(
             list(req.querySpec.configurationSelector.criteria[0].configurationNameCriterion.values),
-            ["beamline-optics"])
+            ["beamline-optics"],
+        )
         # execution options
         self.assertEqual(req.executionOptions.limit, 100)
         self.assertEqual(req.executionOptions.pageToken, "tok")
@@ -290,8 +293,8 @@ class TestBuildRequest(unittest.TestCase):
 # querySamples (unary) send + result
 # ----------------------------------------------------------------------
 
-class TestQuerySamplesUnary(unittest.TestCase):
 
+class TestQuerySamplesUnary(unittest.TestCase):
     def setUp(self):
         self.client = QueryClient(Mock())
         self.mock_stub = Mock()
@@ -314,7 +317,7 @@ class TestQuerySamplesUnary(unittest.TestCase):
         self.assertEqual(result.next_page_token, "")
 
     def test_unexpected_response_format(self):
-        response = _response_with_field('somethingElse')
+        response = _response_with_field("somethingElse")
         self.mock_stub.querySamples.return_value = response
         result = self.client.query_samples(self.params)
         self.assertTrue(result.result_status.is_error)
@@ -339,8 +342,8 @@ class TestQuerySamplesUnary(unittest.TestCase):
 # iter_query_samples (unary paging)
 # ----------------------------------------------------------------------
 
-class TestIterQuerySamples(unittest.TestCase):
 
+class TestIterQuerySamples(unittest.TestCase):
     def setUp(self):
         self.client = QueryClient(Mock())
         self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
@@ -378,8 +381,8 @@ class TestIterQuerySamples(unittest.TestCase):
 # querySamplesStream (server-streaming)
 # ----------------------------------------------------------------------
 
-class TestQuerySamplesStream(unittest.TestCase):
 
+class TestQuerySamplesStream(unittest.TestCase):
     def setUp(self):
         self.client = QueryClient(Mock())
         self.mock_stub = Mock()
@@ -387,8 +390,7 @@ class TestQuerySamplesStream(unittest.TestCase):
         self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
 
     def test_stream_yields_pages(self):
-        self.mock_stub.querySamplesStream.return_value = iter(
-            [_result_response(), _result_response()])
+        self.mock_stub.querySamplesStream.return_value = iter([_result_response(), _result_response()])
         results = list(self.client.iter_query_samples_stream(self.params))
         self.assertEqual(len(results), 2)
         self.assertTrue(all(not r.result_status.is_error for r in results))
@@ -406,7 +408,8 @@ class TestQuerySamplesStream(unittest.TestCase):
 
     def test_business_error_mid_stream_raises(self):
         self.mock_stub.querySamplesStream.return_value = iter(
-            [_result_response(), _exceptional_response("mid-stream boom")])
+            [_result_response(), _exceptional_response("mid-stream boom")]
+        )
         collected = []
         with self.assertRaises(RuntimeError):
             for r in self.client.iter_query_samples_stream(self.params):
