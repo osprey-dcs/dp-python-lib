@@ -16,6 +16,9 @@ against a schema and compiling are not the same tool.
 Usage:
     .venv/bin/python .dev/tools/check-cookbook-snippets.py [--verbose] [FILE ...]
 
+Run it with the same interpreter dp_python_lib is installed into: mypy is invoked as
+`sys.executable -m mypy`, so the snippets are checked against that environment's package.
+
 Exits non-zero if any snippet fails.
 
 Snippet directives (in a comment on the block's first line):
@@ -32,6 +35,8 @@ Snippet directives (in a comment on the block's first line):
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -41,7 +46,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COOKBOOK_DIR = REPO_ROOT / "doc" / "cookbook"
-VENV_MYPY = REPO_ROOT / ".venv" / "bin" / "mypy"
+
+# mypy is invoked as `sys.executable -m mypy` rather than as a console script on PATH.
+# That resolves it from whatever interpreter is running this checker -- a local .venv, CI's
+# system Python, uv, pipx -- without assuming a directory layout.  It also guarantees mypy
+# sees the same installed dp_python_lib the checker was run against, which is the whole
+# point of the exercise.
+MYPY_CMD = [sys.executable, "-m", "mypy"]
 
 # Fenced ```python blocks.  Captures the info string tail so ```python title=... still matches.
 FENCE_RE = re.compile(
@@ -179,8 +190,11 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
     if not checkable:
         return []
 
-    if not VENV_MYPY.exists():
-        return [f"mypy not found at {VENV_MYPY}. Install the dev extra:\n    .venv/bin/python -m pip install mypy"]
+    if importlib.util.find_spec("mypy") is None:
+        return [
+            f"mypy is not installed in the environment running this checker ({sys.executable}).\n"
+            f"    Install the dev extra:  {sys.executable} -m pip install -e '.[analysis,dev]'"
+        ]
 
     errors: list[str] = []
 
@@ -202,7 +216,7 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
             written[name] = (snippet, offset)
 
         cmd = [
-            str(VENV_MYPY),
+            *MYPY_CMD,
             # The generated gRPC stubs are untyped; without this every `import ..._pb2` is an error.
             "--ignore-missing-imports",
             # Type-check the snippets but NOT the library itself.  dp_python_lib currently has
@@ -220,12 +234,18 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
         if verbose:
             print(f"  running: {' '.join(cmd[:6])} ... ({len(written)} files)", file=sys.stderr)
 
+        # Inherit the ambient environment rather than replacing it.  A hardcoded minimal env
+        # breaks anywhere the interpreter is not under /usr (CI tool caches, uv, conda), and
+        # mypy needs the real PATH and venv variables to resolve the same site-packages this
+        # checker is running from.  Only MYPYPATH is overridden, to point at src/.
+        env = {**os.environ, "MYPYPATH": str(REPO_ROOT / "src")}
+
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             cwd=REPO_ROOT,
-            env={"MYPYPATH": str(REPO_ROOT / "src"), "PATH": "/usr/bin:/bin"},
+            env=env,
         )
 
         line_re = re.compile(r"^(?P<file>.+?):(?P<line>\d+):(?:\d+:)?\s*(?P<rest>error:.*)$")
