@@ -76,12 +76,23 @@ class MldpConfig(BaseSettings):
             with open(yaml_file) as f:
                 data = yaml.safe_load(f)
 
+            # safe_load() returns None for an empty file, and can return any YAML type for a
+            # malformed one.  Treat anything that isn't a mapping as "nothing configured" so an
+            # empty config file cleanly falls back to defaults instead of raising.
+            if data is None:
+                logger.warning("YAML configuration file is empty: %s, using defaults", yaml_file)
+                data = {}
+            elif not isinstance(data, dict):
+                raise ValueError(f"expected a mapping at the top level, got {type(data).__name__}")
+
             # Convert nested YAML structure to flat fields
             flat_data = {}
 
             for service in ["ingestion", "query", "annotation"]:
-                if service in data:
-                    service_config = data[service]
+                service_config = data.get(service)
+                # A section present but empty (`ingestion:`) parses as None; skip it rather than
+                # failing the membership tests below.
+                if isinstance(service_config, dict):
                     if "host" in service_config:
                         flat_data[f"{service}_host"] = service_config["host"]
                         logger.debug("Loaded %s_host: %s", service, service_config["host"])
@@ -99,7 +110,7 @@ class MldpConfig(BaseSettings):
             logger.warning("YAML configuration file not found: %s, using defaults", yaml_file)
             return cls()
         except Exception as e:
-            logger.error("Error loading configuration from %s: %s", yaml_file, e)
+            logger.exception("Error loading configuration from %s: %s", yaml_file, e)
             raise ValueError(f"Error loading configuration from {yaml_file}: {e}") from e
 
     def create_ingestion_channel(self) -> grpc.Channel:

@@ -146,6 +146,77 @@ annotation:
         self.assertEqual(config.ingestion.host, "localhost")
         self.assertEqual(config.ingestion.port, 50051)
 
+    def test_from_yaml_empty_file(self):
+        """An empty YAML file parses as None and should fall back to defaults, not raise."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            f.flush()
+
+            try:
+                config = MldpConfig.from_yaml(f.name)
+
+                self.assertEqual(config.ingestion.host, "localhost")
+                self.assertEqual(config.ingestion.port, 50051)
+                self.assertEqual(config.query.port, 50052)
+                self.assertEqual(config.annotation.port, 50053)
+
+            finally:
+                os.unlink(f.name)
+
+    def test_from_yaml_comments_only(self):
+        """A file of only comments also parses as None; same defaults fallback."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("# just a comment, nothing configured\n")
+            f.flush()
+
+            try:
+                config = MldpConfig.from_yaml(f.name)
+
+                self.assertEqual(config.ingestion.host, "localhost")
+                self.assertEqual(config.ingestion.port, 50051)
+
+            finally:
+                os.unlink(f.name)
+
+    def test_from_yaml_empty_service_section(self):
+        """A section present but empty (`query:`) parses as None; skip it, keep other sections."""
+        yaml_content = """
+ingestion:
+  host: yaml-ingestion.example.com
+  port: 9001
+query:
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            try:
+                config = MldpConfig.from_yaml(f.name)
+
+                self.assertEqual(config.ingestion.host, "yaml-ingestion.example.com")
+                self.assertEqual(config.ingestion.port, 9001)
+                # The empty section leaves query at its defaults.
+                self.assertEqual(config.query.host, "localhost")
+                self.assertEqual(config.query.port, 50052)
+
+            finally:
+                os.unlink(f.name)
+
+    def test_from_yaml_non_mapping_top_level(self):
+        """Valid YAML that isn't a mapping is a config error, not a silent defaults fallback."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("- ingestion\n- query\n")
+            f.flush()
+
+            try:
+                with self.assertRaises(ValueError) as context:
+                    MldpConfig.from_yaml(f.name)
+
+                self.assertIn("expected a mapping", str(context.exception))
+
+            finally:
+                os.unlink(f.name)
+
     def test_from_yaml_invalid_yaml(self):
         """Test loading config with invalid YAML."""
         invalid_yaml = "invalid: yaml: content: ["

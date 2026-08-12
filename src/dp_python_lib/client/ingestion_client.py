@@ -43,7 +43,7 @@ class RegisterProviderApiResult(ApiResultBase):
         response: ingestion_pb2.RegisterProviderResponse | None = None,
     ) -> None:
         """
-        :param is_error: Boolean flag indicating if an error occurrent id API call.
+        :param is_error: Boolean flag indicating if an error occurred in the API call.
         :param message: Error message describing error condition.
         :param response: The RegisterProviderResponse object returned by the API call, or None.
         """
