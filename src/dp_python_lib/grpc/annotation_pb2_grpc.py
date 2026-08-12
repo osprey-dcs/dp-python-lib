@@ -5,7 +5,7 @@ import warnings
 
 from . import annotation_pb2 as annotation__pb2
 
-GRPC_GENERATED_VERSION = '1.82.1'
+GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -194,7 +194,8 @@ class DpAnnotationServiceServicer:
 
         This RPC returns information about DataSets matching the specified query parameters. Client sends a single
         QueryDataSetsRequest and receives a single QueryDataSetsResponse. The response may indicate rejection,
-        error in handling, no data matching query, or otherwise contains the data matching the query specification.
+        error in handling, or otherwise contains the data matching the query specification.  A query matching no data
+        returns an empty result, not an ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -220,7 +221,8 @@ class DpAnnotationServiceServicer:
         This RPC is used by clients to query over annotations added to ingested data.
         Client sends a single QueryAnnotationsRequest with the query parameters, and receives a single
         QueryAnnotationsResponse with the query results. The response may indicate rejection, error in handling,
-        no data matching query, or otherwise contains the data matching the query specification.
+        or otherwise contains the data matching the query specification.  A query matching no data returns an empty
+        result, not an ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
