@@ -1,0 +1,228 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "rel-*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (tag/branch/commit) to build. Defaults to the current ref."
+        required: false
+        default: ""
+      dry_run:
+        description: "Build, verify, and sign, but do not publish a GitHub Release."
+        required: false
+        type: boolean
+        default: true
+
+# A publish must never be cancelled halfway through, so unlike CI this does not set
+# cancel-in-progress.
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for keyless Sigstore signing: the OIDC token is what binds the signature
+      # to this workflow's identity.
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          # setuptools-scm derives the version from the tag, so full history and tags are
+          # required.  Without this the release would be versioned 0.1.dev1.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Derive and validate version
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "$TAG" != rel-* ]]; then
+              echo "::error::Tag does not start with 'rel-': $TAG"
+              exit 1
+            fi
+            VERSION="${TAG#rel-}"
+            # Guard against a typo'd tag (rel-1.15, rel-v1.15.0) producing a bad release.
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "::error::Tag '$TAG' does not yield an X.Y.Z version (got '$VERSION')"
+              exit 1
+            fi
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "Releasing version $VERSION from tag $TAG"
+          else
+            echo "Manual dispatch; version comes from setuptools-scm."
+          fi
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Verify built version matches the tag
+        # setuptools-scm derives the version independently from git.  If it disagrees with the
+        # tag, something is wrong with the checkout (e.g. missing tags) and the artifacts would
+        # be mislabelled -- fail loudly rather than publishing them.
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ steps.version.outputs.version }}"
+          BUILT=$(ls dist/*.whl | head -1 | sed -E 's|.*/dp_python_lib-([^-]+)-py3.*|\1|')
+          echo "tag version:   $EXPECTED"
+          echo "built version: $BUILT"
+          if [[ "$BUILT" != "$EXPECTED" ]]; then
+            echo "::error::Built version '$BUILT' does not match tag version '$EXPECTED'."
+            exit 1
+          fi
+
+      - name: Verify distribution metadata
+        run: twine check --strict dist/*
+
+      - name: Verify the wheel installs and imports cleanly
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install dist/*.whl
+          /tmp/wheel-check/bin/python -c "
+          from dp_python_lib.client import MldpClient, QueryParams
+          from importlib.metadata import version
+          print('installed version:', version('dp-python-lib'))
+          "
+
+      - name: Generate SHA256SUMS
+        # One checksums file in the standard format, so consumers can verify every artifact
+        # with a single `sha256sum -c SHA256SUMS`.
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum dp_python_lib-*.whl dp_python_lib-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Sign artifacts with Sigstore
+        # Keyless signing: no key material to store or rotate.  A checksum published in the
+        # same release as the artifact proves integrity but not authenticity -- anyone able to
+        # rewrite the release can rewrite both files.  The Sigstore bundle is what ties these
+        # artifacts to this workflow's identity.
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
+        with:
+          inputs: ./dist/*.whl ./dist/*.tar.gz ./dist/SHA256SUMS
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 7
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # Skipped for a dry run, and for manual dispatches that are not on a rel- tag.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build outputs
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: dist
+
+      - name: List artifacts to be published
+        run: ls -la dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/*.sigstore.json
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## Verifying these artifacts
+
+            Checksums:
+
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
+
+            Signatures (keyless Sigstore; `pip install sigstore`):
+
+            ```bash
+            sigstore verify identity \
+              --cert-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
+              --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+              dp_python_lib-*.whl
+            ```
+
+            ## Installing
+
+            ```bash
+            pip install dp_python_lib-*.whl
+            ```
+
+  # ---------------------------------------------------------------------------------------
+  # PyPI publishing -- WIRED UP BUT INTENTIONALLY DISABLED.
+  #
+  # To enable:
+  #   1. Claim the project name on PyPI.
+  #   2. Configure a Trusted Publisher for osprey-dcs/dp-python-lib, workflow release.yml,
+  #      environment `pypi` (PyPI project settings -> Publishing).  Trusted Publishing uses
+  #      OIDC, so no API token is ever stored in repo secrets.
+  #   3. Create a GitHub environment named `pypi`, ideally with required reviewers.
+  #   4. Change the `if:` below to:
+  #        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')
+  #
+  # Note: PyPI rejects Sigstore bundles as uploads, hence the cleanup step -- the bundles
+  # still go to the GitHub Release.  attestations: true emits PEP 740 attestations instead.
+  # ---------------------------------------------------------------------------------------
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: false # <-- flip this to enable; see the comment block above
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dp-python-lib
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download build outputs
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Remove non-distribution files
+        # Only sdists and wheels may be uploaded; the checksums file and Sigstore bundles
+        # would be rejected.
+        run: rm -f dist/SHA256SUMS dist/*.sigstore.json
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          attestations: true
