@@ -122,7 +122,7 @@ jobs:
         # same release as the artifact proves integrity but not authenticity -- anyone able to
         # rewrite the release can rewrite both files.  The Sigstore bundle is what ties these
         # artifacts to this workflow's identity.
-        uses: sigstore/gh-action-sigstore-python@v3.5.0
+        uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
         with:
           inputs: ./dist/*.whl ./dist/*.tar.gz ./dist/SHA256SUMS
 
@@ -154,7 +154,7 @@ jobs:
         run: ls -la dist/
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3.0.2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
             dist/*.whl
@@ -226,6 +226,6 @@ jobs:
         run: rm -f dist/SHA256SUMS dist/*.sigstore.json
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
