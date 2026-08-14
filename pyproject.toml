@@ -98,7 +98,7 @@ markers = [
 # rewrap; at 120 there are 3.  Reflowing that much prose by hand would be a large diff with no
 # readability gain.
 line-length = 120
-target-version = "py310"
+target-version = "1.15.0"
 # The gRPC stubs are generated from the upstream dp-grpc protos and regenerated wholesale;
 # linting or formatting them would be overwritten on the next regeneration.
 #
