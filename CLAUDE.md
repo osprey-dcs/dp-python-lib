@@ -62,9 +62,21 @@ GitHub Actions workflows live in `.github/workflows/`:
   `workflow_dispatch` trigger allows rehearsing the whole path without cutting a
   tag: publishing is gated on a `rel-` tag push, so a manual run always stops after
   build/verify/sign.  A PyPI publish job is wired up but disabled (`if: false`); the
-  comment block above it lists the steps to enable it.  Actions in `release.yml` are
-  pinned to commit SHAs (this pipeline holds an OIDC signing token and release write
-  access); `ci.yml` uses floating major tags, and Dependabot updates both.
+  comment block above it lists the steps to enable it.
+
+**Action pinning**: every `uses:` reference in both workflows is pinned to a full commit
+SHA with a trailing `# vX.Y.Z` comment naming the version — a tag is mutable, so whoever
+controls an action's repo can repoint it and every workflow picks up the new code with no
+diff and no review.  This matters most in `release.yml`, which holds an OIDC signing token
+and release write access, and whose third-party actions (Sigstore, `action-gh-release`,
+`gh-action-pypi-publish`) run inside that trust boundary.  Pinning does not interfere with
+keyless signing or PyPI trusted publishing: both key on the workflow's OIDC identity rather
+than the action version, and SHA pinning is what PyPA recommends.  Dependabot bumps the SHA
+and its comment together, so pins stay current.  New references follow the same format; the
+check is:
+```bash
+grep -rnE 'uses: *[^ ]+@' .github/workflows/ | grep -vE '@[0-9a-f]{40} # v'   # must return nothing
+```
 
 **Cutting a release**: the version comes from the git tag alone (setuptools-scm),
 so there is no version to bump in a file.  Tag `rel-X.Y.Z` and push the tag.
