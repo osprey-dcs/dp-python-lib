@@ -5,7 +5,7 @@ import warnings
 
 from . import query_pb2 as query__pb2
 
-GRPC_GENERATED_VERSION = '1.82.1'
+GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -115,8 +115,8 @@ class DpQueryServiceServicer:
         queryData: Unary (non-streaming) time series data query.
 
         Client sends a single QueryDataRequest with the query parameters, and receives a single QueryDataResponse with the
-        query results. The response may indicate rejection, error in handling, no data matching query, or otherwise
-        contains the data matching the query specification.
+        query results. The response may indicate rejection or error in handling, or otherwise contains the data
+        matching the query specification.  A query matching no data returns an empty result, not an ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -127,9 +127,10 @@ class DpQueryServiceServicer:
         queryDataStream: Server-side streaming time series data query.
 
         Client sends a single QueryDataRequest with the query parameters, and receives a stream of QueryDataResponse
-        messages with the query results. The response may indicate rejection, error in handling, no data matching query,
-        or otherwise contains the data matching the query specification.  Results are sent in the response stream until
-        the MongoDB cursor for the query is exhausted, or an error is encountered in processing.
+        messages with the query results. The response may indicate rejection or error in handling, or otherwise
+        contains the data matching the query specification.  A query matching no data returns an empty result, not an
+        ExceptionalResult.  Results are sent in the response stream until the MongoDB cursor for the query is
+        exhausted, or an error is encountered in processing.
 
         The response stream is closed by the server in case of rejection, if there is an error in processing, or the
         result cursor is exhausted.
@@ -154,8 +155,8 @@ class DpQueryServiceServicer:
         The server closes the response stream if a request is rejected, or when the result is exhausted or an error
         is encountered.
 
-        Each individual response may indicate rejection, error in handling, no data matching query, or otherwise
-        contains the data matching the query specification.
+        Each individual response may indicate rejection or error in handling, or otherwise contains the data
+        matching the query specification.  A query matching no data returns an empty result, not an ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -167,8 +168,9 @@ class DpQueryServiceServicer:
 
         This time series data query returns its result in a tabular format, for use by the Data Platform web application.
         The client sends a single QueryTableRequest with the query parameters and receives a single QueryTableResponse.
-        The response content may indicate an exception in handling such as rejection, database error, no data matching
-        query, or otherwise contains the tabular data matching the query specification.
+        The response content may indicate an exception in handling such as rejection or database error, or otherwise
+        contains the tabular data matching the query specification.  A query matching no data returns an empty table
+        result, not an ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -185,9 +187,10 @@ class DpQueryServiceServicer:
         This RPC is used by clients to learn about data sources (PVs/columns)
         available in the archive.  Client sends a single QueryPvStatsRequest
         with the query parameters, and receives a single QueryPvStatsResponse
-        with the query results.  The response may indicate rejection, error in
-        handling, no data matching query, or otherwise contains the archive
-        statistics matching the query specification.
+        with the query results.  The response may indicate rejection or error in
+        handling, or otherwise contains the archive statistics matching the query
+        specification.  A query matching no data returns an empty result, not an
+        ExceptionalResult.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
