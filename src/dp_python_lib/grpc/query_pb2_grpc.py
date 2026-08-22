@@ -252,6 +252,11 @@ class DpQueryServiceServicer:
         samples outside [beginTime, endTime).  Callers wanting samples strictly
         within the range should use querySamples(), which trims.
 
+        QuerySpec.sampleStatusSelector is not supported by the bucket-oriented
+        methods (buckets are returned whole and cannot represent per-sample
+        filtering); a request with sampleStatusSelector set is rejected with an
+        ExceptionalResult.
+
         Intended for Java applications, archive export, infrastructure services, and
         high-performance retrieval.
         """
@@ -274,6 +279,9 @@ class DpQueryServiceServicer:
         empty); ExecutionOptions.pageToken must be empty (a non-empty token is
         rejected with an ExceptionalResult).  Use unary queryBuckets() when
         resumable paging is required.
+
+        QuerySpec.sampleStatusSelector is not supported (rejected with an
+        ExceptionalResult); see queryBuckets().
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -293,6 +301,10 @@ class DpQueryServiceServicer:
         the range, so every returned timestamp satisfies beginTime <= t < endTime.
         (This carries forward the trimming behavior of the V1 queryTable processor.)
 
+        Supports QuerySpec.sampleStatusSelector for restricting returned samples by
+        sample status (see SampleStatusSelector and the Sample Status API in
+        annotation.proto).
+
         Expected to become the preferred method for the Python client library,
         interactive analysis, data science, machine learning, and visualization.
         """
@@ -310,6 +322,9 @@ class DpQueryServiceServicer:
         fire-and-consume (no continuation tokens; ExecutionOptions.pageToken must be
         empty, a non-empty token rejected with an ExceptionalResult).  Use unary
         querySamples() when resumable paging is required.
+
+        Supports QuerySpec.sampleStatusSelector for restricting returned samples by
+        sample status; see querySamples().
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

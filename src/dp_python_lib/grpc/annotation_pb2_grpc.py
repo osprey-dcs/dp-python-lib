@@ -162,6 +162,36 @@ class DpAnnotationServiceStub:
                 request_serializer=annotation__pb2.GetActiveConfigurationsRequest.SerializeToString,
                 response_deserializer=annotation__pb2.GetActiveConfigurationsResponse.FromString,
                 _registered_method=True)
+        self.saveSampleStatuses = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/saveSampleStatuses',
+                request_serializer=annotation__pb2.SaveSampleStatusesRequest.SerializeToString,
+                response_deserializer=annotation__pb2.SaveSampleStatusesResponse.FromString,
+                _registered_method=True)
+        self.querySampleStatuses = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/querySampleStatuses',
+                request_serializer=annotation__pb2.QuerySampleStatusesRequest.SerializeToString,
+                response_deserializer=annotation__pb2.QuerySampleStatusesResponse.FromString,
+                _registered_method=True)
+        self.querySampleStatusesStream = channel.unary_stream(
+                '/dp.service.annotation.DpAnnotationService/querySampleStatusesStream',
+                request_serializer=annotation__pb2.QuerySampleStatusesRequest.SerializeToString,
+                response_deserializer=annotation__pb2.QuerySampleStatusesResponse.FromString,
+                _registered_method=True)
+        self.deleteSampleStatuses = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/deleteSampleStatuses',
+                request_serializer=annotation__pb2.DeleteSampleStatusesRequest.SerializeToString,
+                response_deserializer=annotation__pb2.DeleteSampleStatusesResponse.FromString,
+                _registered_method=True)
+        self.saveSampleStatusDomain = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/saveSampleStatusDomain',
+                request_serializer=annotation__pb2.SaveSampleStatusDomainRequest.SerializeToString,
+                response_deserializer=annotation__pb2.SaveSampleStatusDomainResponse.FromString,
+                _registered_method=True)
+        self.querySampleStatusDomains = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/querySampleStatusDomains',
+                request_serializer=annotation__pb2.QuerySampleStatusDomainsRequest.SerializeToString,
+                response_deserializer=annotation__pb2.QuerySampleStatusDomainsResponse.FromString,
+                _registered_method=True)
 
 
 class DpAnnotationServiceServicer:
@@ -575,6 +605,133 @@ class DpAnnotationServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def saveSampleStatuses(self, request, context):
+        """
+        ------------------- Sample Status ---------------------------
+
+
+
+        saveSampleStatuses()
+
+        Batch upsert of sample statuses, assigning status codes to individual PV samples at
+        specific timestamps.  The request contains one or more SampleStatusFrames, each carrying a
+        (domain, layer), a DataTimestamps time axis, and one SampleStatusColumn per PV.
+
+        Upsert semantics are per individual sample status, keyed by (pvName, timestamp, domain,
+        layer): an entry REPLACES any existing status with the same key IN FULL — including the
+        optional confidence and reasons — and creates a new status otherwise.  Statuses at other
+        timestamps are unaffected — to cleanly re-label a time range (e.g., after re-running an ML
+        model whose output timestamps changed), first call deleteSampleStatuses() for the range,
+        then save.
+
+        Frames are processed in request order.  If the same identity key appears in more than one
+        frame of a request, the later frame's status wins (consistent with upsert across requests:
+        last writer wins), and savedCount counts each write.
+
+        The request is validated and rejected as a whole (no partial save on rejection).  If an
+        error is encountered while writing a valid request, an ExceptionalResult with
+        RESULT_STATUS_ERROR is returned and some frames may have been persisted.
+
+        The response may indicate rejection, an error handling the request, or successful
+        handling of the request.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def querySampleStatuses(self, request, context):
+        """
+        querySampleStatuses(): Unary sample status query.
+
+        Query sample statuses over a time range, optionally filtered by PV name, domain, and
+        layer (an empty pvNames list matches all PVs — e.g., to enumerate which PVs a layer has
+        labeled).  Returns one page of SampleStatusBucket objects; additional pages are retrieved
+        by resubmitting the request with the nextPageToken from the previous response as
+        pageToken.
+
+        Bucket selection follows the TimeRange overlap test, and boundary buckets are returned
+        WHOLE (not trimmed) — matching DpQueryService.queryBuckets() — so a returned bucket may
+        contain individual statuses outside [beginTime, endTime).
+
+        A query matching no data returns an empty result, not an ExceptionalResult.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def querySampleStatusesStream(self, request, context):
+        """
+        querySampleStatusesStream(): Server-streaming sample status query.
+
+        Streams QuerySampleStatusesResponse messages until the result is exhausted, the client
+        cancels, or an error occurs.  Paging semantics match DpQueryService.queryBucketsStream():
+        limit controls the chunk size of each streamed response; streaming is fire-and-consume —
+        the server streams to completion and does not emit continuation tokens (nextPageToken is
+        empty on every streamed message); pageToken must be empty (a non-empty token is rejected
+        with an ExceptionalResult).  Use unary querySampleStatuses() when resumable paging is
+        required.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def deleteSampleStatuses(self, request, context):
+        """
+        deleteSampleStatuses()
+
+        Delete sample statuses within the half-open time range [beginTime, endTime), for a single
+        required (domain, layer).  pvNames restricts the delete to the listed PVs; an empty
+        pvNames list is a deliberate wildcard deleting the (domain, layer)'s statuses for ALL PVs
+        in the range.  Intended for cleanly re-labeling a range (delete then save) and for
+        retiring an obsolete producer's statuses (wide time range + empty pvNames).
+
+        Unlike query — which returns boundary buckets whole — deletion is EXACT at the sample
+        axis: only statuses whose timestamps fall within the range are removed; the server splits
+        or rewrites boundary storage buckets as needed.
+
+        domain and layer are required, scoping each delete to a single producer stream.
+
+        A delete matching no statuses is a successful result with deletedCount = 0, not an
+        ExceptionalResult.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def saveSampleStatusDomain(self, request, context):
+        """
+        saveSampleStatusDomain()
+
+        Create or replace a sample status domain registry record, documenting the status code
+        mappings (code -> label / description) for a domain so that consumers can interpret status
+        codes without out-of-band knowledge.
+
+        NOT YET IMPLEMENTED — calling this method returns an error response.
+        Planned for a future release.
+
+        This method is defined now to reserve its name and message shapes as part
+        of the standard CRUD pattern for metadata APIs in this service.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def querySampleStatusDomains(self, request, context):
+        """
+        querySampleStatusDomains()
+
+        Query sample status domain registry records.
+
+        NOT YET IMPLEMENTED — calling this method returns an error response.
+        Planned for a future release.
+
+        This method is defined now to reserve its name and message shapes as part
+        of the standard CRUD pattern for metadata APIs in this service.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DpAnnotationServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -697,6 +854,36 @@ def add_DpAnnotationServiceServicer_to_server(servicer, server):
                     servicer.getActiveConfigurations,
                     request_deserializer=annotation__pb2.GetActiveConfigurationsRequest.FromString,
                     response_serializer=annotation__pb2.GetActiveConfigurationsResponse.SerializeToString,
+            ),
+            'saveSampleStatuses': grpc.unary_unary_rpc_method_handler(
+                    servicer.saveSampleStatuses,
+                    request_deserializer=annotation__pb2.SaveSampleStatusesRequest.FromString,
+                    response_serializer=annotation__pb2.SaveSampleStatusesResponse.SerializeToString,
+            ),
+            'querySampleStatuses': grpc.unary_unary_rpc_method_handler(
+                    servicer.querySampleStatuses,
+                    request_deserializer=annotation__pb2.QuerySampleStatusesRequest.FromString,
+                    response_serializer=annotation__pb2.QuerySampleStatusesResponse.SerializeToString,
+            ),
+            'querySampleStatusesStream': grpc.unary_stream_rpc_method_handler(
+                    servicer.querySampleStatusesStream,
+                    request_deserializer=annotation__pb2.QuerySampleStatusesRequest.FromString,
+                    response_serializer=annotation__pb2.QuerySampleStatusesResponse.SerializeToString,
+            ),
+            'deleteSampleStatuses': grpc.unary_unary_rpc_method_handler(
+                    servicer.deleteSampleStatuses,
+                    request_deserializer=annotation__pb2.DeleteSampleStatusesRequest.FromString,
+                    response_serializer=annotation__pb2.DeleteSampleStatusesResponse.SerializeToString,
+            ),
+            'saveSampleStatusDomain': grpc.unary_unary_rpc_method_handler(
+                    servicer.saveSampleStatusDomain,
+                    request_deserializer=annotation__pb2.SaveSampleStatusDomainRequest.FromString,
+                    response_serializer=annotation__pb2.SaveSampleStatusDomainResponse.SerializeToString,
+            ),
+            'querySampleStatusDomains': grpc.unary_unary_rpc_method_handler(
+                    servicer.querySampleStatusDomains,
+                    request_deserializer=annotation__pb2.QuerySampleStatusDomainsRequest.FromString,
+                    response_serializer=annotation__pb2.QuerySampleStatusDomainsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1355,6 +1542,168 @@ class DpAnnotationService:
             '/dp.service.annotation.DpAnnotationService/getActiveConfigurations',
             annotation__pb2.GetActiveConfigurationsRequest.SerializeToString,
             annotation__pb2.GetActiveConfigurationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def saveSampleStatuses(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/saveSampleStatuses',
+            annotation__pb2.SaveSampleStatusesRequest.SerializeToString,
+            annotation__pb2.SaveSampleStatusesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def querySampleStatuses(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/querySampleStatuses',
+            annotation__pb2.QuerySampleStatusesRequest.SerializeToString,
+            annotation__pb2.QuerySampleStatusesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def querySampleStatusesStream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/querySampleStatusesStream',
+            annotation__pb2.QuerySampleStatusesRequest.SerializeToString,
+            annotation__pb2.QuerySampleStatusesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def deleteSampleStatuses(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/deleteSampleStatuses',
+            annotation__pb2.DeleteSampleStatusesRequest.SerializeToString,
+            annotation__pb2.DeleteSampleStatusesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def saveSampleStatusDomain(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/saveSampleStatusDomain',
+            annotation__pb2.SaveSampleStatusDomainRequest.SerializeToString,
+            annotation__pb2.SaveSampleStatusDomainResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def querySampleStatusDomains(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/querySampleStatusDomains',
+            annotation__pb2.QuerySampleStatusDomainsRequest.SerializeToString,
+            annotation__pb2.QuerySampleStatusDomainsResponse.FromString,
             options,
             channel_credentials,
             insecure,
