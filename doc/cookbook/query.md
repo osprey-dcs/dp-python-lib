@@ -388,7 +388,9 @@ or use `itertools.islice`.
   `NotImplementedError` in the conversion layer.
 - **Duplicate column names raise.**  Both conversions key columns by `DataColumn.name`, so a table
   with two identically-named columns raises `ValueError` rather than silently dropping one.
-- **`valueStatus` is ignored.**  It is never populated in `querySamples()` results.
+- **`valueStatus` is ignored.**  It is never populated in `querySamples()` results; it is deprecated
+  in favor of the [sample status API](sample-status.md), which also lets a query exclude flagged
+  samples outright.
 - **An empty result is not an error** — success with an empty table means nothing matched the
   range and selector.
 - **Bucket-oriented queries (`queryBuckets`) are not yet wrapped** by this library; see

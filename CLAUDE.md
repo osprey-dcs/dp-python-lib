@@ -25,8 +25,9 @@ pytest tests/unit/
 # Run specific test file
 pytest tests/unit/test_ingestion_client.py -v
 
-# Run everything, INCLUDING integration tests.  These need a live MLDP ecosystem
-# (docker compose up -d) on localhost:50051-50053; without it they self-skip.
+# Run everything, INCLUDING integration tests.  These need a live MLDP ecosystem on
+# localhost:50051-50053 -- however started (docker compose, or the services run
+# directly); without it they self-skip.
 pytest tests/
 ```
 
@@ -114,12 +115,16 @@ Optional extras:
 - `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (exposes `.pv_metadata` and `.machine_config`, with room to grow `.annotations`)
 - `src/dp_python_lib/client/pv_metadata_client.py` - PV metadata client (`save_pv_metadata()`, `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`) plus the `PvMetadataQuery` (`Q`) criterion helpers
 - `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers and the `to_timestamp()` helper (tz-aware datetime / epoch seconds / `common.Timestamp`). Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire
+- `src/dp_python_lib/client/sample_status_client.py` - Sample status client (`save_sample_statuses()`, `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, `delete_sample_statuses()`) plus the `sampling_clock()` / `timestamp_list()` axis builders and the `SampleStatusColumn` / `SampleStatusFrame` construction classes. A status's identity key is `(pvName, timestamp, domain, layer)`; `delete_sample_statuses()` requires either `pv_names` or an explicit `all_pvs=True` opt-in for the destructive wildcard
+- `src/dp_python_lib/client/sample_status_conversions.py` - Per-sample expansion of query results (no optional extras required): `expand_data_timestamps()` (SamplingClock positions computed in **integer nanoseconds**, never float seconds — the exact-match contract depends on it), `bucket_to_rows()` / `buckets_to_rows()` / `iter_rows()` yielding `SampleStatusRow` objects with absent confidence/reason surfaced as `None` rather than fabricated `0.0`/`""`
 - `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `src/dp_python_lib/client/query_conversions.py` - Pythonic conversions for query results (optional `[analysis]` extra: pandas/numpy/openpyxl, imported lazily). `data_value_to_python()` (oneof extractor: scalars→native, timestamp→epoch-nanos, array→list, structure→dict, image→`Image` wrapper, fail-loud on unhandled arm), `column_table_to_dataframe()` (UTC datetime index + one column per DataColumn; dense-alignment and duplicate-column-name fail-loud; ColumnMetadata in `df.attrs`), `column_table_to_numpy()` (dict of 1-D arrays; complex arms stay 1-D object arrays rather than collapsing to 2-D), `dataframe_to_excel()` (thin `to_excel()` wrapper: row-limit guard, tz-drop, complex-cell stringification), and `query_samples_to_dataframe()`/`stream_query_samples_to_dataframes()` whole-query conveniences (unary concats by column name; streaming yields per-page frames lazily)
 - `tests/unit/test_ingestion_client.py` - Unit tests for IngestionClient functionality
 - `tests/unit/test_pv_metadata_client.py` - Unit tests for PvMetadataClient functionality
 - `tests/unit/test_machine_config_client.py` - Unit tests for the Configuration side of MachineConfigClient
 - `tests/unit/test_machine_config_activation_client.py` - Unit tests for the ConfigurationActivation side of MachineConfigClient (incl. composite-key validation, timestamp handling, getActiveConfigurations)
+- `tests/unit/test_sample_status_client.py` - Unit tests for SampleStatusClient (frame/column validation, axis builders, three-tier error handling, paging, streaming, delete opt-in, `limit=0` regression)
+- `tests/unit/test_sample_status_conversions.py` - Unit tests for sample_status_conversions (nanosecond-exact axis expansion, absent-vs-zero confidence, alignment fail-loud, laziness)
 - `tests/unit/test_query_client.py` - Unit tests for QueryClient (request building, three-tier error handling, unary paging, streaming, `PvQuery`/`ConfigQuery` helpers, `QueryParams` validation)
 - `tests/unit/test_query_conversions.py` - Unit tests for query_conversions (each DataValue arm, dense-alignment and duplicate-column-name fail-loud, int-gap float-upcast, timestamp columns, 1-D object arrays for complex arms, metadata in attrs, concat-by-name, Excel row-limit/stringification/native-bytes; DataFrame/NumPy/Excel tests skip cleanly when the `[analysis]` extra is absent)
 - `pyproject.toml` - Project metadata and dependencies
@@ -432,6 +437,83 @@ Notes:
   requirements scan) is additive: `column_table_to_numpy()`'s dict-of-arrays is the intended substrate for a
   `column_table_to_torch()` behind a separate optional `[torch]` extra — no change to `QueryClient` or the NumPy
   path. Not built yet.
+
+### Sample Status API (Annotation Service)
+
+Sample status methods are exposed under the `annotation` facade at `client.annotation.sample_status`.  A sample status
+assigns an int32 status code to **one PV sample at one instant**; the identity key is `(pvName, timestamp, domain, layer)`.
+`domain` names the status-code semantics contract (EnumColumn-style — not validated by MLDP); `layer` names the producer
+stream, so an operator override and a model's guess coexist without colliding.  This is the designated replacement for
+the deprecated `DataValue.ValueStatus` mechanism.
+
+Two model properties drive the whole design:
+- **Absence means "no assertion."**  There is no implicit default status; labeling three samples says nothing about the
+  rest.  Absent `confidence`/`reasons` therefore surface as `None`, never as `0.0`/`""` — `0.0` is a legitimate
+  confidence value, so a fabricated default would be indistinguishable from a real one.
+- **Matching is by exact timestamp at nanosecond precision.**  No nearest-sample search, no tolerance window.  This is
+  why `expand_data_timestamps()` computes SamplingClock positions as `startTime + i * periodNanos` in integer
+  nanoseconds: present-day epoch nanos need ~61 bits, so a float64 round-trip would silently produce timestamps that
+  match nothing.
+
+```python
+from datetime import datetime, timezone
+from dp_python_lib.client import (
+    MldpClient, SampleStatusColumn, SampleStatusFrame, SaveSampleStatusesRequestParams,
+    QuerySampleStatusesRequestParams, QueryParams, PvQuery as PV, SampleStatusFilter,
+    sampling_clock, timestamp_list,
+)
+from dp_python_lib.client import sample_status_conversions as ssc
+
+ss = MldpClient().annotation.sample_status
+begin = datetime(2024, 2, 2, tzinfo=timezone.utc)
+end = datetime(2024, 2, 3, tzinfo=timezone.utc)
+
+# sparse labeling: name exactly the samples being labeled (timestamps taken from the data itself)
+bad = [datetime(2024, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc)]
+ss.save_sample_statuses(SaveSampleStatusesRequestParams(
+    frames=[SampleStatusFrame(
+        domain="data_quality", layer="operator_override",
+        data_timestamps=timestamp_list(bad),
+        columns=[SampleStatusColumn("BPMS:GUNB:314:X", status_codes=[2], reasons=["beam loss"])],
+    )],
+    source="shift log", modified_by="operator"))
+
+# dense labeling: sampling_clock() must match the archived data's clock exactly
+axis = sampling_clock(start_time=begin, period_nanos=100_000, count=10_000)
+
+# read back, expanded to one row per sample
+params = QuerySampleStatusesRequestParams(begin_time=begin, end_time=end, domains=["data_quality"])
+for row in ssc.iter_rows(ss.iter_sample_statuses(params)):
+    print(row.pv_name, row.epoch_nanos, row.status_code, row.reason)   # reason is None if unset
+
+# query time-series data with flagged samples removed
+q = QueryParams(begin_time=begin, end_time=end, pv_selector=PV.name_list(["BPMS:GUNB:314:X"]),
+                sample_status_filter=SampleStatusFilter.exclude("data_quality", status_codes=[2]))
+
+# delete: (domain, layer) is required; the PV wildcard needs an explicit opt-in
+ss.delete_sample_statuses(begin, end, domain="ml_anomaly", layer="ml_model_v1", all_pvs=True)
+```
+
+Notes:
+- Saving is a per-key upsert that **replaces in full**: re-saving with `reasons` omitted clears the stored reason.
+  Supply the complete desired state each time.  `source`/`modified_by` apply to the whole request, not per frame.
+- A frame's optional parallel arrays (`confidence`, `reasons`) must be omitted or supply exactly one entry per
+  timestamp; validated client-side so the error names the offending PV instead of bouncing the whole batch.  A PV may
+  appear at most once per frame.  An all-empty `reasons` list is dropped rather than sent as empty strings.
+- There is deliberately **no criterion-builder class** here (unlike `PvMetadataQuery`/`ConfigurationQuery`): the request
+  takes plain repeated string filters (`pv_names`/`domains`/`layers`, ANDed across, ORed within), so plain lists are the
+  honest representation.
+- `SampleStatusFilter.include()`/`.exclude()` are the only ways to build a `sampleStatusSelector`, which makes the
+  server-rejected `MODE_UNSPECIFIED` zero value unreachable.  Because absence means "no assertion", an *unlabeled*
+  sample never matches: `exclude()` keeps it, `include()` drops it.
+- `sampleStatusSelector` is supported by `querySamples()`/`querySamplesStream()` **only** — the server rejects it on a
+  bucket query.  `_build_query_spec()` is shared with the future bucket client (#16) and carries a note at the seam:
+  a bucket request builder must *refuse* `sample_status_filter` rather than copy it through.
+- `delete_sample_statuses()` is exact at the sample axis (a straddling bucket is not deleted wholesale), and a delete
+  matching nothing is a success with `deleted_count == 0`.
+- The deferred domain-registry RPCs (`saveSampleStatusDomain` / `querySampleStatusDomains`) are reserved placeholders
+  that return "not implemented", so they are not wrapped.
+- A pandas view of statuses is deferred; `sample_status_conversions` returns plain Python objects and needs no extras.
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)

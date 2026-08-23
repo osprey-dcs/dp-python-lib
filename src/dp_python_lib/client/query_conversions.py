@@ -11,7 +11,8 @@ Design decisions (see .dev/plan/issue-7/plan.md, Q6 and section 2):
     structure, byteArray, image) are preserved losslessly as Python objects in an object-dtype column, never
     auto-flattened.  An unset value in an otherwise-populated column becomes None (pandas renders NaN); an
     *unhandled* oneof arm raises (fail-loud).
-  - DataValue.valueStatus is ignored by design (never populated in querySamples() results).
+  - DataValue.valueStatus is ignored by design (never populated in querySamples() results); it is deprecated in
+    favor of the sample status API (see sample_status_client / sample_status_conversions).
   - Columns are dense and index-aligned with the timestampList; a length mismatch is a fail-loud ValueError.
   - Serialized columns are not decoded (deferred); a ColumnTable carrying serializedDataColumns raises
     NotImplementedError.
