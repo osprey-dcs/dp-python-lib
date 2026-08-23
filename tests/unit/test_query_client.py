@@ -15,6 +15,7 @@ from dp_python_lib.client.query_client import (
     QueryClient,
     QueryParams,
     QuerySamplesApiResult,
+    SampleStatusFilter,
 )
 from dp_python_lib.grpc import query_pb2
 
@@ -431,6 +432,107 @@ class TestQuerySamplesStream(unittest.TestCase):
             for r in self.client.iter_query_samples_stream(self.params):
                 collected.append(r)
         self.assertEqual(len(collected), 1)
+
+
+# ----------------------------------------------------------------------
+# SampleStatusFilter / sampleStatusSelector
+# ----------------------------------------------------------------------
+
+
+class TestSampleStatusFilter(unittest.TestCase):
+    def test_include_sets_include_mode(self):
+        selector = SampleStatusFilter.include("data_quality")
+        self.assertEqual(selector.domain, "data_quality")
+        self.assertEqual(selector.mode, query_pb2.SampleStatusSelector.MODE_INCLUDE_MATCHING)
+
+    def test_exclude_sets_exclude_mode(self):
+        selector = SampleStatusFilter.exclude("data_quality")
+        self.assertEqual(selector.mode, query_pb2.SampleStatusSelector.MODE_EXCLUDE_MATCHING)
+
+    def test_neither_constructor_can_produce_unspecified_mode(self):
+        # MODE_UNSPECIFIED is the enum's zero value and is rejected by the server.  Routing construction through
+        # the two named constructors is what makes that state unreachable, so assert it directly.
+        for selector in (SampleStatusFilter.include("d"), SampleStatusFilter.exclude("d")):
+            self.assertNotEqual(selector.mode, query_pb2.SampleStatusSelector.MODE_UNSPECIFIED)
+
+    def test_layers_and_status_codes_are_carried(self):
+        selector = SampleStatusFilter.exclude("data_quality", layers=["ml_v1", "ops"], status_codes=[2, 3])
+        self.assertEqual(list(selector.layers), ["ml_v1", "ops"])
+        self.assertEqual(list(selector.statusCodes), [2, 3])
+
+    def test_omitted_layers_and_status_codes_stay_empty(self):
+        # Empty means "match all layers / any status code", so nothing may be invented here.
+        selector = SampleStatusFilter.include("data_quality")
+        self.assertEqual(list(selector.layers), [])
+        self.assertEqual(list(selector.statusCodes), [])
+
+    def test_empty_domain_raises(self):
+        for factory in (SampleStatusFilter.include, SampleStatusFilter.exclude):
+            with self.assertRaises(ValueError) as ctx:
+                factory("")
+            self.assertIn("domain", str(ctx.exception))
+
+    def test_status_code_zero_is_carried(self):
+        # 0 is a legitimate int32 status code; a truthiness guard on the list would still keep it, but a per-item
+        # filter would drop it.  Pin the whole list.
+        selector = SampleStatusFilter.include("d", status_codes=[0, 1])
+        self.assertEqual(list(selector.statusCodes), [0, 1])
+
+
+class TestBuildRequestSampleStatusSelector(unittest.TestCase):
+    def setUp(self):
+        self.client = QueryClient(Mock())
+
+    def test_selector_is_copied_into_the_query_spec(self):
+        p = QueryParams(
+            BEGIN,
+            END,
+            pv_selector=PvQuery.pattern("ABC:.*"),
+            sample_status_filter=SampleStatusFilter.exclude("data_quality", layers=["ml_v1"], status_codes=[2]),
+        )
+        req = self.client._build_query_samples_request(p)
+
+        selector = req.querySpec.sampleStatusSelector
+        self.assertEqual(selector.domain, "data_quality")
+        self.assertEqual(selector.mode, query_pb2.SampleStatusSelector.MODE_EXCLUDE_MATCHING)
+        self.assertEqual(list(selector.layers), ["ml_v1"])
+        self.assertEqual(list(selector.statusCodes), [2])
+
+    def test_omitted_filter_leaves_selector_unset(self):
+        # An unset message field must stay genuinely absent on the wire, not present-but-empty: a present selector
+        # with an empty domain and MODE_UNSPECIFIED is a request the server rejects.
+        p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("ABC:.*"))
+        req = self.client._build_query_samples_request(p)
+        self.assertFalse(req.querySpec.HasField("sampleStatusSelector"))
+
+    def test_streaming_request_carries_the_selector_too(self):
+        # Both RPCs share _build_query_spec(), so the filter must reach the streaming path as well.
+        p = QueryParams(
+            BEGIN,
+            END,
+            pv_selector=PvQuery.pattern("ABC:.*"),
+            sample_status_filter=SampleStatusFilter.include("data_quality"),
+        )
+        req = self.client._build_query_samples_request(p, page_token=None)
+        self.assertTrue(req.querySpec.HasField("sampleStatusSelector"))
+        self.assertEqual(req.querySpec.sampleStatusSelector.domain, "data_quality")
+
+    def test_selector_coexists_with_pv_and_config_selectors(self):
+        p = QueryParams(
+            BEGIN,
+            END,
+            pv_selector=PvQuery.name_list(["ABC:1"]),
+            config_criteria=[ConfigQuery.category(["optics"])],
+            sample_status_filter=SampleStatusFilter.exclude("data_quality"),
+        )
+        req = self.client._build_query_samples_request(p)
+        self.assertEqual(list(req.querySpec.pvSelector.pvNameList.pvNames), ["ABC:1"])
+        self.assertEqual(len(req.querySpec.configurationSelector.criteria), 1)
+        self.assertTrue(req.querySpec.HasField("sampleStatusSelector"))
+
+    def test_params_default_filter_is_none(self):
+        p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+        self.assertIsNone(p.sample_status_filter)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from dp_python_lib.client.query_client import (
     QueryClient,
     QueryParams,
     QuerySamplesApiResult,
+    SampleStatusFilter,
 )
 from dp_python_lib.client.sample_status_client import (
     DeleteSampleStatusesApiResult,
@@ -83,6 +84,7 @@ __all__ = [
     "RegisterProviderRequestParams",
     "SampleStatusClient",
     "SampleStatusColumn",
+    "SampleStatusFilter",
     "SampleStatusFrame",
     "SampleStatusRow",
     "SaveConfigurationActivationApiResult",
