@@ -50,6 +50,7 @@ from dp_python_lib.client.sample_status_client import (
     sampling_clock,
     timestamp_list,
 )
+from dp_python_lib.client.sample_status_conversions import SampleStatusRow
 
 __all__ = [
     "AnnotationClient",
@@ -83,6 +84,7 @@ __all__ = [
     "SampleStatusClient",
     "SampleStatusColumn",
     "SampleStatusFrame",
+    "SampleStatusRow",
     "SaveConfigurationActivationApiResult",
     "SaveConfigurationActivationRequestParams",
     "SaveConfigurationApiResult",
