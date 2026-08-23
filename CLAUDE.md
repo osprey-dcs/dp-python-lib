@@ -514,6 +514,11 @@ Notes:
 - The deferred domain-registry RPCs (`saveSampleStatusDomain` / `querySampleStatusDomains`) are reserved placeholders
   that return "not implemented", so they are not wrapped.
 - A pandas view of statuses is deferred; `sample_status_conversions` returns plain Python objects and needs no extras.
+- Verified end to end against a live 1.16.0 Annotation Service (`tests/integration/test_sample_status_client_integration.py`):
+  exact nanosecond timestamp round-trip through both axis forms, absent-stays-absent, full-replace upsert, and layer
+  independence.  The tests probe for the API first and skip with an actionable message against a pre-1.16.0 server,
+  since reachability alone does not imply the RPCs exist.  Status *filtering* of query results is still unit-tested
+  only — it needs ingested sample data to attach to (#17).
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)

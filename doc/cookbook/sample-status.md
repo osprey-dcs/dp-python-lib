@@ -364,13 +364,23 @@ delete would remove, run the same range and `(domain, layer)` through
 
 ### How far these examples have been verified
 
-The same caveat as the [query recipe](query.md#how-far-these-examples-have-been-verified), and for
-the same reason.  Request building is exercised by unit tests, and the conversions are covered by
-tests over hand-built buckets.  What has **not** been observed end to end is the full loop —
-labeling real archived samples and seeing a status-filtered query drop exactly those rows —
-because there is no way to ingest sample data from Python yet
-([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17)).
+The save/query/delete loop **has** been exercised against a live 1.16.0 Annotation Service, by
+`tests/integration/test_sample_status_client_integration.py`.  That covers the parts most likely
+to break silently:
 
-That gap matters more here than elsewhere, because the exact-timestamp matching rule is precisely
-the kind of thing that unit tests over hand-built objects cannot falsify.  **When the ingestion
-client lands, re-verify this recipe against real data**, especially the `sampling_clock()` path.
+- Timestamps round-trip exactly, through both `timestamp_list()` and `sampling_clock()` — the
+  dense case labels 100 samples at 1 kHz and checks every expanded position against
+  `startTime + i * periodNanos`.
+- Unsupplied `confidence` / `reasons` come back as `None`, not `0.0` / `""`.
+- Re-saving a key with `reasons` omitted clears the stored reason (full replace, not merge).
+- The same PV and instant in two layers stay two distinct statuses.
+
+What has **not** been observed is the last link: labeling *real archived samples* and watching a
+status-filtered query drop exactly those rows.  The integration tests save statuses and read them
+back, but there is no way to ingest sample data from Python yet
+([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17)), so the statuses they write
+have no underlying samples to attach to.
+
+**When the ingestion client lands, re-verify the filtering examples** — the
+[querying with flagged samples removed](#querying-data-with-flagged-samples-removed) section is
+the part still standing on unit tests alone.
