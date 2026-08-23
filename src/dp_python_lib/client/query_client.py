@@ -249,6 +249,92 @@ class ConfigQuery:
         return criterion
 
 
+class SampleStatusFilter:
+    """
+    Builds a SampleStatusSelector, restricting a time-series query to (or away from) samples carrying particular
+    sample statuses -- e.g. "give me this PV's data, minus everything my anomaly detector flagged".
+
+    Construct one with the include() or exclude() classmethods rather than directly.  The underlying Mode enum has a
+    MODE_UNSPECIFIED zero value that the server rejects; routing construction through the two named constructors
+    makes that state unreachable rather than something a caller can fall into by leaving the mode unset.
+
+    Filtering is by the same (pvName, timestamp, domain, layer) identity key the sample status API stores: a sample
+    matches when a status exists for it in the given domain, in one of the given layers, with one of the given
+    status codes.  Absence means "no assertion", so a sample with no status at all never matches -- with
+    include() it is therefore excluded from results, and with exclude() it is kept.
+    """
+
+    @staticmethod
+    def _build(
+        domain: str, layers: list[str] | None, status_codes: list[int] | None, mode
+    ) -> "query_pb2.SampleStatusSelector":
+        """
+        Builds a SampleStatusSelector in the given mode, validating the required domain.
+        :param domain: The status domain to filter on.
+        :param layers: Layers to match; omit to match all layers in the domain.
+        :param status_codes: Status codes to match; omit to match any status code.
+        :param mode: The SampleStatusSelector.Mode to apply.
+        :return: The constructed SampleStatusSelector.
+        :raises ValueError: if domain is empty.
+        """
+        if not domain:
+            raise ValueError("SampleStatusFilter requires a non-empty domain")
+
+        selector = query_pb2.SampleStatusSelector()
+        selector.domain = domain
+        selector.mode = mode
+
+        if layers:
+            selector.layers[:] = layers
+        if status_codes:
+            selector.statusCodes[:] = status_codes
+
+        return selector
+
+    @classmethod
+    def include(
+        cls,
+        domain: str,
+        layers: list[str] | None = None,
+        status_codes: list[int] | None = None,
+    ) -> "query_pb2.SampleStatusSelector":
+        """
+        Builds a selector keeping ONLY samples that carry a matching status (MODE_INCLUDE_MATCHING).
+
+        Samples with no status in the domain carry no assertion and so do not match -- they are absent from the
+        results.  An include filter therefore narrows to explicitly labeled samples.
+
+        :param domain: The status domain to filter on (required).
+        :param layers: Layers to match; omit to match all layers in the domain.
+        :param status_codes: Status codes to match; omit to match any status code in the domain/layers.
+        :return: A SampleStatusSelector for use as QueryParams(sample_status_filter=...).
+        :raises ValueError: if domain is empty.
+        """
+        return cls._build(domain, layers, status_codes, query_pb2.SampleStatusSelector.MODE_INCLUDE_MATCHING)
+
+    @classmethod
+    def exclude(
+        cls,
+        domain: str,
+        layers: list[str] | None = None,
+        status_codes: list[int] | None = None,
+    ) -> "query_pb2.SampleStatusSelector":
+        """
+        Builds a selector dropping samples that carry a matching status (MODE_EXCLUDE_MATCHING).
+
+        Samples with no status in the domain carry no assertion and so do not match the filter -- they are kept.
+        An exclude filter therefore removes only what was explicitly labeled, which is the usual shape of
+        "give me the data minus the samples flagged bad".
+
+        :param domain: The status domain to filter on (required).
+        :param layers: Layers to match; omit to match all layers in the domain.
+        :param status_codes: Status codes to match; omit to match any status code in the domain/layers.
+        :return: A SampleStatusSelector for use as QueryParams(sample_status_filter=...).
+        :raises ValueError: if domain is empty.
+        """
+        return cls._build(domain, layers, status_codes, query_pb2.SampleStatusSelector.MODE_EXCLUDE_MATCHING)
+
+
 class QueryParams:
     """
     Encapsulates client parameters for a v2 time-series query.  This is the kind-neutral representation of the shared
@@ -269,6 +355,7 @@ class QueryParams:
         config_criteria: list["query_pb2.ConfigurationSelector.Criterion"] | None = None,
         limit: int | None = None,
         exclude_column_metadata: bool = False,
+        sample_status_filter: "query_pb2.SampleStatusSelector | None" = None,
     ) -> None:
         """
         :param begin_time: Inclusive start of the query range (tz-aware datetime, epoch seconds, or common.Timestamp).
@@ -282,8 +369,12 @@ class QueryParams:
             cap.  0 is meaningful and means "let the server pick a default"; a negative value raises.
         :param exclude_column_metadata: If True, omit per-column ColumnMetadata from the results.  Defaults to False
             (metadata included).
+        :param sample_status_filter: Optional SampleStatusSelector (see SampleStatusFilter.include()/exclude())
+            restricting results to, or away from, samples carrying matching sample statuses.  Supported by
+            querySamples()/querySamplesStream() only -- see the note in _build_query_spec().
         :raises ValueError: if both begin_time and end_time are not supplied, if neither pv_selector nor
-            config_criteria is present, if begin_time is not strictly before end_time, or if limit is negative.
+            config_criteria is present, if begin_time is not strictly before end_time, if limit is negative, or if
+            sample_status_filter is present but carries an empty domain or MODE_UNSPECIFIED.
         """
         if begin_time is None or end_time is None:
             raise ValueError("QueryParams requires both begin_time and end_time")
@@ -305,6 +396,22 @@ class QueryParams:
         if limit is not None and limit < 0:
             raise ValueError(f"QueryParams limit must be non-negative, got {limit}")
 
+        # SampleStatusFilter.include()/exclude() make an invalid selector unreachable *through the helpers*, but
+        # this parameter accepts any SampleStatusSelector, so a default-constructed one would set the field
+        # present-but-invalid and be rejected by the server.  Check it here so the failure names the problem and
+        # points at the helpers, rather than arriving as a server-side error on an otherwise well-formed query.
+        if sample_status_filter is not None:
+            if not sample_status_filter.domain:
+                raise ValueError(
+                    "QueryParams sample_status_filter requires a non-empty domain; "
+                    "build it with SampleStatusFilter.include() or SampleStatusFilter.exclude()"
+                )
+            if sample_status_filter.mode == query_pb2.SampleStatusSelector.MODE_UNSPECIFIED:
+                raise ValueError(
+                    "QueryParams sample_status_filter has MODE_UNSPECIFIED, which the server rejects; "
+                    "build it with SampleStatusFilter.include() or SampleStatusFilter.exclude()"
+                )
+
         self.begin_time = begin_time
         self.end_time = end_time
         self._begin_ts = begin_ts
@@ -313,6 +420,7 @@ class QueryParams:
         self.config_criteria = config_criteria
         self.limit = limit
         self.exclude_column_metadata = exclude_column_metadata
+        self.sample_status_filter = sample_status_filter
 
     @property
     def begin_timestamp(self) -> common_pb2.Timestamp:
@@ -414,8 +522,16 @@ class QueryClient(ServiceApiClientBase):
 
     def _build_query_spec(self, request_params: QueryParams) -> query_pb2.QuerySpec:
         """
-        Builds the shared QuerySpec (time range + PV selector + configuration selector) from the supplied QueryParams.
-        Factored out so both _build_query_samples_request() and a future _build_query_buckets_request() reuse it.
+        Builds the shared QuerySpec (time range + PV selector + configuration selector + optional sample status
+        selector) from the supplied QueryParams.  Factored out so both _build_query_samples_request() and a future
+        _build_query_buckets_request() reuse it.
+
+        NOTE for the future bucket-oriented client (issue #16): sampleStatusSelector is supported by
+        querySamples()/querySamplesStream() ONLY -- the server rejects it on a bucket query, because a bucket is a
+        stored unit that cannot be partially filtered without rewriting it.  A bucket request builder reusing this
+        method must therefore refuse a QueryParams carrying sample_status_filter rather than copying it through,
+        which would silently produce a request the server rejects.
+
         :param request_params: User parameters for the query.
         :return: A QuerySpec for the specified params.
         """
@@ -431,6 +547,9 @@ class QueryClient(ServiceApiClientBase):
 
         if request_params.config_criteria:
             spec.configurationSelector.criteria.extend(request_params.config_criteria)
+
+        if request_params.sample_status_filter is not None:
+            spec.sampleStatusSelector.CopyFrom(request_params.sample_status_filter)
 
         return spec
 

@@ -9,8 +9,8 @@ element it measures — and then finding PVs by those properties instead of by n
 See [API conventions](conventions.md) for result checking, paging, and criteria rules, and
 [Creating and connecting a client](connecting.md) for getting a client in the first place.
 
-All examples use `client.annotation.pv_metadata`, which is `None` unless an annotation channel is
-configured.
+All examples use `client.annotation.pv_metadata`.  Note that `client.annotation` itself is `None`
+unless an annotation channel is configured, so guard on `client.annotation` before reaching through it.
 
 ### Imports used by the examples
 
