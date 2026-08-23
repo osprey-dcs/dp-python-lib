@@ -505,8 +505,11 @@ class TestBuildRequestSampleStatusSelector(unittest.TestCase):
         req = self.client._build_query_samples_request(p)
         self.assertFalse(req.querySpec.HasField("sampleStatusSelector"))
 
-    def test_streaming_request_carries_the_selector_too(self):
-        # Both RPCs share _build_query_spec(), so the filter must reach the streaming path as well.
+    def test_selector_reaches_the_streaming_path_via_the_shared_builder(self):
+        # iter_query_samples_stream() builds its request with _build_query_samples_request() -- the same builder the
+        # unary path uses -- so exercising that builder is what covers the streaming path; there is no separate
+        # streaming request builder to test.  Pinned here so a future split into two builders fails loudly rather
+        # than silently leaving the streaming path unfiltered.
         p = QueryParams(
             BEGIN,
             END,
@@ -533,6 +536,32 @@ class TestBuildRequestSampleStatusSelector(unittest.TestCase):
     def test_params_default_filter_is_none(self):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
         self.assertIsNone(p.sample_status_filter)
+
+    def test_default_constructed_selector_is_rejected(self):
+        # The helpers make MODE_UNSPECIFIED unreachable, but the parameter accepts any SampleStatusSelector.  A
+        # default-constructed one would set the field present-but-invalid and be rejected by the server, so catch
+        # it here where the error can name the problem and point at the helpers.
+        with self.assertRaises(ValueError) as ctx:
+            QueryParams(
+                BEGIN,
+                END,
+                pv_selector=PvQuery.pattern("x"),
+                sample_status_filter=query_pb2.SampleStatusSelector(),
+            )
+        self.assertIn("domain", str(ctx.exception))
+
+    def test_selector_with_domain_but_unspecified_mode_is_rejected(self):
+        selector = query_pb2.SampleStatusSelector()
+        selector.domain = "data_quality"
+
+        with self.assertRaises(ValueError) as ctx:
+            QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), sample_status_filter=selector)
+        self.assertIn("MODE_UNSPECIFIED", str(ctx.exception))
+
+    def test_helper_built_selectors_pass_validation(self):
+        for selector in (SampleStatusFilter.include("d"), SampleStatusFilter.exclude("d")):
+            p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), sample_status_filter=selector)
+            self.assertIs(p.sample_status_filter, selector)
 
 
 if __name__ == "__main__":

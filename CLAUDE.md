@@ -503,9 +503,12 @@ Notes:
 - There is deliberately **no criterion-builder class** here (unlike `PvMetadataQuery`/`ConfigurationQuery`): the request
   takes plain repeated string filters (`pv_names`/`domains`/`layers`, ANDed across, ORed within), so plain lists are the
   honest representation.
-- `SampleStatusFilter.include()`/`.exclude()` are the only ways to build a `sampleStatusSelector`, which makes the
-  server-rejected `MODE_UNSPECIFIED` zero value unreachable.  Because absence means "no assertion", an *unlabeled*
-  sample never matches: `exclude()` keeps it, `include()` drops it.
+- `SampleStatusFilter.include()`/`.exclude()` are the intended ways to build a `sampleStatusSelector`, making the
+  server-rejected `MODE_UNSPECIFIED` zero value unreachable through the helpers.  Since the `sample_status_filter`
+  parameter still accepts any `SampleStatusSelector`, `QueryParams` also *validates* one that is passed in (non-empty
+  domain, mode not `MODE_UNSPECIFIED`), so a hand-built selector fails with a message naming the problem rather than
+  as a server rejection.  Because absence means "no assertion", an *unlabeled* sample never matches: `exclude()`
+  keeps it, `include()` drops it.
 - `sampleStatusSelector` is supported by `querySamples()`/`querySamplesStream()` **only** — the server rejects it on a
   bucket query.  `_build_query_spec()` is shared with the future bucket client (#16) and carries a note at the seam:
   a bucket request builder must *refuse* `sample_status_filter` rather than copy it through.

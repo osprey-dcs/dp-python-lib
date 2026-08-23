@@ -373,7 +373,8 @@ class QueryParams:
             restricting results to, or away from, samples carrying matching sample statuses.  Supported by
             querySamples()/querySamplesStream() only -- see the note in _build_query_spec().
         :raises ValueError: if both begin_time and end_time are not supplied, if neither pv_selector nor
-            config_criteria is present, if begin_time is not strictly before end_time, or if limit is negative.
+            config_criteria is present, if begin_time is not strictly before end_time, if limit is negative, or if
+            sample_status_filter is present but carries an empty domain or MODE_UNSPECIFIED.
         """
         if begin_time is None or end_time is None:
             raise ValueError("QueryParams requires both begin_time and end_time")
@@ -394,6 +395,22 @@ class QueryParams:
         # proto -- "if limit is omitted (0) the server selects an appropriate default" -- so only reject < 0.
         if limit is not None and limit < 0:
             raise ValueError(f"QueryParams limit must be non-negative, got {limit}")
+
+        # SampleStatusFilter.include()/exclude() make an invalid selector unreachable *through the helpers*, but
+        # this parameter accepts any SampleStatusSelector, so a default-constructed one would set the field
+        # present-but-invalid and be rejected by the server.  Check it here so the failure names the problem and
+        # points at the helpers, rather than arriving as a server-side error on an otherwise well-formed query.
+        if sample_status_filter is not None:
+            if not sample_status_filter.domain:
+                raise ValueError(
+                    "QueryParams sample_status_filter requires a non-empty domain; "
+                    "build it with SampleStatusFilter.include() or SampleStatusFilter.exclude()"
+                )
+            if sample_status_filter.mode == query_pb2.SampleStatusSelector.MODE_UNSPECIFIED:
+                raise ValueError(
+                    "QueryParams sample_status_filter has MODE_UNSPECIFIED, which the server rejects; "
+                    "build it with SampleStatusFilter.include() or SampleStatusFilter.exclude()"
+                )
 
         self.begin_time = begin_time
         self.end_time = end_time

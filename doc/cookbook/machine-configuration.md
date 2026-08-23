@@ -8,8 +8,8 @@ the machine doing at 18:04 last Tuesday?"*
 
 See [API conventions](conventions.md) for result checking, paging, and criteria rules.
 
-All examples use `client.annotation.machine_config`, which is `None` unless an annotation channel
-is configured.
+All examples use `client.annotation.machine_config`.  Note that `client.annotation` itself is `None`
+unless an annotation channel is configured, so guard on `client.annotation` before reaching through it.
 
 ### Imports used by the examples
 

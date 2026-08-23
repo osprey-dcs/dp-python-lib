@@ -21,6 +21,20 @@ from dp_python_lib.client.sample_status_client import (
     timestamp_list,
 )
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _exact_nanos(value: datetime) -> int:
+    """
+    Converts a tz-aware datetime to epoch nanoseconds using integer arithmetic only.
+
+    These tests exist to assert that timestamps round-trip *exactly*, so the expected value must not itself go
+    through a float.  datetime.timestamp() returns a float whose ULP at present-day epochs is ~238ns -- it cannot
+    represent nanoseconds at all -- so computing the expectation that way would be checking exactness against a
+    value derived from the very representation the API's exact-match contract rules out.
+    """
+    return (value - _EPOCH) // timedelta(microseconds=1) * 1_000
+
 
 class TestSampleStatusClientIntegration(unittest.TestCase):
     """
@@ -169,7 +183,7 @@ class TestSampleStatusClientIntegration(unittest.TestCase):
         self.assertEqual(len(rows), 3)
 
         # The timestamps must round-trip exactly -- statuses attach to samples by exact nanosecond match.
-        expected_nanos = sorted(int(t.timestamp() * 1_000_000) * 1_000 for t in times)
+        expected_nanos = sorted(_exact_nanos(t) for t in times)
         self.assertEqual(sorted(r.epoch_nanos for r in rows), expected_nanos)
 
         by_nanos = {r.epoch_nanos: r for r in rows}
@@ -223,7 +237,7 @@ class TestSampleStatusClientIntegration(unittest.TestCase):
         rows = list(ssc.iter_rows(self.sample_status.iter_sample_statuses(self._query_params())))
         self.assertEqual(len(rows), count)
 
-        start_nanos = int(self.base_time.timestamp()) * 1_000_000_000
+        start_nanos = _exact_nanos(self.base_time)
         self.assertEqual(
             sorted(r.epoch_nanos for r in rows),
             [start_nanos + i * period_nanos for i in range(count)],

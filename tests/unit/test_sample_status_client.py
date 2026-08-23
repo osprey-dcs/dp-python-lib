@@ -210,6 +210,32 @@ class TestSampleStatusFrame(unittest.TestCase):
         with self.assertRaises(ValueError):
             SampleStatusFrame("dq", "op", common_pb2.DataTimestamps(), [SampleStatusColumn("ABC:1", [1])])
 
+    def test_rejects_zero_count_sampling_clock(self):
+        # sampling_clock() makes this unreachable, but a hand-built DataTimestamps can carry count=0 -- and the
+        # oneof still reports samplingClock as set, so it is not caught by the unset-axis check above.  The error
+        # must name the empty axis rather than surfacing as a column-length mismatch.
+        from dp_python_lib.grpc import common_pb2
+
+        axis = common_pb2.DataTimestamps()
+        axis.samplingClock.startTime.epochSeconds = BEGIN_EPOCH
+        axis.samplingClock.periodNanos = 1_000_000
+        axis.samplingClock.count = 0
+
+        with self.assertRaises(ValueError) as ctx:
+            SampleStatusFrame("dq", "op", axis, [SampleStatusColumn("ABC:1", [1])])
+        self.assertIn("count", str(ctx.exception))
+
+    def test_rejects_empty_timestamp_list(self):
+        # As above for the other axis arm: an empty repeated field still reports timestampList as the set oneof.
+        from dp_python_lib.grpc import common_pb2
+
+        axis = common_pb2.DataTimestamps()
+        axis.timestampList.SetInParent()
+
+        with self.assertRaises(ValueError) as ctx:
+            SampleStatusFrame("dq", "op", axis, [SampleStatusColumn("ABC:1", [1])])
+        self.assertIn("timestamp", str(ctx.exception).lower())
+
     def test_to_proto(self):
         frame = SampleStatusFrame(
             "data_quality", "operator_override", self._axis(), [SampleStatusColumn("ABC:1", [1, 2])]

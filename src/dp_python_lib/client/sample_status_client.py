@@ -73,15 +73,28 @@ def timestamp_list(values: list[TimestampInput]) -> common_pb2.DataTimestamps:
 def _timestamp_count(timestamps: common_pb2.DataTimestamps) -> int:
     """
     Returns the number of timestamps a DataTimestamps describes, for validating parallel-array lengths.
+
+    An empty axis is rejected here rather than allowed to surface later as a confusing column-length mismatch.
+    The axis builders already make this unreachable -- sampling_clock() requires count >= 1 and timestamp_list()
+    requires a non-empty list -- but a hand-built DataTimestamps can still carry a zero-count SamplingClock or an
+    empty TimestampList, and both report their oneof arm as set.  Rejecting them keeps this in step with
+    expand_data_timestamps(), which applies the same rule on the read path.
+
     :param timestamps: The time axis to measure.
     :return: The number of timestamps on the axis.
-    :raises ValueError: if neither axis form is set.
+    :raises ValueError: if neither axis form is set, or if the axis describes no timestamps.
     """
     axis = timestamps.WhichOneof("value")
     if axis == "samplingClock":
-        return timestamps.samplingClock.count
+        count = timestamps.samplingClock.count
+        if count < 1:
+            raise ValueError(f"DataTimestamps samplingClock requires count >= 1, got {count}")
+        return count
     if axis == "timestampList":
-        return len(timestamps.timestampList.timestamps)
+        count = len(timestamps.timestampList.timestamps)
+        if count < 1:
+            raise ValueError("DataTimestamps timestampList requires at least one timestamp, got an empty list")
+        return count
     raise ValueError("DataTimestamps must specify either a samplingClock or a timestampList")
 
 

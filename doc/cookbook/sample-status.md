@@ -8,8 +8,8 @@ data with the flagged samples left out.
 
 See [API conventions](conventions.md) for result checking, paging, and time handling.
 
-All examples use `client.annotation.sample_status`, which is `None` unless an annotation channel
-is configured.
+All examples use `client.annotation.sample_status`.  Note that `client.annotation` itself is `None`
+unless an annotation channel is configured, so guard on `client.annotation` before reaching through it.
 
 ### Imports used by the examples
 
@@ -284,8 +284,10 @@ being deliberate about: an unlabeled sample **does not match** the filter. So `e
 (you remove only what was explicitly flagged) and `include()` drops it (you narrow to explicitly
 labeled samples only). `exclude()` is almost always what you want for analysis.
 
-There is no `MODE_UNSPECIFIED` to fall into — `include()` and `exclude()` are the only ways to
-build a filter, and the server rejects an unspecified mode.
+There is no `MODE_UNSPECIFIED` to fall into — `include()` and `exclude()` are the ways to build a
+filter, and the server rejects an unspecified mode. If you hand-build a `SampleStatusSelector`
+instead, `QueryParams` rejects an empty domain or an unspecified mode up front rather than letting
+the request reach the server.
 
 ## Correcting and retracting
 
