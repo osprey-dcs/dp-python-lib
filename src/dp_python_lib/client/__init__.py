@@ -10,6 +10,26 @@ from dp_python_lib.client.annotations_client import (
     SaveAnnotationRequestParams,
     calculations,
 )
+
+# NOTE: the data_frame() *function* is deliberately NOT re-exported here.  Binding that name in the package
+# namespace would shadow the data_frame *module*, so both `from dp_python_lib.client import data_frame` and
+# `import dp_python_lib.client.data_frame` would hand back the function instead of the module -- breaking the
+# documented `from dp_python_lib.client import data_frame as dfb` usage.  Reach it as dfb.data_frame(...).
+from dp_python_lib.client.data_frame import (
+    bool_column,
+    calculations_source,
+    column_metadata,
+    data_column,
+    double_column,
+    enum_column,
+    float_column,
+    int32_column,
+    int64_column,
+    provenance,
+    pv_source,
+    string_column,
+    timestamp_count,
+)
 from dp_python_lib.client.dataset_client import (
     DataSetClient,
     DataSetQuery,
@@ -142,10 +162,23 @@ __all__ = [
     "SavePvMetadataRequestParams",
     "SaveSampleStatusesApiResult",
     "SaveSampleStatusesRequestParams",
+    "bool_column",
     "calculations",
+    "calculations_source",
     "calculations_spec",
+    "column_metadata",
     "data_block",
+    "data_column",
+    "double_column",
+    "enum_column",
+    "float_column",
+    "int32_column",
+    "int64_column",
+    "provenance",
+    "pv_source",
     "sampling_clock",
+    "string_column",
+    "timestamp_count",
     "timestamp_list",
     "to_timestamp",
 ]

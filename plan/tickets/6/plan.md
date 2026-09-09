@@ -36,6 +36,14 @@
   dp-service `fddf692` (annotation on `localhost:50053`, ingestion on `:50051`): 18 tests, 12 subtests.  Writing it
   surfaced one further server behavior the triage had not found — `saveDataSet` requires its PVs to exist in the
   archive — now recorded in section 3 and in `CLAUDE.md`.
+- **Phases 2 and 3 implemented 2026-09-09.**  `data_frame.py` (axis builders relocated from `sample_status_client`
+  and re-exported, typed scalar column builders, the `data_column()` escape hatch, provenance helpers, and
+  `data_frame()` assembly with the server's shape rules checked client-side) and `data_frame_conversions.py` (the
+  pure-Python read side plus the pandas bridges behind `[analysis]`).  87 new unit tests; 657 total with the extra
+  installed, 601 passing and 56 skipping cleanly without it (verified in a venv that has no pandas).  One naming
+  collision surfaced and was resolved: the `data_frame()` *function* is deliberately not re-exported from
+  `dp_python_lib.client`, because binding that name would shadow the `data_frame` *module* and break the
+  `from dp_python_lib.client import data_frame as dfb` form this plan's own reference snippet uses.
 
 ## Overview
 
