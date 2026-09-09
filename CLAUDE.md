@@ -155,6 +155,8 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `src/dp_python_lib/client/sample_status_conversions.py` - Per-sample expansion of query results (no optional extras required): `expand_data_timestamps()` (SamplingClock positions computed in **integer nanoseconds**, never float seconds — the exact-match contract depends on it), `bucket_to_rows()` / `buckets_to_rows()` / `iter_rows()` yielding `SampleStatusRow` objects with absent confidence/reason surfaced as `None` rather than fabricated `0.0`/`""`
 - `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `src/dp_python_lib/client/query_conversions.py` - Pythonic conversions for query results (optional `[analysis]` extra: pandas/numpy/openpyxl, imported lazily). `data_value_to_python()` (oneof extractor: scalars→native, timestamp→epoch-nanos, array→list, structure→dict, image→`Image` wrapper, fail-loud on unhandled arm), `column_table_to_dataframe()` (UTC datetime index + one column per DataColumn; dense-alignment and duplicate-column-name fail-loud; ColumnMetadata in `df.attrs`), `column_table_to_numpy()` (dict of 1-D arrays; complex arms stay 1-D object arrays rather than collapsing to 2-D), `dataframe_to_excel()` (thin `to_excel()` wrapper: row-limit guard, tz-drop, complex-cell stringification), and `query_samples_to_dataframe()`/`stream_query_samples_to_dataframes()` whole-query conveniences (unary concats by column name; streaming yields per-page frames lazily)
+- `src/dp_python_lib/client/service_api_client_base.py` - Base class for the service clients: owns the channel and the one-per-client gRPC stub, and provides `_dispatch()`, the shared three-tier sender that all 18 unary `_send_*` methods delegate to
+- `tests/unit/test_service_api_client_base.py` - Unit tests for `_dispatch` itself (success, business error, unrecognized response, `RpcError` with and without a resolvable `code()`, unexpected exception, and the `request_log`/`success_log` hooks)
 - `tests/unit/test_ingestion_client.py` - Unit tests for IngestionClient functionality
 - `tests/unit/test_pv_metadata_client.py` - Unit tests for PvMetadataClient functionality
 - `tests/unit/test_machine_config_client.py` - Unit tests for the Configuration side of MachineConfigClient
@@ -180,6 +182,31 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - Service clients extend `ServiceApiClientBase`, which is constructed with `(channel, stub_class)` and
   creates the gRPC stub **once** at init time, stored as `self._stub`.  `_send_*` methods reuse
   `self._stub` rather than creating a new stub per call.
+- **Every unary `_send_*` method delegates to `ServiceApiClientBase._dispatch()`** rather than writing
+  the three-tier block out by hand (issue #14; `plan/tickets/14/plan.md`).  A sender is now the call
+  itself plus its log messages:
+  ```python
+  def _send_query_pv_metadata(self, request: annotation_pb2.QueryPvMetadataRequest) -> QueryPvMetadataApiResult:
+      return self._dispatch(
+          self._stub.queryPvMetadata,        # the bound stub method
+          request,
+          QueryPvMetadataApiResult,          # result class; all take (is_error, message, response)
+          "pvMetadataResult",                # the success oneof field
+          "queryPvMetadata",                 # op name, used in log and error messages
+          request_log=lambda: self.logger.info(
+              "Calling queryPvMetadata API with %d criteria", len(request.criteria)),
+          success_log=lambda response: self.logger.info(
+              "QueryPvMetadata returned %d records", len(response.pvMetadataResult.pvMetadata)),
+      )
+  ```
+  `request_log` / `success_log` are optional: omit them and `_dispatch` logs a generic
+  `"Calling <op> API"` / `"<op> completed successfully"`.  Pass one whenever the message names the
+  entity or reports a count off the response — that detail is the reason the parameters exist, and
+  nothing in the test suite asserts on log content, so a dropped message fails silently.
+- **The server-streaming senders deliberately do not use `_dispatch`.**
+  `_send_query_samples_stream()` and `_send_query_sample_statuses_stream()` *yield* one result per
+  streamed message — error results included, for the public `iter_*` wrapper to convert into a
+  `RuntimeError` — which is a different contract from returning a single result.  Leave them as they are.
 - Where one gRPC service backs several feature areas (e.g. `DpAnnotationService` covers PV metadata,
   machine configuration, and annotations), use a lightweight facade (`AnnotationClient`) that owns the
   shared channel and exposes feature-scoped clients as attributes (`annotation.pv_metadata`).  This
@@ -187,12 +214,24 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 
 ### gRPC Error Handling
 - Use **synchronous gRPC calls** with `DpIngestionServiceStub` for simplicity
-- Implement **three-tier error handling**:
+- **Three-tier error handling**, implemented once in `ServiceApiClientBase._dispatch()` and inherited by
+  every unary sender (see the Client Implementation Pattern above):
   1. **gRPC Exceptions** (`grpc.RpcError`) - network/connection errors
   2. **Business Logic Errors** - check response `exceptionalResult` field
   3. **General Exceptions** - unexpected errors
+- A response carrying neither `exceptionalResult` nor the expected success field is itself an error, so an
+  unrecognized response shape is never mistaken for a success.
 - Check protobuf union fields with `response.HasField('fieldName')`
 - Return consistent result objects with `is_error` flag and appropriate messages
+- The error-message text is part of the contract — roughly 40 unit tests match on it with `assertIn`.
+  `_dispatch` produces `f"gRPC error: {e.details()}"`, `f"Unexpected error: {e!s}"`, and
+  `f"Unexpected response format: neither exceptionalResult nor {success_field} found"`.
+- When logging an `RpcError`, `_dispatch` includes `e.code()` only when it resolves: a bare
+  `grpc.RpcError()`, which is what the test mocks raise, has no usable code.
+- `_dispatch` names the operation with the raw camelCase `op_name` in all three error-log tiers.  The
+  hand-written senders capitalized it in the business-error warning only (`SavePvMetadata API returned
+  business error`), while their other two error logs already used camelCase; the refactor dropped that
+  one inconsistency deliberately.  Log text only -- returned messages are unchanged.
 
 ### Testing Best Practices
 - Use `@patch` decorators to mock gRPC stubs and avoid real network calls

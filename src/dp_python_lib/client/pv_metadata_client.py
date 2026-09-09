@@ -313,35 +313,15 @@ class PvMetadataClient(ServiceApiClientBase):
         :param request: SavePvMetadataRequest with parameters for the call.
         :return: A SavePvMetadataApiResult with the method response and status information.
         """
-        self.logger.info("Calling savePvMetadata API for PV: %s", request.pvName)
-
-        try:
-            self.logger.debug("Invoking stub.savePvMetadata with request")
-            response = self._stub.savePvMetadata(request)
-            self.logger.debug("Received response from savePvMetadata API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("SavePvMetadata API returned business error: %s", error_msg)
-                return SavePvMetadataApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("savePvMetadataResult"):
-                self.logger.info("Successfully saved PV metadata for: %s", request.pvName)
-                return SavePvMetadataApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor savePvMetadataResult found"
-                self.logger.error(error_msg)
-                return SavePvMetadataApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during savePvMetadata: %s", e.details())
-            return SavePvMetadataApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during savePvMetadata: %s", str(e))
-            return SavePvMetadataApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.savePvMetadata,
+            request,
+            SavePvMetadataApiResult,
+            "savePvMetadataResult",
+            "savePvMetadata",
+            request_log=lambda: self.logger.info("Calling savePvMetadata API for PV: %s", request.pvName),
+            success_log=lambda _response: self.logger.info("Successfully saved PV metadata for: %s", request.pvName),
+        )
 
     def save_pv_metadata(self, request_params: SavePvMetadataRequestParams) -> SavePvMetadataApiResult:
         """
@@ -382,35 +362,17 @@ class PvMetadataClient(ServiceApiClientBase):
         :param request: GetPvMetadataRequest with parameters for the call.
         :return: A GetPvMetadataApiResult with the method response and status information.
         """
-        self.logger.info("Calling getPvMetadata API for: %s", request.pvNameOrAlias)
-
-        try:
-            self.logger.debug("Invoking stub.getPvMetadata with request")
-            response = self._stub.getPvMetadata(request)
-            self.logger.debug("Received response from getPvMetadata API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("GetPvMetadata API returned business error: %s", error_msg)
-                return GetPvMetadataApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("getPvMetadataResult"):
-                self.logger.info("Successfully retrieved PV metadata for: %s", request.pvNameOrAlias)
-                return GetPvMetadataApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor getPvMetadataResult found"
-                self.logger.error(error_msg)
-                return GetPvMetadataApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during getPvMetadata: %s", e.details())
-            return GetPvMetadataApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during getPvMetadata: %s", str(e))
-            return GetPvMetadataApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.getPvMetadata,
+            request,
+            GetPvMetadataApiResult,
+            "getPvMetadataResult",
+            "getPvMetadata",
+            request_log=lambda: self.logger.info("Calling getPvMetadata API for: %s", request.pvNameOrAlias),
+            success_log=lambda _response: self.logger.info(
+                "Successfully retrieved PV metadata for: %s", request.pvNameOrAlias
+            ),
+        )
 
     def get_pv_metadata(self, pv_name_or_alias: str) -> GetPvMetadataApiResult:
         """
@@ -462,35 +424,17 @@ class PvMetadataClient(ServiceApiClientBase):
         :param request: QueryPvMetadataRequest with parameters for the call.
         :return: A QueryPvMetadataApiResult with the method response and status information.
         """
-        self.logger.info("Calling queryPvMetadata API with %d criteria", len(request.criteria))
-
-        try:
-            self.logger.debug("Invoking stub.queryPvMetadata with request")
-            response = self._stub.queryPvMetadata(request)
-            self.logger.debug("Received response from queryPvMetadata API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("QueryPvMetadata API returned business error: %s", error_msg)
-                return QueryPvMetadataApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("pvMetadataResult"):
-                self.logger.info("QueryPvMetadata returned %d records", len(response.pvMetadataResult.pvMetadata))
-                return QueryPvMetadataApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor pvMetadataResult found"
-                self.logger.error(error_msg)
-                return QueryPvMetadataApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during queryPvMetadata: %s", e.details())
-            return QueryPvMetadataApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during queryPvMetadata: %s", str(e))
-            return QueryPvMetadataApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.queryPvMetadata,
+            request,
+            QueryPvMetadataApiResult,
+            "pvMetadataResult",
+            "queryPvMetadata",
+            request_log=lambda: self.logger.info("Calling queryPvMetadata API with %d criteria", len(request.criteria)),
+            success_log=lambda response: self.logger.info(
+                "QueryPvMetadata returned %d records", len(response.pvMetadataResult.pvMetadata)
+            ),
+        )
 
     def query_pv_metadata(
         self,
@@ -566,35 +510,17 @@ class PvMetadataClient(ServiceApiClientBase):
         :param request: DeletePvMetadataRequest with parameters for the call.
         :return: A DeletePvMetadataApiResult with the method response and status information.
         """
-        self.logger.info("Calling deletePvMetadata API for: %s", request.pvNameOrAlias)
-
-        try:
-            self.logger.debug("Invoking stub.deletePvMetadata with request")
-            response = self._stub.deletePvMetadata(request)
-            self.logger.debug("Received response from deletePvMetadata API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("DeletePvMetadata API returned business error: %s", error_msg)
-                return DeletePvMetadataApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("deletePvMetadataResult"):
-                self.logger.info("Successfully deleted PV metadata for: %s", request.pvNameOrAlias)
-                return DeletePvMetadataApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor deletePvMetadataResult found"
-                self.logger.error(error_msg)
-                return DeletePvMetadataApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during deletePvMetadata: %s", e.details())
-            return DeletePvMetadataApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during deletePvMetadata: %s", str(e))
-            return DeletePvMetadataApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.deletePvMetadata,
+            request,
+            DeletePvMetadataApiResult,
+            "deletePvMetadataResult",
+            "deletePvMetadata",
+            request_log=lambda: self.logger.info("Calling deletePvMetadata API for: %s", request.pvNameOrAlias),
+            success_log=lambda _response: self.logger.info(
+                "Successfully deleted PV metadata for: %s", request.pvNameOrAlias
+            ),
+        )
 
     def delete_pv_metadata(self, pv_name_or_alias: str) -> DeletePvMetadataApiResult:
         """

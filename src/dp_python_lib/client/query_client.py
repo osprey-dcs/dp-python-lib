@@ -588,35 +588,14 @@ class QueryClient(ServiceApiClientBase):
         :param request: QuerySamplesRequest with parameters for the call.
         :return: A QuerySamplesApiResult with the method response and status information.
         """
-        self.logger.info("Calling querySamples API")
-
-        try:
-            self.logger.debug("Invoking stub.querySamples with request")
-            response = self._stub.querySamples(request)
-            self.logger.debug("Received response from querySamples API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("QuerySamples API returned business error: %s", error_msg)
-                return QuerySamplesApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("sampleQueryResult"):
-                self.logger.info("QuerySamples returned a result page")
-                return QuerySamplesApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor sampleQueryResult found"
-                self.logger.error(error_msg)
-                return QuerySamplesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during querySamples: %s", e.details())
-            return QuerySamplesApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during querySamples: %s", str(e))
-            return QuerySamplesApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.querySamples,
+            request,
+            QuerySamplesApiResult,
+            "sampleQueryResult",
+            "querySamples",
+            success_log=lambda _response: self.logger.info("QuerySamples returned a result page"),
+        )
 
     def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:
         """
