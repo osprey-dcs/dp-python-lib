@@ -97,6 +97,42 @@ Optional extras:
 - `[analysis]` - `pandas`, `numpy`, `openpyxl` for the query-result conversions
 - `[dev]` - `pytest`, `mypy`, `ruff`; install with `pip install -e ".[analysis,dev]"`
 
+## Ticket Planning Workflow
+
+Every non-trivial ticket gets a **version-controlled plan** at `plan/tickets/<issue>/plan.md`, the
+same convention dp-grpc and dp-service use (see `plan/README.md`).  This replaces the older practice
+of keeping plans in the gitignored `.dev/plan/issue-<n>/` directory — plans there were invisible to
+reviewers, to CI, and to anyone working from a fresh clone.  `.dev/` remains in `.gitignore` and still
+holds scratch material and the cookbook snippet checker; do not add new ticket plans there.
+
+Scratch and draft material stays outside the repo, under `~/dp/dev/tickets/dp-python-lib/<issue>/`.
+The distinction is intent, not format: a draft being iterated on is scratch; the plan the
+implementation will be reviewed against belongs under `plan/tickets/`.
+
+**Triage before planning.**  Verify the ticket's stated premises against the code, the generated
+stubs, and the upstream repos before writing the plan.  Two things are specific to this repo: the
+stubs in `src/dp_python_lib/grpc/` may lag dp-grpc `main` (check the last `grpc-sync-*` PR against
+the upstream merge dates), and server behavior lives in dp-service, whose `plan/tickets/` records
+say what the handlers actually do.  Where triage contradicts the ticket, update the issue description
+and say so explicitly in the plan's Background section rather than silently planning around it.
+
+**Plan structure** (see `plan/tickets/6/plan.md` for a worked example):
+
+- **Overview** — what the ticket delivers, and for whom.
+- **Background / triage findings** — verified facts, especially anything that contradicts the issue
+  as filed; for this repo that includes the authoritative message shapes introspected from the
+  regenerated stubs and the server behaviors the client must encode.
+- **Design decisions** — the choices a reviewer would otherwise have to reverse-engineer, each with
+  its rationale and the alternative that was rejected.
+- **Implementation tasks** — per file, concrete enough to execute without re-deriving the design.
+- **Out of scope** — with a pointer to the ticket that owns each excluded item.
+- **Dependencies and sequencing** — what blocks on what, and explicitly what does *not*.
+- **Open questions** — each with context and a recommendation, resolved in place (dated) before
+  implementation starts.
+
+Record findings that outlive the ticket in this file rather than leaving them only in the plan: a
+plan documents one change, `CLAUDE.md` documents the invariant it established.
+
 ## Architecture Notes
 
 - The `grpc/` directory contains auto-generated code from Protocol Buffer definitions
@@ -426,8 +462,9 @@ Notes:
   `serializedDataColumns` raises `NotImplementedError` in the conversion layer.
 - `DataValue` mapping: scalars→native dtypes, `timestampValue`→`datetime64[ns, UTC]`, integer columns with gaps
   upcast to `float64`; complex arms preserved losslessly (`arrayValue`→list, `structureValue`→dict,
-  `byteArrayValue`→bytes, `imageValue`→`Image(data, file_type)`); an unhandled oneof arm raises.  `valueStatus`
-  is ignored (never populated in `querySamples()` results).  Per-column `ColumnMetadata` lands in
+  `byteArrayValue`→bytes, `imageValue`→`Image(data, file_type)`); an unhandled oneof arm raises.  `DataValue.valueStatus`
+  no longer exists: it was removed in dp-grpc 1.16.0 (field 15 reserved) in favor of the sample status API, and was
+  never populated in `querySamples()` results before that.  Per-column `ColumnMetadata` lands in
   `df.attrs["column_metadata"]` unless `exclude_column_metadata=True`.
 - Both conversions key columns by `DataColumn.name`, so a `ColumnTable` carrying two columns with the same name
   raises `ValueError` rather than silently dropping the earlier one.  `column_table_to_numpy()` always returns
@@ -444,7 +481,7 @@ Sample status methods are exposed under the `annotation` facade at `client.annot
 assigns an int32 status code to **one PV sample at one instant**; the identity key is `(pvName, timestamp, domain, layer)`.
 `domain` names the status-code semantics contract (EnumColumn-style — not validated by MLDP); `layer` names the producer
 stream, so an operator override and a model's guess coexist without colliding.  This is the designated replacement for
-the deprecated `DataValue.ValueStatus` mechanism.
+the former `DataValue.ValueStatus` mechanism, which was removed in dp-grpc 1.16.0 (field 15 reserved).
 
 Two model properties drive the whole design:
 - **Absence means "no assertion."**  There is no implicit default status; labeling three samples says nothing about the

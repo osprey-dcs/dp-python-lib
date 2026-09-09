@@ -9,6 +9,8 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from assignment_spy import watch_assignments
+
 from dp_python_lib.client.machine_config_client import (
     ConfigurationQuery,
     MachineConfigClient,
@@ -203,9 +205,11 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
         self.assertEqual(request.pageToken, "")
 
     def test_build_query_request_limit_zero_is_set(self):
-        # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression.
-        request = self.client._build_query_configurations_request([ConfigurationQuery.tags(["x"])], limit=0)
-        self.assertEqual(request.limit, 0)
+        # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression (#13).
+        # A proto3 scalar reads 0 whether or not it was assigned, so watch the assignment itself.
+        with watch_assignments(annotation_pb2, "QueryConfigurationsRequest", "limit") as assigned:
+            self.client._build_query_configurations_request([ConfigurationQuery.tags(["x"])], limit=0)
+        self.assertEqual(assigned, [0], "limit=0 must be assigned, not dropped by a truthiness guard")
 
 
 class TestSaveConfiguration(unittest.TestCase):

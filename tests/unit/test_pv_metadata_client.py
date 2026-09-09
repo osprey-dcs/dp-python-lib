@@ -8,6 +8,8 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from assignment_spy import watch_assignments
+
 from dp_python_lib.client.pv_metadata_client import (
     DeletePvMetadataApiResult,
     GetPvMetadataApiResult,
@@ -73,6 +75,18 @@ class TestPvMetadataClientBuildRequests(unittest.TestCase):
     def test_build_delete_request(self):
         request = self.client._build_delete_pv_metadata_request("alias-1")
         self.assertEqual(request.pvNameOrAlias, "alias-1")
+
+    def test_build_query_request_limit_zero_is_set(self):
+        # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression (#13).
+        # A proto3 scalar reads 0 whether or not it was assigned, so watch the assignment itself.
+        with watch_assignments(annotation_pb2, "QueryPvMetadataRequest", "limit") as assigned:
+            self.client._build_query_pv_metadata_request([PvMetadataQuery.tags(["x"])], limit=0)
+        self.assertEqual(assigned, [0], "limit=0 must be assigned, not dropped by a truthiness guard")
+
+    def test_build_query_request_limit_omitted_is_unset(self):
+        with watch_assignments(annotation_pb2, "QueryPvMetadataRequest", "limit") as assigned:
+            self.client._build_query_pv_metadata_request([PvMetadataQuery.tags(["x"])])
+        self.assertEqual(assigned, [], "an omitted limit must not be assigned")
 
     def test_build_query_request(self):
         criteria = [

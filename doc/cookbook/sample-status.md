@@ -75,8 +75,8 @@ integer arithmetic on a `SamplingClock`.  A timestamp that has been rounded, or 
 round-trip through a float, will silently match nothing.  This is the single most common way to
 get a save that "succeeds" and a query that returns nothing.
 
-> Sample status replaces the deprecated `DataValue.ValueStatus` mechanism.  `valueStatus` is never
-> populated in `querySamples()` results; use this API instead.
+> Sample status replaces the former `DataValue.ValueStatus` mechanism, which was removed in dp-grpc
+> 1.16.0 (field 15 is reserved).  It was never populated in `querySamples()` results; use this API.
 
 ## Labeling a few bad samples
 
