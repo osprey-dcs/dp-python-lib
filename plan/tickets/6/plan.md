@@ -22,6 +22,15 @@
   grpcio floor raised to 1.83.1), #13 closed, follow-ups #40 / #41 filed, #14 sequenced first, and the planning
   convention, the `valueStatus` rewording, and the `limit=0` test fix landed in #42.  This is the first plan under
   the `plan/tickets/<N>/` convention in this repo (previous plans lived in the gitignored `.dev/plan/`).
+  **Phase 0 is complete**: #14 merged as `a0ce121`, so nothing blocks Phase 1.
+- **Re-triaged 2026-09-09** before implementation, against the merged stubs and the upstream sources at the commits
+  above (unchanged since the plan was written).  Every message shape in [section 2](#2-authoritative-message-shapes-from-the-regenerated-stubs)
+  was re-introspected from the committed stubs and matches; the `TextCriterion`, key-only-`attributes`, export
+  one-source, `EXPORT_FORMAT_UNSPECIFIED`, and calculations-validation behaviors in
+  [section 3](#3-server-behaviors-the-client-must-encode-dp-service-248-verified-against-the-merged-prs) were
+  re-verified in the dp-service Java source rather than taken from the ticket.  Four things the first pass missed
+  were folded in: the delete-not-found tier, the absent server-side `begin < end` check, the epoch-0 `SamplingClock`
+  rejection (all three now rows in section 3), and the redundant-`count` question (resolved in D6).
 
 ## Overview
 
@@ -154,6 +163,9 @@ attributes a reader of this table might reach for do not exist.
 | Criteria AND across the list, OR within a criterion; **at most one `TextCriterion` per request** (a second is a validation `REJECT`, since two `$text` clauses cannot be ANDed) | client-side `ValueError` naming the rule is cheap and matches the "fail with a message naming the problem" posture (Q7) |
 | Blank criterion values are rejected server-side; `IdCriterion` ids and get/delete ids must be valid ObjectIds (malformed → `REJECT`, not "not found") | helpers reject empty inputs as usual; no ObjectId validation client-side (format is a server implementation detail) |
 | `getDataSet` / `getAnnotation` / `getCalculations` not-found → `ExceptionalResult` | same "business error" tier as `get_pv_metadata` |
+| `deleteDataSet` / `deleteAnnotation` **not-found is also a `REJECT`**, not a silent success (`DeleteAnnotationDispatcher:34-36`, "no Annotation record found for id: …") | same business-error tier, so no code change — but the cookbook teardown and the integration test's delete-twice leg must expect an error result on the second delete, not a success |
+| `DataBlock` validation is **only** `beginTime.epochSeconds >= 1`, `endTime.epochSeconds >= 1`, and a non-empty `pvNames` (`AnnotationValidationUtility.validateDataBlock`) — the server never checks `begin < end` | D4's client-side `begin < end` check is the *only* one there is, not a duplicate of a server check.  A reversed block is accepted today, which is also why the proto's silence on half-openness is a real ambiguity rather than a documentation gap |
+| A `SamplingClock` axis must have `startTime.epochSeconds != 0` as well as non-zero `periodNanos` and `count` (`validateCalculationsDataFrame`) | an epoch-0 start time is **rejected**: fixtures must not build a calculations axis from `datetime(1970, 1, 1)`.  `sampling_clock()` does not check this (it has no reason to — the sample-status axis has no such rule), so it is a fixture discipline, not a builder change |
 | `deleteDataSet` rejected while referenced; message names one referencing annotation id plus the total count | surface verbatim; no client-side cascade (decision D8) |
 | `deleteAnnotation` deletes the annotation first, then its calculations; incoming `annotationIds` / `derivedFrom` links dangle | readers must tolerate dangling ids — document, do not resolve |
 | `saveAnnotation` full-replace **includes calculations**: omitting them clears (and deletes) the stored object; a replaced object is deleted; the result returns the new `calculationsId` | params carry `calculations` explicitly; the cookbook's update recipe reads with `get_annotation()` and resends |
@@ -246,7 +258,8 @@ annotation has none); `QueryAnnotationsApiResult.annotations` + `next_page_token
 **D6 — A shared `common.DataFrame` builder module, sized for what calculations need and shaped for #17.**
 New `client/data_frame.py` (no optional dependencies):
 
-- axis: `sampling_clock()` / `timestamp_list()` move here (re-exported from `sample_status_client`);
+- axis: `sampling_clock()` / `timestamp_list()` move here (re-exported from `sample_status_client`), with their
+  signatures unchanged — see the count note below;
 - typed scalar columns: `double_column(name, values, metadata=None)`, `float_column`, `int64_column`,
   `int32_column`, `bool_column`, `string_column`, `enum_column(name, values, enum_id, metadata=None)`;
 - `data_column(name, values, metadata=None)` — the legacy `DataColumn` escape hatch, where a `None` entry is a
@@ -265,6 +278,17 @@ once, with ingestion data in hand.  `ingestion.proto`'s `ingestionDataFrame` *is
 module is the substrate #17 extends rather than a parallel one.  `calculations(frames: dict[str,
 common_pb2.DataFrame]) -> annotation_pb2.Calculations` lives in `annotations_client.py`; taking a dict makes
 frame-name uniqueness true by construction.  (Q4, resolved as proposed.)
+
+*On the redundant `count` (triage, 2026-09-09).*  `sampling_clock(start, period, count)` makes every calculations
+call site restate a number it already has — `sampling_clock(t0, period, count=len(values))` — so a mismatch between
+axis and column becomes a `data_frame()` `ValueError` rather than being unrepresentable.  A `data_frame()` that took
+a `(start_time, period_nanos)` pair and derived the count from the columns would remove that.  **Rejected**, for two
+reasons.  It would fork the axis API by caller: `sample_status_client` genuinely knows its count independently (it
+labels a subset of an archived clock the client did not produce), so the count-bearing form has to stay, and a second
+derived form beside it means two ways to say the same thing.  And `SampleStatusFrame` already set the house precedent
+for exactly this shape — an explicit `data_timestamps` plus per-column validation against it — so `data_frame()`
+matching it is what a reader of one will expect of the other.  The redundancy is real but cheap, and it is caught
+client-side with a message naming the column.  Decided now because the signature is breaking to change later.
 
 **D7 — Read side: typed columns → Python, then → pandas, sharing one converter with #16.**
 New `client/data_frame_conversions.py`: `data_frame_timestamps(frame) -> list[int]` (epoch nanos, via
@@ -352,7 +376,8 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
   dataset → get → query by id / owner / pv name / tag (asserting the lowercase-normalized tag) → save annotation
   with a hand-built `Calculations` → `get_annotation` (calculations inline, `dataSetIds` ids-only) →
   `get_calculations` → `query_annotations([AQ.datasets([...])])` (calculations empty, id present) →
-  `delete_dataset` rejected while referenced → `delete_annotation` → `delete_dataset` → paging across a
+  `delete_dataset` rejected while referenced → `delete_annotation` → `delete_dataset` → deleting either a second
+  time is a business *error*, not a success (finding above) → paging across a
   run-unique tag with `limit=1` → malformed page token is a business error.  Everything written is deleted, keyed
   by a run-unique owner id.  The builder, pandas, and export legs are added in Phase 4.
 
