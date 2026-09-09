@@ -72,7 +72,11 @@ proto-only) gives:
 
 - **7 RPCs added** — `getDataSet`, `deleteDataSet`, `patchDataSet`, `getAnnotation`, `deleteAnnotation`,
   `patchAnnotation`, `getCalculations`; none removed; 37 total.
-- **Only three files change**: `annotation_pb2.py`, `annotation_pb2_grpc.py`, `common_pb2.py`.
+- **Only three files change in substance**: `annotation_pb2.py`, `annotation_pb2_grpc.py`, `common_pb2.py`.
+  The actual sync run (#39, 2026-09-09) touched seven, because the runner's grpcio-tools was 1.83.1 and
+  re-stamped `GRPC_GENERATED_VERSION` in every `*_pb2_grpc.py` — a two-line banner change per file that also
+  raises the stubs' import-time grpcio requirement.  The `pyproject.toml` floor moved to 1.83.1 on the sync
+  branch (the drift `cbe9631` fixed for the #8 sync; inspect every `grpc-sync-*` PR for it).
 - **All 406 existing unit tests pass unchanged** against the regenerated stubs (run from a scratch copy of the
   repo with the stub directory swapped).  No shipped client touches datasets, annotations, or export, and the
   `ValueStatus` removal reaches this repo only as prose: `query_conversions.py:14` (docstring), `CLAUDE.md`,
@@ -301,7 +305,8 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
 ### Phase 0 — prerequisites (own PRs, before the feature branch)
 
 1. **Stub sync.**  Dispatch `generate-python-stubs.yml` on dp-grpc `main` with `dry_run=false` (done 2026-09-09,
-   run 34382676119), verify the `grpc-sync-*` PR against a local generation (three files, per finding 1), merge.  In the same
+   run 34382676119 → #39), verify the `grpc-sync-*` PR against a local generation and bump the grpcio floor to
+   match the re-stamped banners (finding 1), merge.  In the same
    PR or a trailing docs commit, reword the four `valueStatus` mentions ("removed in dp-grpc 1.16.0, field 15
    reserved").
 2. **#14 `_dispatch` extraction**, its own PR (Q3).
