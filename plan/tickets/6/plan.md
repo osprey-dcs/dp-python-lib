@@ -17,10 +17,11 @@
   (D1–D33).
 - **Status**: written 2026-09-09 against dp-grpc `6dfff3f` and dp-service `fddf692`; open questions Q1–Q11
   resolved the same day (every recommendation accepted — see [Open questions](#open-questions-resolved-2026-09-09)).
-  Phase 0 started the same day: stub sync dispatched (dp-grpc run
-  [34382676119](https://github.com/osprey-dcs/dp-grpc/actions/runs/34382676119)), #13 closed, follow-ups #40 / #41
-  filed, #14 sequenced first.  This is the first plan under the `plan/tickets/<N>/` convention in this repo
-  (previous plans lived in the gitignored `.dev/plan/`).
+  Phase 0 completed the same day except for #14: the stub sync (dp-grpc run
+  [34382676119](https://github.com/osprey-dcs/dp-grpc/actions/runs/34382676119)) merged as #39 (`b6d0b37`, with the
+  grpcio floor raised to 1.83.1), #13 closed, follow-ups #40 / #41 filed, #14 sequenced first, and the planning
+  convention, the `valueStatus` rewording, and the `limit=0` test fix landed in #42.  This is the first plan under
+  the `plan/tickets/<N>/` convention in this repo (previous plans lived in the gitignored `.dev/plan/`).
 
 ## Overview
 
@@ -101,7 +102,7 @@ DataSet      : id, name, ownerId, description, dataBlocks[], tags[], attributes[
 DataBlock    : beginTime, endTime (two Timestamps -- NOT a TimeRange), pvNames[]
 Annotation   : id, ownerId, dataSetIds[], name, annotationIds[], description, tags[], attributes[],
                calculationsId, calculations (populated by getAnnotation ONLY), createdTime, updatedTime, modifiedBy
-Calculations : id (ignored on save), calculationDataFrames[] of CalculationsDataFrame { name, frame: common.DataFrame }
+Calculations : id (ignored on save), calculationDataFrames[] of Calculations.CalculationsDataFrame { name, frame: common.DataFrame }
 common.DataFrame : dataTimestamps (SamplingClock | TimestampList), dataColumns[] (legacy DataColumn escape hatch),
                serializedDataColumns[], and 14 typed repeated fields: doubleColumns, floatColumns, int64Columns,
                int32Columns, boolColumns, stringColumns, enumColumns, imageColumns, structColumns,
@@ -109,9 +110,10 @@ common.DataFrame : dataTimestamps (SamplingClock | TimestampList), dataColumns[]
 typed scalar column : name, values[], metadata (ColumnMetadata); EnumColumn adds enumId
 array column : name, dimensions (ArrayDimensions{dims[]}), values[] (flat, samples x prod(dims)), metadata
 ColumnMetadata : provenance (ColumnProvenance), tags[], attributes[]
-ColumnProvenance : source, process, derivedFrom[] of ColumnSource { oneof origin: pvName | calculationsColumn
-               {calculationsId, frameName, columnName}; timeRange (optional) }
-CalculationsSpec : calculationsId, dataFrameColumns: map<frameName, ColumnNameList{columnNames[]}>
+ColumnProvenance : source, process, derivedFrom[] of ColumnProvenance.ColumnSource { oneof origin: pvName |
+               calculationsColumn: ColumnProvenance.CalculationsColumn {calculationsId, frameName, columnName};
+               timeRange (optional) }
+CalculationsSpec : calculationsId, dataFrameColumns: map<frameName, CalculationsSpec.ColumnNameList{columnNames[]}>
 
 SaveDataSetRequest    : id, name, ownerId, description, dataBlocks[], tags[], attributes[], modifiedBy   (flat)
 SaveDataSetResponse   : saveDataSetResult { dataSetId }
@@ -136,7 +138,11 @@ DataValue             : valueStatus is GONE (field 15 reserved)
 
 Two naming traps carried over from the Java cookbook: the `Calculations` list field is `calculationDataFrames`
 (singular "calculation") while the message is `CalculationsDataFrame` (plural); and `Attribute` keys the pair
-with `name`, whereas the query-side `AttributesCriterion` uses `key`.
+with `name`, whereas the query-side `AttributesCriterion` uses `key`.  A third, from the generated Python:
+`CalculationsDataFrame`, `ColumnSource`, `CalculationsColumn`, and `ColumnNameList` are *nested* messages
+(`annotation_pb2.Calculations.CalculationsDataFrame`, `common_pb2.ColumnProvenance.ColumnSource`,
+`common_pb2.ColumnProvenance.CalculationsColumn`, `common_pb2.CalculationsSpec.ColumnNameList`), so the module-level
+attributes a reader of this table might reach for do not exist.
 
 ### 3. Server behaviors the client must encode (dp-service #248, verified against the merged PRs)
 
@@ -183,7 +189,11 @@ with `name`, whereas the query-side `AttributesCriterion` uses `key`.
   relaxation to the five existing helpers is [#40](https://github.com/osprey-dcs/dp-python-lib/issues/40), not
   this ticket.
 - **#14 (`_dispatch` refactor)** was parked "until #6 lands so the full duplication is visible".  It is visible
-  now: 17 unary `_send_*` bodies exist and this ticket adds 11 more.  It lands first (Q3; recorded on #14).
+  now: 18 unary `_send_*` bodies exist — 16 on the annotation-service clients, plus one each in `QueryClient` and
+  `IngestionClient` in the identical three-tier shape — and this ticket adds 10 more (one per unary RPC in the
+  table; `iter_*` reuses the query sender).  The two server-streaming senders stay as they are.  `_dispatch` lives
+  on `ServiceApiClientBase`, so it covers all 18 rather than only the annotation clients.  It lands first (Q3;
+  recorded on #14).
 
 ## Design decisions (proposed)
 
@@ -242,8 +252,8 @@ New `client/data_frame.py` (no optional dependencies):
 - `data_column(name, values, metadata=None)` — the legacy `DataColumn` escape hatch, where a `None` entry is a
   missing value (unset oneof), the only way to express a gap on a shared axis;
 - `data_frame(data_timestamps, columns) -> common_pb2.DataFrame` — routes each column into its repeated
-  field; validates count-match against the axis, non-empty names/values, and column-name uniqueness across
-  types (the server's D28 rules, checked client-side so the error names the column);
+  field; validates at least one column, count-match against the axis, non-empty names/values, and column-name
+  uniqueness across types (the server's D28 rules, checked client-side so the error names the column);
 - provenance: `column_metadata(tags=None, attributes=None, provenance=None)`, `provenance(source=None,
   process=None, derived_from=None)`, `pv_source(pv_name, time_range=None)`, `calculations_source(calculations_id,
   frame_name, column_name, time_range=None)`; a `time_range` is a `(begin, end)` pair of `TimestampInput`.
@@ -275,25 +285,28 @@ is two destructive RPC families behind one flag; the honest shape is the two-ste
 `iter_annotations([AQ.datasets([dataset_id])])`, delete those, then delete the dataset.  The cookbook shows it.
 (The sample-status wildcard delete needed an explicit `all_pvs=True` opt-in; this is the same instinct.)
 
-**D9 — One batch-fetch convenience, because the proto insists on it.**  `DataSetClient.get_datasets(ids) ->
-dict[str, DataSet]` issues one `query_datasets([DS.ids(ids)])` and pages through it.  It exists so the
-"annotation listing needs its datasets" case in the cookbook is one call and never becomes the N+1 that D5 of
-the dp-grpc plan removed server-side.  Ids are deduplicated; ids that resolve to nothing are simply absent from
-the dict (a dangling `dataSetIds` entry is not an error).
+**D9 — One batch-fetch convenience, because the proto insists on it.**  `DataSetClient.get_datasets(ids) -> dict[str,
+DataSet]` issues one `query_datasets([DS.ids(ids)])` and pages through it.  It exists so the "annotation listing needs
+its datasets" case in the cookbook is one call and never becomes the N+1 that D5 of the dp-grpc plan removed
+server-side.  Ids are deduplicated (order preserved); an empty `ids` returns `{}` without an RPC, because the cookbook
+feeds it from annotation `dataSetIds` lists that may be empty and `DS.ids([])` would otherwise raise; ids that resolve
+to nothing are simply absent from the dict (a dangling `dataSetIds` entry is not an error).
 
-**D10 — Export ergonomics: an `ExportFormat` enum and a `calculations_spec()` builder; nothing that pretends
-to download.**  `ExportFormat` is a `str` enum (`HDF5`/`CSV`/`XLSX`, values `"hdf5"`/`"csv"`/`"xlsx"`) so
-`ExportFormat("csv")` and `ExportFormat.CSV` both work and `EXPORT_FORMAT_UNSPECIFIED` is unreachable through
-the params class.  `ExportDataRequestParams(output_format, dataset_id=None, data_blocks=None,
-calculations_spec=None)` raises unless at least one source is set.  `calculations_spec(calculations_id,
-frame_columns: dict[str, list[str]] | None = None) -> common_pb2.CalculationsSpec`; omitting `frame_columns`
-means all frames and columns.  The result exposes `file_path` and `file_url` as-is: the file lives on the
-server's filesystem and there is no retrieval RPC.
+**D10 — Export ergonomics: an `ExportFormat` enum and a `calculations_spec()` builder; nothing that pretends to
+download.**  `ExportFormat` is a `str` enum (`HDF5`/`CSV`/`XLSX`, values `"hdf5"`/`"csv"`/`"xlsx"`) so
+`ExportFormat("csv")` and `ExportFormat.CSV` both work; `ExportDataRequestParams` coerces a bare string through
+`ExportFormat(...)` at construction, so a misspelling raises `ValueError` naming the valid values, and
+`EXPORT_FORMAT_UNSPECIFIED` is unreachable through the params class.  `ExportDataRequestParams(output_format,
+dataset_id=None, data_blocks=None, calculations_spec=None)` raises unless at least one source is
+set.  `calculations_spec(calculations_id, frame_columns: dict[str, list[str]] | None = None) ->
+common_pb2.CalculationsSpec`; omitting `frame_columns` means all frames and columns.  The result exposes `file_path`
+and `file_url` as-is: the file lives on the server's filesystem and there is no retrieval RPC.
 
-**D11 — Client-side validation mirrors the server's shape rules, not its resource caps.**  Empty ids, empty
-required lists, a second `TextCriterion`, a zero-source export, count-mismatched or duplicate-named columns,
-and duplicate frame names all raise `ValueError` before any RPC.  String-length / array-size / image-size caps
-stay server-side: they are deployment policy, and duplicating numbers that can change is how clients drift.  (Q7, resolved as proposed.)
+**D11 — Client-side validation mirrors the server's shape rules, not its resource caps.**  Empty ids, empty required
+lists, a second `TextCriterion`, a zero-source export, an empty frame (no columns), count-mismatched or
+duplicate-named columns, and duplicate frame names all raise `ValueError` before any RPC.  String-length / array-size /
+image-size caps stay server-side: they are deployment policy, and duplicating numbers that can change is how clients
+drift.  (Q7, resolved as proposed.)
 
 **D12 — Integration tests probe for the modernized API before running.**  A pre-1.16.0 server accepts the
 connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not a sufficient skip check (the
@@ -306,12 +319,15 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
 
 1. **Stub sync.**  Dispatch `generate-python-stubs.yml` on dp-grpc `main` with `dry_run=false` (done 2026-09-09,
    run 34382676119 → #39), verify the `grpc-sync-*` PR against a local generation and bump the grpcio floor to
-   match the re-stamped banners (finding 1), merge.  In the same
-   PR or a trailing docs commit, reword the four `valueStatus` mentions ("removed in dp-grpc 1.16.0, field 15
-   reserved").
-2. **#14 `_dispatch` extraction**, its own PR (Q3).
+   match the re-stamped banners (finding 1), merge (done 2026-09-09, `b6d0b37`).  The four `valueStatus` mentions
+   are reworded ("removed in dp-grpc 1.16.0, field 15 reserved") in #42, since #39 was the bot's PR.
+2. **#14 `_dispatch` extraction**, its own PR (Q3), covering all 18 unary senders (finding 5).
 3. **Planning convention** (Q10): this file, `plan/README.md`, and a "Ticket Planning Workflow" section in
-   `CLAUDE.md` mirroring dp-service's, in a docs-only PR that also carries the #13 regression test.
+   `CLAUDE.md` mirroring dp-service's, in a docs-only PR (#42) that also carries the #13 regression test.  Review
+   of #42 found that asserting `request.limit == 0` cannot detect the #13 bug at all — a proto3 scalar reads 0
+   whether or not it was assigned — and that three older `limit=0` tests had the same vacuous shape.  #42 therefore
+   adds `tests/unit/assignment_spy.py` (`watch_assignments()`), and all five `limit=0` tests now assert the
+   assignment itself; Phase 1's `limit` tests use the same helper.
 
 ### Phase 1 — low-level wrappers (no optional dependencies)
 
@@ -330,19 +346,25 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
   (including "omitted optional fields are absent, not empty"), every criterion helper incl. `attributes(key)`
   key-only and the empty-input `ValueError`s, the second-`TextCriterion` rejection, the zero-source export
   rejection, `ExportFormat` mapping, three-tier `_send_*` coverage per RPC (success / `exceptionalResult` /
-  `RpcError` / unexpected), page-token threading and the `iter_*` `RuntimeError`, `get_datasets` dedup and
+  `RpcError` / unexpected), page-token threading and the `iter_*` `RuntimeError`, `get_datasets` dedup, empty-input, and
   absent-id behavior.
+- `tests/integration/test_datasets_annotations_integration.py`, wrapper level (Q9): the API probe (D12); save
+  dataset → get → query by id / owner / pv name / tag (asserting the lowercase-normalized tag) → save annotation
+  with a hand-built `Calculations` → `get_annotation` (calculations inline, `dataSetIds` ids-only) →
+  `get_calculations` → `query_annotations([AQ.datasets([...])])` (calculations empty, id present) →
+  `delete_dataset` rejected while referenced → `delete_annotation` → `delete_dataset` → paging across a
+  run-unique tag with `limit=1` → malformed page token is a business error.  Everything written is deleted, keyed
+  by a run-unique owner id.  The builder, pandas, and export legs are added in Phase 4.
 
 ### Phase 2 — calculations construction and reading (no optional dependencies)
 
-- `src/dp_python_lib/client/data_frame.py` per D6, with `sampling_clock` / `timestamp_list` relocated and
-  re-exported.
-- `src/dp_python_lib/client/data_frame_conversions.py` — the pure-Python half of D7.
-- Unit tests: each typed column round-trips through `data_frame()` and back through `data_frame_columns()`;
-  count-mismatch / duplicate-name / empty-name errors name the column; `data_column()` `None` → unset oneof →
-  `None` on read; SamplingClock axis reads back in exact integer nanoseconds (the sample-status test's
-  no-float discipline); provenance helpers set the right `origin` arm and optional `timeRange`;
-  `calculations()` rejects an empty dict and an empty frame name.
+- `src/dp_python_lib/client/data_frame.py` per D6, with `sampling_clock` / `timestamp_list` relocated and re-exported.
+  - `src/dp_python_lib/client/data_frame_conversions.py` — the pure-Python half of D7. - Unit tests: each typed column
+  round-trips through `data_frame()` and back through `data_frame_columns()`; an empty column list, count-mismatch,
+  duplicate-name, and empty-name errors name the frame or column; `data_column()` `None` → unset oneof → `None` on
+  read; SamplingClock axis reads back in exact integer nanoseconds (the sample-status test's no-float discipline);
+  provenance helpers set the right `origin` arm and optional `timeRange`; `calculations()` rejects an empty dict and
+  an empty frame name.
 
 ### Phase 3 — pandas bridges (`[analysis]` extra, lazily imported)
 
@@ -353,14 +375,11 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
 
 ### Phase 4 — integration test and documentation
 
-- `tests/integration/test_datasets_annotations_integration.py`: probe (D12); save dataset → get → query by id /
-  owner / pv name / tag (asserting the lowercase-normalized tag) → save annotation with a typed `DoubleColumn`
-  carrying `derivedFrom` → `get_annotation` (calculations inline, `dataSetIds` ids-only) → `get_calculations` →
-  `query_annotations([AQ.datasets([...])])` (calculations empty, id present) → `delete_dataset` rejected while
-  referenced → full-replace re-save without calculations clears them → `delete_annotation` → `delete_dataset`
-  → paging across a run-unique tag with `limit=1` → malformed page token is a business error → calculations-only
-  CSV export (file exists on the same host; array-column CSV export is rejected).  Everything written is
-  deleted, keyed by a run-unique owner id.
+- Extend `tests/integration/test_datasets_annotations_integration.py` (the wrapper-level round trip lands in
+  Phase 1): save annotation with a builder-made typed `DoubleColumn` carrying `derivedFrom` → `get_annotation` →
+  `get_calculations` read back through `data_frame_conversions` (exact integer-nanosecond axis) → full-replace
+  re-save without calculations clears them → calculations-only CSV export (file exists on the same host;
+  array-column CSV export is rejected).
 - `doc/cookbook/datasets-and-annotations.md`, the Python counterpart of dp-grpc's recipe, in the continuous
   worked example (a region of the `BPMS:GUNB:314` shift, an RMS calculation over it, provenance, export);
   `doc/cookbook/README.md` table; `doc/cookbook/conventions.md` — empty criteria = match all, and the two
@@ -392,7 +411,8 @@ connection and answers `getDataSet` with `UNIMPLEMENTED`, so reachability is not
   alone (finding 1).
 - **No server dependency remains**: dp-service #248 landed in full on 2026-09-09.  But **no release carries it
   yet** (dp-grpc and dp-service `main` say 1.16.0; the latest tag everywhere is `rel-1.15.0`), so the
-  integration test needs a server built from dp-service `main` at or after `4cde755` (PR #264) — Q11.
+  integration test (from PR 1 onward, Q9) needs a server built from dp-service `main` at or after `4cde755`
+  (PR #264) — Q11.
 - Phases 1 → 2 → 3 are sequential in code (3 imports 2, 2's `calculations()` is what 1's params accept), but
   the Phase 1 wrappers are usable and testable on their own with hand-built `Calculations` protos.
 - #17 (ingestion) should start after Phase 2 lands, extending `data_frame.py` rather than forking it.  #16
@@ -417,7 +437,7 @@ in full by the ticket owner on 2026-09-09.
 
 - **Q3 — #14 before #6.  RESOLVED: yes, as its own small PR.**  The `_dispatch(stub_call, request, result_cls,
   success_field, op_name)` extraction is mechanical and covered by the existing 406 tests (they mock the stub
-  method, which `_dispatch` still calls); doing it first makes each of the 11 new `_send_*` methods ~8 lines
+  method, which `_dispatch` still calls); doing it first makes each of the 10 new `_send_*` methods ~8 lines
   instead of ~40.  The "wait until #6 lands" rationale is satisfied by this plan's RPC table.  Recorded on #14.
 
 - **Q4 — How much `Calculations` construction belongs in #6.  RESOLVED: D6's builder.**  Scalar typed
@@ -444,18 +464,21 @@ in full by the ticket owner on 2026-09-09.
   verified against the local generation from finding 1 and merged on its own.  Committing locally generated
   stubs stays the fallback if the bot token lapses.
 
-- **Q9 — PR structure.  RESOLVED: two PRs.**  Phases 1+2 (wrappers and builders, with the wrapper integration
-  test) and Phases 3+4 (pandas bridges, full recipe, docs), each reviewable in one sitting; the ticket stays open
-  until the second merges, as dp-service #248 did.
+- **Q9 — PR structure.  RESOLVED: two PRs.**  Phases 1+2 (wrappers and builders, with the wrapper-level
+  integration test listed under Phase 1) and Phases 3+4 (pandas bridges, the integration test's builder and export
+  legs, full recipe, docs), each reviewable in one sitting; the ticket stays open until the second merges, as
+  dp-service #248 did.  *Correction 2026-09-09 (review of #42):* the task list originally put the whole integration
+  test in Phase 4, contradicting this answer; PR 1 carries the wrapper round trip, following the #8 precedent of
+  verifying against a live server before merge.
 
 - **Q10 — Adopting the planning convention now.  RESOLVED: docs-only PR now.**  This file, `plan/README.md`
   (from dp-grpc's), the `CLAUDE.md` "Ticket Planning Workflow" section (dp-service's wording, adapted), and the
   #13 regression test — so the ticket body links to a stable URL before implementation starts.
 
-- **Q11 — Integration test environment.  RESOLVED: the #8 model.**  Phases 1–3 are built against mocked stubs;
+- **Q11 — Integration test environment.  RESOLVED: the #8 model.**  Unit tests are built against mocked stubs;
   the ticket owner starts an ecosystem built from dp-service `main` at or after PR #264 on `localhost:50053`
-  for Phase 4, and the plan records the server commit the integration test was verified against.  Nothing was
-  listening on 50051–50053 when this was written.
+  before PR 1 merges (the wrapper-level integration test, Q9) and again for Phase 4, and the plan records the
+  server commit each was verified against.  Nothing was listening on 50051–50053 when this was written.
 
 ## Reference: proposed API surface (for the CLAUDE.md usage section)
 
