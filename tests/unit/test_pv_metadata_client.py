@@ -74,6 +74,16 @@ class TestPvMetadataClientBuildRequests(unittest.TestCase):
         request = self.client._build_delete_pv_metadata_request("alias-1")
         self.assertEqual(request.pvNameOrAlias, "alias-1")
 
+    def test_build_query_request_limit_zero_is_set(self):
+        # limit=0 must be forwarded (distinct from "not provided"); guard against a truthiness regression (#13).
+        request = self.client._build_query_pv_metadata_request([PvMetadataQuery.tags(["x"])], limit=0)
+        self.assertEqual(request.limit, 0)
+
+    def test_build_query_request_limit_omitted_is_unset(self):
+        request = self.client._build_query_pv_metadata_request([PvMetadataQuery.tags(["x"])])
+        self.assertEqual(request.limit, 0)
+        self.assertEqual(request.pageToken, "")
+
     def test_build_query_request(self):
         criteria = [
             PvMetadataQuery.pv_name(prefix=["ABC:"]),
