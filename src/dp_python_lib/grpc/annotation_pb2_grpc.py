@@ -5,7 +5,7 @@ import warnings
 
 from . import annotation_pb2 as annotation__pb2
 
-GRPC_GENERATED_VERSION = '1.83.0'
+GRPC_GENERATED_VERSION = '1.83.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -47,20 +47,55 @@ class DpAnnotationServiceStub:
                 request_serializer=annotation__pb2.SaveDataSetRequest.SerializeToString,
                 response_deserializer=annotation__pb2.SaveDataSetResponse.FromString,
                 _registered_method=True)
+        self.getDataSet = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/getDataSet',
+                request_serializer=annotation__pb2.GetDataSetRequest.SerializeToString,
+                response_deserializer=annotation__pb2.GetDataSetResponse.FromString,
+                _registered_method=True)
         self.queryDataSets = channel.unary_unary(
                 '/dp.service.annotation.DpAnnotationService/queryDataSets',
                 request_serializer=annotation__pb2.QueryDataSetsRequest.SerializeToString,
                 response_deserializer=annotation__pb2.QueryDataSetsResponse.FromString,
+                _registered_method=True)
+        self.deleteDataSet = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/deleteDataSet',
+                request_serializer=annotation__pb2.DeleteDataSetRequest.SerializeToString,
+                response_deserializer=annotation__pb2.DeleteDataSetResponse.FromString,
+                _registered_method=True)
+        self.patchDataSet = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/patchDataSet',
+                request_serializer=annotation__pb2.PatchDataSetRequest.SerializeToString,
+                response_deserializer=annotation__pb2.PatchDataSetResponse.FromString,
                 _registered_method=True)
         self.saveAnnotation = channel.unary_unary(
                 '/dp.service.annotation.DpAnnotationService/saveAnnotation',
                 request_serializer=annotation__pb2.SaveAnnotationRequest.SerializeToString,
                 response_deserializer=annotation__pb2.SaveAnnotationResponse.FromString,
                 _registered_method=True)
+        self.getAnnotation = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/getAnnotation',
+                request_serializer=annotation__pb2.GetAnnotationRequest.SerializeToString,
+                response_deserializer=annotation__pb2.GetAnnotationResponse.FromString,
+                _registered_method=True)
         self.queryAnnotations = channel.unary_unary(
                 '/dp.service.annotation.DpAnnotationService/queryAnnotations',
                 request_serializer=annotation__pb2.QueryAnnotationsRequest.SerializeToString,
                 response_deserializer=annotation__pb2.QueryAnnotationsResponse.FromString,
+                _registered_method=True)
+        self.deleteAnnotation = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/deleteAnnotation',
+                request_serializer=annotation__pb2.DeleteAnnotationRequest.SerializeToString,
+                response_deserializer=annotation__pb2.DeleteAnnotationResponse.FromString,
+                _registered_method=True)
+        self.patchAnnotation = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/patchAnnotation',
+                request_serializer=annotation__pb2.PatchAnnotationRequest.SerializeToString,
+                response_deserializer=annotation__pb2.PatchAnnotationResponse.FromString,
+                _registered_method=True)
+        self.getCalculations = channel.unary_unary(
+                '/dp.service.annotation.DpAnnotationService/getCalculations',
+                request_serializer=annotation__pb2.GetCalculationsRequest.SerializeToString,
+                response_deserializer=annotation__pb2.GetCalculationsResponse.FromString,
                 _registered_method=True)
         self.exportData = channel.unary_unary(
                 '/dp.service.annotation.DpAnnotationService/exportData',
@@ -207,12 +242,42 @@ class DpAnnotationServiceServicer:
 
     def saveDataSet(self, request, context):
         """
-        saveDataSet: Create or update a DataSet.
+        ------------------- DataSet CRUD ---------------------------
 
-        This RPC sends a request to the annotation service to save a DataSet with the specified parameters.
-        The annotation service performs validation, and for a valid request, it performs an "upsert" (insert or update)
-        for the specified DataSet. The response may indicate rejection, an error in handling the request,
-        or successful handling of the request.
+
+
+        saveDataSet()
+
+        Create or replace a DataSet.
+
+        Full replace (upsert) semantics: if the request omits id a new DataSet is created and
+        the server generates its id; if id is supplied, ALL fields of the existing DataSet
+        (name, ownerId, description, dataBlocks, tags, attributes, modifiedBy) are replaced
+        with the request contents.  Callers must supply the complete desired state on every
+        call — fields omitted from the request are not preserved.  Use patchDataSet() (future)
+        for partial updates.
+
+        The response may indicate rejection, an error handling the request, or a
+        SaveDataSetResult with the id of the created or updated DataSet.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def getDataSet(self, request, context):
+        """
+        getDataSet()
+
+        Retrieve a single DataSet by id.
+
+        This is the content-retrieval path for the dataSetIds returned by queryAnnotations():
+        annotation query results carry dataset ids only, not embedded dataset content.  To
+        retrieve many datasets at once, prefer queryDataSets() with an IdCriterion listing the
+        ids — it is a single round trip, whereas a getDataSet() per id is not.
+
+        The response may indicate rejection, an error handling the request, or a
+        GetDataSetResult containing the matching record.  If no DataSet exists with the
+        specified id, an ExceptionalResult is returned.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -220,12 +285,59 @@ class DpAnnotationServiceServicer:
 
     def queryDataSets(self, request, context):
         """
-        queryDataSets: Unary (non-streaming) data sets query.
+        queryDataSets(): Unary (non-streaming) DataSets query.
 
-        This RPC returns information about DataSets matching the specified query parameters. Client sends a single
-        QueryDataSetsRequest and receives a single QueryDataSetsResponse. The response may indicate rejection,
-        error in handling, or otherwise contains the data matching the query specification.  A query matching no data
-        returns an empty result, not an ExceptionalResult.
+        Query DataSet records using structured search criteria.  Client sends a single
+        QueryDataSetsRequest and receives a single QueryDataSetsResponse.
+
+        Pagination: limit sets the maximum number of records in a page; an unset or zero limit
+        means a server-configured default page size, NOT an unbounded result.  Clients must
+        follow nextPageToken to retrieve all matching records.  pageToken is an opaque
+        continuation token obtained from a previous response; a malformed token is rejected
+        with an ExceptionalResult.
+
+        Ordering: results are ordered by id ascending.  The id is unique, which makes paging
+        stable, and is approximately insertion order.  Ordering is part of this method's
+        contract — paging is only well defined under a deterministic sort.
+
+        The response may indicate rejection, an error in handling, or otherwise contains the
+        DataSets matching the query criteria.  A query matching no data returns an empty
+        result, not an ExceptionalResult.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def deleteDataSet(self, request, context):
+        """
+        deleteDataSet()
+
+        Delete the DataSet with the specified id.
+
+        The request is rejected if any Annotation references the DataSet in its dataSetIds — a
+        containment-strength association.  Delete or update those annotations first.  Use
+        queryAnnotations() with a DataSetsCriterion to find them.
+
+        The response may indicate rejection, an error handling the request, or a
+        DeleteDataSetResult confirming the id of the deleted record.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def patchDataSet(self, request, context):
+        """
+        patchDataSet()
+
+        Partial update of an existing DataSet.  Allows individual fields (name, description,
+        dataBlocks, tags, attributes, modifiedBy) to be updated without replacing the entire
+        record, unlike the full-replace semantics of saveDataSet().
+
+        NOT YET IMPLEMENTED — calling this method returns an error response.
+        Planned for a future release.  Field mask design is deferred.
+
+        This method is defined now to reserve its name and message shapes as part
+        of the standard CRUD pattern for metadata APIs in this service.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -233,12 +345,51 @@ class DpAnnotationServiceServicer:
 
     def saveAnnotation(self, request, context):
         """
-        saveAnnotation
+        ------------------- Annotation CRUD ---------------------------
 
-        This RPC sends a request to the annotation service to create or update an annotation with the
-        specified parameters. The annotation service performs validation, and for a valid request,
-        attempts to "upsert" the annotation. The response may indicate rejection, an error in handling the request,
-        or successful handling of the request.
+
+
+        saveAnnotation()
+
+        Create or replace an Annotation.
+
+        Full replace (upsert) semantics: if the request omits id a new Annotation is created
+        and the server generates its id; if id is supplied, ALL fields of the existing
+        Annotation (ownerId, dataSetIds, name, annotationIds, description, tags, attributes,
+        calculations, modifiedBy) are replaced with the request contents.  Callers must supply
+        the complete desired state on every call — fields omitted from the request are not
+        preserved.  Use patchAnnotation() (future) for partial updates.
+
+        WARNING: full replace applies to calculations as it does to every other field.  An
+        update that omits calculations CLEARS the annotation's existing calculations.
+
+        Calculations are created and replaced through this method — there is no
+        saveCalculations().  The response returns calculationsId alongside annotationId when
+        the request carried calculations, so the addressing key used by getCalculations(),
+        CalculationsSpec, and ColumnProvenance is available without a further round trip.
+
+        The response may indicate rejection, an error handling the request, or a
+        SaveAnnotationResult with the id of the created or updated Annotation.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def getAnnotation(self, request, context):
+        """
+        getAnnotation()
+
+        Retrieve a single Annotation by id, with its Calculations content populated inline as a
+        one-hop convenience for the common "open this annotation" case.  This is the only
+        method that returns calculations content within an Annotation; queryAnnotations()
+        returns calculationsId only.
+
+        Associated DataSets are returned as ids (dataSetIds), not content; use getDataSet() or
+        queryDataSets() with an IdCriterion to retrieve them.
+
+        The response may indicate rejection, an error handling the request, or a
+        GetAnnotationResult containing the matching record.  If no Annotation exists with the
+        specified id, an ExceptionalResult is returned.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -246,13 +397,98 @@ class DpAnnotationServiceServicer:
 
     def queryAnnotations(self, request, context):
         """
-        queryAnnotations: Unary (non-streaming) annotations query.
+        queryAnnotations(): Unary (non-streaming) Annotations query.
 
-        This RPC is used by clients to query over annotations added to ingested data.
-        Client sends a single QueryAnnotationsRequest with the query parameters, and receives a single
-        QueryAnnotationsResponse with the query results. The response may indicate rejection, error in handling,
-        or otherwise contains the data matching the query specification.  A query matching no data returns an empty
+        Query Annotation records using structured search criteria.  Client sends a single
+        QueryAnnotationsRequest and receives a single QueryAnnotationsResponse.
+
+        Results carry references, not embedded content: each returned Annotation has
+        dataSetIds and calculationsId, and neither dataset content nor calculations content is
+        included.  Retrieve dataset content with a single queryDataSets() call whose
+        IdCriterion lists the ids gathered across the returned annotations, and calculations
+        content with getCalculations() or getAnnotation().
+
+        Pagination: limit sets the maximum number of records in a page; an unset or zero limit
+        means a server-configured default page size, NOT an unbounded result.  Clients must
+        follow nextPageToken to retrieve all matching records.  pageToken is an opaque
+        continuation token obtained from a previous response; a malformed token is rejected
+        with an ExceptionalResult.
+
+        Ordering: results are ordered by id ascending.  The id is unique, which makes paging
+        stable, and is approximately insertion order.  Ordering is part of this method's
+        contract — paging is only well defined under a deterministic sort.
+
+        The response may indicate rejection, an error in handling, or otherwise contains the
+        Annotations matching the query criteria.  A query matching no data returns an empty
         result, not an ExceptionalResult.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def deleteAnnotation(self, request, context):
+        """
+        deleteAnnotation()
+
+        Delete the Annotation with the specified id.  The Annotation's Calculations, if any,
+        are deleted with it — their lifecycle belongs to the owning Annotation.
+
+        Unlike deleteDataSet(), this delete is NOT blocked by incoming references.  Other
+        Annotations listing this annotation's id in annotationIds, and
+        ColumnProvenance.derivedFrom links naming its calculations, are soft associations and
+        are permitted to dangle.  A soft link that resolves to nothing means the referenced
+        record was deleted, and readers must tolerate it.
+
+        The response may indicate rejection, an error handling the request, or a
+        DeleteAnnotationResult confirming the id of the deleted record.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def patchAnnotation(self, request, context):
+        """
+        patchAnnotation()
+
+        Partial update of an existing Annotation.  Allows individual fields (dataSetIds, name,
+        annotationIds, description, tags, attributes, calculations, modifiedBy) to be updated
+        without replacing the entire record, unlike the full-replace semantics of
+        saveAnnotation().
+
+        NOT YET IMPLEMENTED — calling this method returns an error response.
+        Planned for a future release.  Field mask design is deferred.
+
+        This method is defined now to reserve its name and message shapes as part
+        of the standard CRUD pattern for metadata APIs in this service.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def getCalculations(self, request, context):
+        """
+        ------------------- Calculations Retrieval ---------------------------
+
+
+
+        getCalculations()
+
+        Retrieve a single Calculations object by id, without loading the owning Annotation's
+        descriptive payload.  This is the click-through path: list annotations, pick one, then
+        fetch exactly its calculations using the calculationsId the listing returned.
+
+        Obtain calculationsId from SaveAnnotationResult, from Annotation.calculationsId in
+        query or get results, or from a ColumnProvenance.CalculationsColumn provenance link.
+
+        Calculations have no save, delete, or query method of their own, and the asymmetry is
+        deliberate: they are written and replaced through saveAnnotation(), their lifecycle
+        belongs to the owning Annotation (deleteAnnotation() removes them), and discovery goes
+        through queryAnnotations().  Only retrieval needs a standalone path, because a client
+        that already holds a calculationsId should not have to fetch an annotation to use it.
+
+        The response may indicate rejection, an error handling the request, or a
+        GetCalculationsResult containing the matching record.  If no Calculations object
+        exists with the specified id, an ExceptionalResult is returned.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -260,12 +496,26 @@ class DpAnnotationServiceServicer:
 
     def exportData(self, request, context):
         """
+        ------------------- Export ---------------------------
+
+
+
         exportData(): Export data to common file formats.
 
-        This RPC is used by clients to export data (both DataSets and Calculations) to file.  Client sends a single
-        ExportDataRequest specifying the details of the data to be exported and the desired output file format,
-        and receives a single response.  The response may indicate a problem handling the request, or otherwise contains
-        details about the exported file including the path and optional (if configured) URL for accessing the file.
+        This RPC is used by clients to export archived PV data and/or Annotation Calculations
+        to file.  Client sends a single ExportDataRequest specifying the data to be exported
+        and the desired output file format, and receives a single response.  The response may
+        indicate a problem handling the request, or otherwise contains details about the
+        exported file including the path and optional (if configured) URL for accessing the
+        file.
+
+        Data to export is specified by any combination of a saved DataSet (dataSetId), inline
+        ad-hoc DataBlocks (dataBlocks), and Calculations (calculationsSpec).  At least one must
+        be supplied; a request specifying none is rejected.  See ExportDataRequest.
+
+        Output format restriction: the tabular formats (CSV, XLSX) can only represent scalar
+        columns.  A DataSet or Calculations object containing array, image, or struct columns
+        can be exported to HDF5, but a request to export it as CSV or XLSX is rejected.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -296,6 +546,16 @@ class DpAnnotationServiceServicer:
         queryPvMetadata()
 
         Query PV metadata records using structured search criteria.
+
+        Pagination: limit sets the maximum number of records in a page; an unset or zero limit
+        means a server-configured default page size, NOT an unbounded result.  Clients must
+        follow nextPageToken to retrieve all matching records.  pageToken is an opaque
+        continuation token obtained from a previous response; a malformed token is rejected
+        with an ExceptionalResult.
+
+        Ordering: results are ordered by pvName ascending.  pvName is unique, which makes
+        paging stable.  Ordering is part of this method's contract — paging is only well
+        defined under a deterministic sort.
 
         The response may indicate rejection, an error handling the request, or
         a PvMetadataResult containing the matching records and pagination token.
@@ -416,6 +676,16 @@ class DpAnnotationServiceServicer:
 
         Query Configuration records using structured search criteria.
 
+        Pagination: limit sets the maximum number of records in a page; an unset or zero limit
+        means a server-configured default page size, NOT an unbounded result.  Clients must
+        follow nextPageToken to retrieve all matching records.  pageToken is an opaque
+        continuation token obtained from a previous response; a malformed token is rejected
+        with an ExceptionalResult.
+
+        Ordering: results are ordered by configurationName ascending.  configurationName is
+        unique, which makes paging stable.  Ordering is part of this method's contract —
+        paging is only well defined under a deterministic sort.
+
         The response may indicate rejection, an error handling the request, or
         a QueryConfigurationsResult containing the matching records and pagination token.
         """
@@ -522,6 +792,18 @@ class DpAnnotationServiceServicer:
         queryConfigurationActivations()
 
         Query ConfigurationActivation records using structured search criteria.
+
+        Pagination: limit sets the maximum number of records in a page; an unset or zero limit
+        means a server-configured default page size, NOT an unbounded result.  Clients must
+        follow nextPageToken to retrieve all matching records.  pageToken is an opaque
+        continuation token obtained from a previous response; a malformed token is rejected
+        with an ExceptionalResult.
+
+        Ordering: results are ordered by startTime ascending, then configurationName
+        ascending, then record id ascending.  startTime alone is not unique, and the
+        tiebreakers are what make paging stable across records sharing a start time.
+        Ordering is part of this method's contract — paging is only well defined under a
+        deterministic sort.
 
         The response may indicate rejection, an error handling the request, or
         a QueryConfigurationActivationsResult containing the matching records and
@@ -647,7 +929,11 @@ class DpAnnotationServiceServicer:
         layer (an empty pvNames list matches all PVs — e.g., to enumerate which PVs a layer has
         labeled).  Returns one page of SampleStatusBucket objects; additional pages are retrieved
         by resubmitting the request with the nextPageToken from the previous response as
-        pageToken.
+        pageToken.  A malformed pageToken is rejected with an ExceptionalResult.
+
+        Ordering: results are ordered by pvName ascending, then domain, then layer, then
+        bucket start time.  Ordering is part of this method's contract — paging is only well
+        defined under a deterministic sort.
 
         Bucket selection follows the TimeRange overlap test, and boundary buckets are returned
         WHOLE (not trimmed) — matching DpQueryService.queryBuckets() — so a returned bucket may
@@ -740,20 +1026,55 @@ def add_DpAnnotationServiceServicer_to_server(servicer, server):
                     request_deserializer=annotation__pb2.SaveDataSetRequest.FromString,
                     response_serializer=annotation__pb2.SaveDataSetResponse.SerializeToString,
             ),
+            'getDataSet': grpc.unary_unary_rpc_method_handler(
+                    servicer.getDataSet,
+                    request_deserializer=annotation__pb2.GetDataSetRequest.FromString,
+                    response_serializer=annotation__pb2.GetDataSetResponse.SerializeToString,
+            ),
             'queryDataSets': grpc.unary_unary_rpc_method_handler(
                     servicer.queryDataSets,
                     request_deserializer=annotation__pb2.QueryDataSetsRequest.FromString,
                     response_serializer=annotation__pb2.QueryDataSetsResponse.SerializeToString,
+            ),
+            'deleteDataSet': grpc.unary_unary_rpc_method_handler(
+                    servicer.deleteDataSet,
+                    request_deserializer=annotation__pb2.DeleteDataSetRequest.FromString,
+                    response_serializer=annotation__pb2.DeleteDataSetResponse.SerializeToString,
+            ),
+            'patchDataSet': grpc.unary_unary_rpc_method_handler(
+                    servicer.patchDataSet,
+                    request_deserializer=annotation__pb2.PatchDataSetRequest.FromString,
+                    response_serializer=annotation__pb2.PatchDataSetResponse.SerializeToString,
             ),
             'saveAnnotation': grpc.unary_unary_rpc_method_handler(
                     servicer.saveAnnotation,
                     request_deserializer=annotation__pb2.SaveAnnotationRequest.FromString,
                     response_serializer=annotation__pb2.SaveAnnotationResponse.SerializeToString,
             ),
+            'getAnnotation': grpc.unary_unary_rpc_method_handler(
+                    servicer.getAnnotation,
+                    request_deserializer=annotation__pb2.GetAnnotationRequest.FromString,
+                    response_serializer=annotation__pb2.GetAnnotationResponse.SerializeToString,
+            ),
             'queryAnnotations': grpc.unary_unary_rpc_method_handler(
                     servicer.queryAnnotations,
                     request_deserializer=annotation__pb2.QueryAnnotationsRequest.FromString,
                     response_serializer=annotation__pb2.QueryAnnotationsResponse.SerializeToString,
+            ),
+            'deleteAnnotation': grpc.unary_unary_rpc_method_handler(
+                    servicer.deleteAnnotation,
+                    request_deserializer=annotation__pb2.DeleteAnnotationRequest.FromString,
+                    response_serializer=annotation__pb2.DeleteAnnotationResponse.SerializeToString,
+            ),
+            'patchAnnotation': grpc.unary_unary_rpc_method_handler(
+                    servicer.patchAnnotation,
+                    request_deserializer=annotation__pb2.PatchAnnotationRequest.FromString,
+                    response_serializer=annotation__pb2.PatchAnnotationResponse.SerializeToString,
+            ),
+            'getCalculations': grpc.unary_unary_rpc_method_handler(
+                    servicer.getCalculations,
+                    request_deserializer=annotation__pb2.GetCalculationsRequest.FromString,
+                    response_serializer=annotation__pb2.GetCalculationsResponse.SerializeToString,
             ),
             'exportData': grpc.unary_unary_rpc_method_handler(
                     servicer.exportData,
@@ -932,6 +1253,33 @@ class DpAnnotationService:
             _registered_method=True)
 
     @staticmethod
+    def getDataSet(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/getDataSet',
+            annotation__pb2.GetDataSetRequest.SerializeToString,
+            annotation__pb2.GetDataSetResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def queryDataSets(request,
             target,
             options=(),
@@ -948,6 +1296,60 @@ class DpAnnotationService:
             '/dp.service.annotation.DpAnnotationService/queryDataSets',
             annotation__pb2.QueryDataSetsRequest.SerializeToString,
             annotation__pb2.QueryDataSetsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def deleteDataSet(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/deleteDataSet',
+            annotation__pb2.DeleteDataSetRequest.SerializeToString,
+            annotation__pb2.DeleteDataSetResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def patchDataSet(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/patchDataSet',
+            annotation__pb2.PatchDataSetRequest.SerializeToString,
+            annotation__pb2.PatchDataSetResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -986,6 +1388,33 @@ class DpAnnotationService:
             _registered_method=True)
 
     @staticmethod
+    def getAnnotation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/getAnnotation',
+            annotation__pb2.GetAnnotationRequest.SerializeToString,
+            annotation__pb2.GetAnnotationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def queryAnnotations(request,
             target,
             options=(),
@@ -1002,6 +1431,87 @@ class DpAnnotationService:
             '/dp.service.annotation.DpAnnotationService/queryAnnotations',
             annotation__pb2.QueryAnnotationsRequest.SerializeToString,
             annotation__pb2.QueryAnnotationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def deleteAnnotation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/deleteAnnotation',
+            annotation__pb2.DeleteAnnotationRequest.SerializeToString,
+            annotation__pb2.DeleteAnnotationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def patchAnnotation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/patchAnnotation',
+            annotation__pb2.PatchAnnotationRequest.SerializeToString,
+            annotation__pb2.PatchAnnotationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def getCalculations(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dp.service.annotation.DpAnnotationService/getCalculations',
+            annotation__pb2.GetCalculationsRequest.SerializeToString,
+            annotation__pb2.GetCalculationsResponse.FromString,
             options,
             channel_credentials,
             insecure,
