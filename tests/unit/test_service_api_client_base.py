@@ -151,6 +151,18 @@ class TestDispatch(unittest.TestCase):
         request_log.assert_called_once_with()
         success_log.assert_not_called()
 
+    def test_business_error_log_names_the_operation_with_the_raw_op_name(self):
+        # All three error tiers name the operation with the camelCase op_name.  The hand-written senders this
+        # helper replaced capitalized it in this one log line only; asserting the format keeps the choice
+        # deliberate, since nothing else in the suite covers log content.
+        response = _response_with_field("exceptionalResult")
+        response.exceptionalResult.message = "boom"
+
+        with self.assertLogs("dp_python_lib.client.service_api_client_base", level=logging.WARNING) as captured:
+            self._dispatch(Mock(return_value=response))
+
+        self.assertIn("someOperation API returned business error: boom", "\n".join(captured.output))
+
     def test_default_logs_used_when_callables_omitted(self):
         stub_call = Mock(return_value=_response_with_field("someResult"))
 

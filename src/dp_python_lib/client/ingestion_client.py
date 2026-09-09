@@ -105,7 +105,7 @@ class IngestionClient(ServiceApiClientBase):
     def _send_register_provider(self, request: ingestion_pb2.RegisterProviderRequest) -> RegisterProviderApiResult:
         """
         Invokes the registerProvider() API method with the supplied request object.
-        :param request: RegisgerProviderRequest object with parameters for call to registerProvider().
+        :param request: RegisterProviderRequest object with parameters for call to registerProvider().
         :return: Returns a RegisterProviderApiResult with the method response and status information.
         """
         return self._dispatch(
@@ -115,7 +115,9 @@ class IngestionClient(ServiceApiClientBase):
             "registrationResult",
             "registerProvider",
             request_log=lambda: self.logger.info("Calling registerProvider API for provider: %s", request.providerName),
-            success_log=lambda response: self.logger.info("Successfully registered provider: %s", request.providerName),
+            success_log=lambda _response: self.logger.info(
+                "Successfully registered provider: %s", request.providerName
+            ),
         )
 
     def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:

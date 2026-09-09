@@ -1,13 +1,26 @@
 import logging
 from abc import ABC
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import grpc
 
 from .result import ApiResultBase
 
-ApiResultT = TypeVar("ApiResultT", bound=ApiResultBase)
+ApiResultT = TypeVar("ApiResultT", bound=ApiResultBase, covariant=True)
+
+
+class ApiResultFactory(Protocol[ApiResultT]):
+    """
+    The constructor signature every concrete *ApiResult class shares.  ApiResultBase itself takes only
+    (is_error, message); the 'response' keyword is added by each subclass, which declares it with the precise
+    response type for its own API method.  _dispatch constructs result objects generically, so it is that shared
+    three-argument shape -- not the base class -- that it actually depends on, and this Protocol is what states it.
+    Typing result_cls with it keeps the checker honest about the 'response' keyword, which a bare
+    type[ApiResultT] would reject.
+    """
+
+    def __call__(self, is_error: bool, message: str, response: Any = None) -> ApiResultT: ...
 
 
 class ServiceApiClientBase(ABC):
@@ -32,7 +45,7 @@ class ServiceApiClientBase(ABC):
         self,
         stub_call: Callable[[Any], Any],
         request: Any,
-        result_cls: type[ApiResultT],
+        result_cls: ApiResultFactory[ApiResultT],
         success_field: str,
         op_name: str,
         request_log: Callable[[], None] | None = None,
@@ -55,7 +68,8 @@ class ServiceApiClientBase(ABC):
 
         :param stub_call: The bound stub method to invoke, e.g. self._stub.savePvMetadata.
         :param request: The request message to pass to stub_call.
-        :param result_cls: The *ApiResult class to construct; all of them take (is_error, message, response).
+        :param result_cls: The *ApiResult class to construct; all of them take (is_error, message, response),
+            the shape stated by the ApiResultFactory protocol.
         :param success_field: Name of the response's success oneof field, e.g. "savePvMetadataResult".
         :param op_name: API method name used in log and error messages, e.g. "savePvMetadata".
         :param request_log: Optional callable logging a method-specific message before the call.  When omitted, a
@@ -76,6 +90,10 @@ class ServiceApiClientBase(ABC):
 
             if response.HasField("exceptionalResult"):
                 error_msg = response.exceptionalResult.message
+                # op_name is used verbatim here, so all three error tiers name the operation the same way.  The
+                # hand-written senders capitalized it on this line only ("SavePvMetadata API returned business
+                # error"), while their gRPC-error and unexpected-error logs already used the camelCase name; the
+                # inconsistency was not worth preserving.  Log text only -- the returned message is unchanged.
                 self.logger.warning("%s API returned business error: %s", op_name, error_msg)
                 return result_cls(is_error=True, message=error_msg)
 

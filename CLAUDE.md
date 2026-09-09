@@ -192,6 +192,10 @@ Optional extras:
   `f"Unexpected response format: neither exceptionalResult nor {success_field} found"`.
 - When logging an `RpcError`, `_dispatch` includes `e.code()` only when it resolves: a bare
   `grpc.RpcError()`, which is what the test mocks raise, has no usable code.
+- `_dispatch` names the operation with the raw camelCase `op_name` in all three error-log tiers.  The
+  hand-written senders capitalized it in the business-error warning only (`SavePvMetadata API returned
+  business error`), while their other two error logs already used camelCase; the refactor dropped that
+  one inconsistency deliberately.  Log text only -- returned messages are unchanged.
 
 ### Testing Best Practices
 - Use `@patch` decorators to mock gRPC stubs and avoid real network calls

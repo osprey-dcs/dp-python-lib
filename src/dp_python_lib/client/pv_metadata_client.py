@@ -320,7 +320,7 @@ class PvMetadataClient(ServiceApiClientBase):
             "savePvMetadataResult",
             "savePvMetadata",
             request_log=lambda: self.logger.info("Calling savePvMetadata API for PV: %s", request.pvName),
-            success_log=lambda response: self.logger.info("Successfully saved PV metadata for: %s", request.pvName),
+            success_log=lambda _response: self.logger.info("Successfully saved PV metadata for: %s", request.pvName),
         )
 
     def save_pv_metadata(self, request_params: SavePvMetadataRequestParams) -> SavePvMetadataApiResult:
@@ -369,7 +369,7 @@ class PvMetadataClient(ServiceApiClientBase):
             "getPvMetadataResult",
             "getPvMetadata",
             request_log=lambda: self.logger.info("Calling getPvMetadata API for: %s", request.pvNameOrAlias),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully retrieved PV metadata for: %s", request.pvNameOrAlias
             ),
         )
@@ -517,7 +517,7 @@ class PvMetadataClient(ServiceApiClientBase):
             "deletePvMetadataResult",
             "deletePvMetadata",
             request_log=lambda: self.logger.info("Calling deletePvMetadata API for: %s", request.pvNameOrAlias),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully deleted PV metadata for: %s", request.pvNameOrAlias
             ),
         )

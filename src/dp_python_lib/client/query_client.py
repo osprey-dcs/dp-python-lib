@@ -594,7 +594,7 @@ class QueryClient(ServiceApiClientBase):
             QuerySamplesApiResult,
             "sampleQueryResult",
             "querySamples",
-            success_log=lambda response: self.logger.info("QuerySamples returned a result page"),
+            success_log=lambda _response: self.logger.info("QuerySamples returned a result page"),
         )
 
     def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:

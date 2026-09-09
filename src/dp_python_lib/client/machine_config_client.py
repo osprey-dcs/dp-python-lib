@@ -710,7 +710,7 @@ class MachineConfigClient(ServiceApiClientBase):
             request_log=lambda: self.logger.info(
                 "Calling saveConfiguration API for configuration: %s", request.configurationName
             ),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully saved configuration: %s", request.configurationName
             ),
         )
@@ -767,7 +767,7 @@ class MachineConfigClient(ServiceApiClientBase):
             "getConfigurationResult",
             "getConfiguration",
             request_log=lambda: self.logger.info("Calling getConfiguration API for: %s", request.configurationName),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully retrieved configuration: %s", request.configurationName
             ),
         )
@@ -922,7 +922,7 @@ class MachineConfigClient(ServiceApiClientBase):
             "deleteConfigurationResult",
             "deleteConfiguration",
             request_log=lambda: self.logger.info("Calling deleteConfiguration API for: %s", request.configurationName),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully deleted configuration: %s", request.configurationName
             ),
         )
@@ -1010,7 +1010,7 @@ class MachineConfigClient(ServiceApiClientBase):
                 "Calling saveConfigurationActivation API for configuration: %s",
                 request.configurationName,
             ),
-            success_log=lambda response: self.logger.info(
+            success_log=lambda _response: self.logger.info(
                 "Successfully saved configuration activation for: %s", request.configurationName
             ),
         )
@@ -1117,7 +1117,7 @@ class MachineConfigClient(ServiceApiClientBase):
             GetConfigurationActivationApiResult,
             "getConfigurationActivationResult",
             "getConfigurationActivation",
-            success_log=lambda response: self.logger.info("Successfully retrieved configuration activation"),
+            success_log=lambda _response: self.logger.info("Successfully retrieved configuration activation"),
         )
 
     def get_configuration_activation(
@@ -1302,7 +1302,7 @@ class MachineConfigClient(ServiceApiClientBase):
             DeleteConfigurationActivationApiResult,
             "deleteConfigurationActivationResult",
             "deleteConfigurationActivation",
-            success_log=lambda response: self.logger.info("Successfully deleted configuration activation"),
+            success_log=lambda _response: self.logger.info("Successfully deleted configuration activation"),
         )
 
     def delete_configuration_activation(
