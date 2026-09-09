@@ -69,6 +69,18 @@ for their service.
   transparent paging (`query_samples()` / `iter_query_samples()`) and server-streaming
   (`iter_query_samples_stream()`).  Results convert to pandas DataFrames, NumPy arrays, and Excel
   via the optional `[analysis]` extra.
+- **DataSets** — `client.annotation.datasets`.  Name a region of the archive (time ranges plus the
+  PVs covered over them) so it can be found, annotated, and exported later: `save_dataset()`,
+  `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, and a
+  `get_datasets(ids)` batch fetch, with the `DataSetQuery` criterion helpers.
+- **Annotations and calculations** — `client.annotation.annotations`.  Attach conclusions and
+  derived values to those datasets, with column-level provenance recording what each column came
+  from: `save_annotation()`, `get_annotation()`, `query_annotations()`, `iter_annotations()`,
+  `delete_annotation()`, `get_calculations()`, and the `AnnotationQuery` helpers.  Calculations are
+  built with the `data_frame` builders and read back with `data_frame_conversions`, which also
+  bridges to pandas under the optional `[analysis]` extra.
+- **Export** — `client.annotation.export`.  Export a saved dataset, ad-hoc data blocks, and/or
+  calculations to HDF5, CSV, or XLSX.  The file is written on the server; there is no retrieval RPC.
 - **Provider registration** — `client.ingestion_client.register_provider()`.  The rest of the
   ingestion API is not yet implemented.
 
@@ -97,10 +109,6 @@ Note the v2 query API comes from unreleased dp-grpc work and will not work again
   - `queryTable()` — PV time-series data in tabular format
   - `queryPvStats()` — archive ingestion statistics for PVs
   - `queryProviders()` / `queryProviderStats()` — provider information and ingestion statistics
-- **Annotation Service**
-  - `saveDataSet()` / `queryDataSets()` — datasets over collections of PVs and time ranges
-  - `saveAnnotation()` / `queryAnnotations()` — annotations targeting a dataset
-  - `exportData()` — export datasets to common file formats
 - **Ingestion Stream Service**
   - `subscribeDataEvent()` — notification when a data condition in the ingestion stream triggers
 

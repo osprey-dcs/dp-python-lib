@@ -104,10 +104,26 @@ from dp_python_lib.client import (
     QuerySampleStatusesRequestParams,
     sampling_clock,
     timestamp_list,
+    DataSetClient,
+    DataSetQuery,
+    DataSetQuery as DS,
+    SaveDataSetRequestParams,
+    data_block,
+    AnnotationsClient,
+    AnnotationQuery,
+    AnnotationQuery as AQ,
+    SaveAnnotationRequestParams,
+    calculations,
+    ExportClient,
+    ExportFormat,
+    ExportDataRequestParams,
+    calculations_spec,
 )
 
 from dp_python_lib.client import query_conversions as qc
 from dp_python_lib.client import sample_status_conversions as ssc
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
 
 client: MldpClient = MldpClient()
 begin: datetime = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -117,6 +133,19 @@ end: datetime = datetime(2024, 1, 2, tzinfo=timezone.utc)
 # building the query.  Snippets that demonstrate query *construction* build their own.
 params: QueryParams = QueryParams(
     begin_time=begin, end_time=end, pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))
+
+# The datasets-and-annotations recipe is one continuous worked example: it saves a dataset, then an
+# annotation on it, then calculations, then exports and deletes them.  These are the handles the
+# recipe establishes in its own earlier snippets and legitimately carries forward, the way `client`
+# and `params` are carried above.  Server-assigned ids are strings.
+t0: datetime = datetime(2026, 2, 2, 18, 0, tzinfo=timezone.utc)
+t1: datetime = datetime(2026, 2, 2, 19, 0, tzinfo=timezone.utc)
+# Typed `str` because the recipe's snippets narrow the Optional accessors with an assert before
+# carrying the id forward -- which is the pattern conventions.md teaches, so the declared type here
+# is the post-narrowing one.
+dataset_id: str = "6aa1bb271a768e97db44d426"
+annotation_id: str = "6aa1bb271a768e97db44d427"
+calculations_id: str = "6aa1bb271a768e97db44d428"
 # --- end preamble ---
 """
 

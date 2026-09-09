@@ -529,10 +529,62 @@ Notes:
 
 ### DataSets, Annotations, and Export API (Annotation Service)
 
-Phase 1 of issue #6 (`plan/tickets/6/plan.md`) added three feature clients on the `annotation` facade:
+Issue #6 (`plan/tickets/6/plan.md`) added three feature clients on the `annotation` facade:
 `client.annotation.datasets` (`DataSetClient`), `client.annotation.annotations` (`AnnotationsClient`), and
-`client.annotation.export` (`ExportClient`).  The full usage section lands with the cookbook recipe in PR 2; the
-invariants worth knowing before touching this code:
+`client.annotation.export` (`ExportClient`).  A DataSet names a region of the archive; an Annotation describes one
+or more DataSets and may own a Calculations payload of derived values; export writes any of it to a file on the
+server.  Worked example: `doc/cookbook/datasets-and-annotations.md`.
+
+```python
+from datetime import datetime, timezone
+from dp_python_lib.client import (
+    MldpClient, SaveDataSetRequestParams, SaveAnnotationRequestParams, ExportDataRequestParams, ExportFormat,
+    DataSetQuery as DS, AnnotationQuery as AQ, data_block, calculations, calculations_spec, sampling_clock,
+)
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
+
+client = MldpClient()
+ds, an, ex = client.annotation.datasets, client.annotation.annotations, client.annotation.export
+t0 = datetime(2026, 2, 2, 18, tzinfo=timezone.utc)
+t1 = datetime(2026, 2, 2, 19, tzinfo=timezone.utc)
+
+# a region of the archive: one DataBlock per (time range, PV list).  Every PV must already have
+# ingested data -- see the archive-existence invariant below.
+dataset_id = ds.save_dataset(SaveDataSetRequestParams(
+    name="CXI shift, hour 1", owner_id="cmcchesney",
+    data_blocks=[data_block(t0, t1, ["BPMS:GUNB:314:X"])],
+    tags=["cxi-3443"], attributes={"EXP": "CXI_3443"}, modified_by="cmcchesney")).dataset_id
+
+# derived values with column-level provenance, one frame per time axis
+frame = dfb.data_frame(
+    sampling_clock(start_time=t0, period_nanos=1_000_000_000, count=3),
+    [dfb.double_column("x_rms", [0.31, 0.29, 0.33], metadata=dfb.column_metadata(
+        provenance=dfb.provenance(process="1 Hz RMS",
+                                  derived_from=[dfb.pv_source("BPMS:GUNB:314:X", (t0, t1))])))])
+saved = an.save_annotation(SaveAnnotationRequestParams(
+    name="Orbit drift", owner_id="cmcchesney", dataset_ids=[dataset_id],
+    tags=["reviewed"], calculations=calculations({"orbit-rms": frame})))
+
+# find it again; query results carry ids, so resolve a page's datasets in ONE call
+for a in an.iter_annotations([AQ.tags(["reviewed"]), AQ.attributes("EXP")]):   # key-only search
+    print(a.name, a.dataSetIds, bool(a.calculationsId))
+datasets = ds.get_datasets([i for a in an.iter_annotations([AQ.datasets([dataset_id])])
+                            for i in a.dataSetIds])
+
+# read the calculations back (get_annotation is the only method returning them inline)
+calcs = an.get_calculations(saved.calculations_id).calculations
+columns = dfc.data_frame_columns(calcs.calculationDataFrames[0].frame)   # plain Python, no extras
+frames = dfc.calculations_to_dataframes(calcs)                          # pandas, [analysis] extra
+
+# export; then tear down annotations first, since delete_dataset is refused while referenced
+ex.export_data(ExportDataRequestParams(ExportFormat.HDF5, dataset_id=dataset_id,
+                                       calculations_spec=calculations_spec(saved.calculations_id)))
+an.delete_annotation(saved.annotation_id)
+ds.delete_dataset(dataset_id)
+```
+
+Invariants worth knowing before touching this code:
 
 - **`saveDataSet` requires every PV named in a data block to already exist in the archive** — that is, to have
   *ingested data*.  The server's error text says `no PV metadata found for names: [...]`, but the check is a
@@ -579,6 +631,10 @@ invariants worth knowing before touching this code:
   large `$in` and an oversized request message.  A short result is logged at WARNING, since an id withheld for any
   other reason is indistinguishable from a dangling one.
 - `patchDataSet` / `patchAnnotation` are reserved "not implemented" placeholders and are not wrapped.
+- Calculations are built with `data_frame.py` and read back with `data_frame_conversions.py`; both are shared with
+  #16/#17 rather than local to this area.  `data_frame_from_pandas()` always emits a `TimestampList`, never an
+  inferred `SamplingClock`, and rejects `NaN` fail-loud: a dense typed column cannot express a gap, so use
+  `data_column()` or a separate frame.
 
 ### Sample Status API (Annotation Service)
 

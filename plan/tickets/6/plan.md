@@ -44,6 +44,15 @@
   collision surfaced and was resolved: the `data_frame()` *function* is deliberately not re-exported from
   `dp_python_lib.client`, because binding that name would shadow the `data_frame` *module* and break the
   `from dp_python_lib.client import data_frame as dfb` form this plan's own reference snippet uses.
+- **Phase 4 implemented 2026-09-09.**  `doc/cookbook/datasets-and-annotations.md` (continuing the shared worked
+  example: a dataset over the CXI shift's first hour, an orbit-drift annotation, a 1 Hz RMS calculation with
+  provenance, and the export), the cookbook README table and worked-example note, the `README.md` move of the three
+  Annotation Service bullets from TODO to Current state, and the `CLAUDE.md` usage section.  The integration test
+  grew the Phase 4 legs — builder-made calculations read back through `data_frame_conversions` with a sub-second
+  axis (so the round trip exercises nanosecond arithmetic rather than whole seconds), provenance survival, and four
+  export cases — for 25 tests, 12 subtests, all passing against dp-service `fddf692`.  The checker preamble gained
+  the new names plus the recipe's shared worked-example handles.  The `CLAUDE.md` snippet was extracted and **run
+  against the live server**, not just type-checked: every documented call succeeds end to end.
 
 ## Overview
 

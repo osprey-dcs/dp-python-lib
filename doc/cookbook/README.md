@@ -26,6 +26,7 @@ client.
 | [Recording machine configuration](machine-configuration.md) | Defining configurations, recording when each was active, closing and opening intervals, and answering "what was the machine doing at 18:04?" |
 | [Querying time-series data](query.md) | Retrieving samples by PV name, by metadata, or by machine configuration, and converting results to pandas / NumPy / Excel |
 | [Labeling samples](sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
+| [DataSets and annotations](datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, round-tripping calculations through pandas, and exporting |
 
 **Not yet covered: getting data in.**  `IngestionClient` currently exposes only
 `register_provider()`, so there is no ingestion recipe.
@@ -45,6 +46,8 @@ query recipes is the data the earlier recipes create:
   `MODE=09`), activated over a shift with `DEST=CXI` and `EXP=CXI_3443`.
 - Queries that retrieve those PVs by name, by *"every monitor in GUNB"*, and by *"whatever ran
   during the CXI shift"*.
+- A dataset naming the first hour of that shift, an annotation recording an orbit drift, and a 1 Hz
+  RMS calculation attached to it with provenance pointing back at the source PV.
 
 Attribute names and values are the facility's; tag values are illustrative placeholders.
 
