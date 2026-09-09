@@ -148,11 +148,14 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 
 - `src/dp_python_lib/client/mldp_client.py` - Main client wrapper for the gRPC services
 - `src/dp_python_lib/client/ingestion_client.py` - Ingestion service client with methods like `register_provider()`
-- `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (exposes `.pv_metadata` and `.machine_config`, with room to grow `.annotations`)
+- `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (`.pv_metadata`, `.machine_config`, `.sample_status`, `.datasets`, `.annotations`, `.export` — every implemented `DpAnnotationService` feature area)
 - `src/dp_python_lib/client/pv_metadata_client.py` - PV metadata client (`save_pv_metadata()`, `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`) plus the `PvMetadataQuery` (`Q`) criterion helpers
 - `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers and the `to_timestamp()` helper (tz-aware datetime / epoch seconds / `common.Timestamp`). Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire
 - `src/dp_python_lib/client/sample_status_client.py` - Sample status client (`save_sample_statuses()`, `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, `delete_sample_statuses()`) plus the `sampling_clock()` / `timestamp_list()` axis builders and the `SampleStatusColumn` / `SampleStatusFrame` construction classes. A status's identity key is `(pvName, timestamp, domain, layer)`; `delete_sample_statuses()` requires either `pv_names` or an explicit `all_pvs=True` opt-in for the destructive wildcard
 - `src/dp_python_lib/client/sample_status_conversions.py` - Per-sample expansion of query results (no optional extras required): `expand_data_timestamps()` (SamplingClock positions computed in **integer nanoseconds**, never float seconds — the exact-match contract depends on it), `bucket_to_rows()` / `buckets_to_rows()` / `iter_rows()` yielding `SampleStatusRow` objects with absent confidence/reason surfaced as `None` rather than fabricated `0.0`/`""`
+- `src/dp_python_lib/client/dataset_client.py` - DataSet client (`save_dataset()`, `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, plus the `get_datasets(ids)` batch fetch that avoids the annotation-listing N+1) with the `DataSetQuery` (`DS`) criterion helpers and the `data_block()` builder. `data_block()` is the only place `begin < end` is checked — the server does not
+- `src/dp_python_lib/client/annotations_client.py` - Annotations client (`save_annotation()`, `get_annotation()`, `query_annotations()`, `iter_annotations()`, `delete_annotation()`, `get_calculations()`) with the `AnnotationQuery` (`AQ`) criterion helpers and the `calculations()` builder, which takes a `dict[str, DataFrame]` so frame-name uniqueness is true by construction. Note `AnnotationsClient` (feature client) vs `AnnotationClient` (facade)
+- `src/dp_python_lib/client/export_client.py` - Export client (`export_data()`) with the `ExportFormat` str enum and the `calculations_spec()` builder
 - `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `src/dp_python_lib/client/query_conversions.py` - Pythonic conversions for query results (optional `[analysis]` extra: pandas/numpy/openpyxl, imported lazily). `data_value_to_python()` (oneof extractor: scalars→native, timestamp→epoch-nanos, array→list, structure→dict, image→`Image` wrapper, fail-loud on unhandled arm), `column_table_to_dataframe()` (UTC datetime index + one column per DataColumn; dense-alignment and duplicate-column-name fail-loud; ColumnMetadata in `df.attrs`), `column_table_to_numpy()` (dict of 1-D arrays; complex arms stay 1-D object arrays rather than collapsing to 2-D), `dataframe_to_excel()` (thin `to_excel()` wrapper: row-limit guard, tz-drop, complex-cell stringification), and `query_samples_to_dataframe()`/`stream_query_samples_to_dataframes()` whole-query conveniences (unary concats by column name; streaming yields per-page frames lazily)
 - `src/dp_python_lib/client/service_api_client_base.py` - Base class for the service clients: owns the channel and the one-per-client gRPC stub, and provides `_dispatch()`, the shared three-tier sender that all 18 unary `_send_*` methods delegate to
@@ -163,6 +166,11 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `tests/unit/test_machine_config_activation_client.py` - Unit tests for the ConfigurationActivation side of MachineConfigClient (incl. composite-key validation, timestamp handling, getActiveConfigurations)
 - `tests/unit/test_sample_status_client.py` - Unit tests for SampleStatusClient (frame/column validation, axis builders, three-tier error handling, paging, streaming, delete opt-in, `limit=0` regression)
 - `tests/unit/test_sample_status_conversions.py` - Unit tests for sample_status_conversions (nanosecond-exact axis expansion, absent-vs-zero confidence, alignment fail-loud, laziness)
+- `tests/unit/test_dataset_client.py` - Unit tests for DataSetClient (request building, `DataSetQuery` incl. key-only attributes, `data_block()` validation, three-tier error handling, paging, `get_datasets()` dedup/empty/absent-id)
+- `tests/unit/test_annotations_client.py` - Unit tests for AnnotationsClient (incl. `calculations()`, absent-vs-empty calculations on save, the `calculations_id` empty-string-vs-None rule, three-tier error handling, paging)
+- `tests/unit/test_export_client.py` - Unit tests for ExportClient (`ExportFormat` mapping and unreachable `UNSPECIFIED`, `calculations_spec()`, the zero-source rejection, three-tier error handling)
+- `tests/unit/test_annotation_client.py` - Unit tests pinning the `AnnotationClient` facade wiring (every feature client present, one shared channel, one stub apiece)
+- `tests/integration/test_datasets_annotations_integration.py` - Live-server round trip for datasets/annotations/calculations; ingests its own samples first, because `saveDataSet` requires archived PVs
 - `tests/unit/test_query_client.py` - Unit tests for QueryClient (request building, three-tier error handling, unary paging, streaming, `PvQuery`/`ConfigQuery` helpers, `QueryParams` validation)
 - `tests/unit/test_query_conversions.py` - Unit tests for query_conversions (each DataValue arm, dense-alignment and duplicate-column-name fail-loud, int-gap float-upcast, timestamp columns, 1-D object arrays for complex arms, metadata in attrs, concat-by-name, Excel row-limit/stringification/native-bytes; DataFrame/NumPy/Excel tests skip cleanly when the `[analysis]` extra is absent)
 - `pyproject.toml` - Project metadata and dependencies
@@ -513,6 +521,39 @@ Notes:
   requirements scan) is additive: `column_table_to_numpy()`'s dict-of-arrays is the intended substrate for a
   `column_table_to_torch()` behind a separate optional `[torch]` extra — no change to `QueryClient` or the NumPy
   path. Not built yet.
+
+### DataSets, Annotations, and Export API (Annotation Service)
+
+Phase 1 of issue #6 (`plan/tickets/6/plan.md`) added three feature clients on the `annotation` facade:
+`client.annotation.datasets` (`DataSetClient`), `client.annotation.annotations` (`AnnotationsClient`), and
+`client.annotation.export` (`ExportClient`).  The full usage section lands with the cookbook recipe in PR 2; the
+invariants worth knowing before touching this code:
+
+- **`saveDataSet` requires every PV named in a data block to already exist in the archive** — that is, to have
+  *ingested data*.  The server's error text says `no PV metadata found for names: [...]`, but the check is a
+  `distinct` on `pvName` over the **buckets** collection (`MongoAnnotationHandler.validateSaveDataSetRequest` →
+  `MongoSyncQueryClient.executeQueryPvExistence`), so saving PV metadata does **not** satisfy it.  Nothing is
+  validated client-side (the client cannot know what is archived), but any test or example must use an archived PV.
+  `ingestData()` acks *before* the bucket becomes queryable, so a `saveDataSet` issued immediately after ingesting
+  still fails; `tests/integration/test_datasets_annotations_integration.py` probes until it succeeds rather than
+  sleeping a fixed interval, and ingests through the generated stub because `IngestionClient` wraps only
+  `registerProvider()` until #17.
+- **The server does not check `begin < end` on a `DataBlock`** (it checks only that each bound is non-zero and that
+  `pvNames` is non-empty), so `data_block()`'s check is the only one there is.
+- **Delete-not-found is a business error**, not a silent success, on both `delete_dataset()` and
+  `delete_annotation()`.  `delete_dataset()` is also refused while any annotation references the dataset — delete the
+  annotations first; there is deliberately no cascade.
+- **`save_annotation()` replaces in full, including calculations**: omitting them clears *and deletes* the stored
+  object, and a replacement returns a new `calculationsId`.  `get_annotation()` is the only method returning
+  calculations inline; `query_annotations()` results carry the id with empty content.
+- Two criterion-helper differences from the older `PvMetadataQuery` / `ConfigurationQuery` helpers, both following
+  the proto: `attributes(key)` accepts an absent `values` list as a key-only existence search, and `criteria` is
+  optional because the server treats an empty list as match-all.  Back-porting these to the five existing helpers is
+  [#40](https://github.com/osprey-dcs/dp-python-lib/issues/40) / [#41](https://github.com/osprey-dcs/dp-python-lib/issues/41).
+- `ExportFormat` makes the server-rejected `EXPORT_FORMAT_UNSPECIFIED` unreachable, and `ExportDataRequestParams`
+  requires at least one of `dataset_id` / `data_blocks` / `calculations_spec`.  The exported file lives on the
+  **server's** filesystem and there is no retrieval RPC, so there is no download convenience.
+- `patchDataSet` / `patchAnnotation` are reserved "not implemented" placeholders and are not wrapped.
 
 ### Sample Status API (Annotation Service)
 

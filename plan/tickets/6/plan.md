@@ -31,6 +31,11 @@
   re-verified in the dp-service Java source rather than taken from the ticket.  Four things the first pass missed
   were folded in: the delete-not-found tier, the absent server-side `begin < end` check, the epoch-0 `SamplingClock`
   rejection (all three now rows in section 3), and the redundant-`count` question (resolved in D6).
+- **Phase 1 implemented and merged-ready 2026-09-09.**  Three clients, criterion helpers, params/results, facade
+  wiring, 149 unit tests (570 total).  The wrapper-level integration test passes against a live ecosystem built from
+  dp-service `fddf692` (annotation on `localhost:50053`, ingestion on `:50051`): 18 tests, 12 subtests.  Writing it
+  surfaced one further server behavior the triage had not found — `saveDataSet` requires its PVs to exist in the
+  archive — now recorded in section 3 and in `CLAUDE.md`.
 
 ## Overview
 
@@ -162,6 +167,7 @@ attributes a reader of this table might reach for do not exist.
 | Page tokens are **opaque keyset tokens** carrying a query discriminator; a malformed, whitespace, legacy skip-offset, or wrong-query token is **rejected** (`REJECT`) | `iter_*` surfaces that as `RuntimeError`; nothing to parse.  Note the three metadata queries still use skip tokens with silent restart (dp-service #193) — `conventions.md` must describe both behaviors |
 | Criteria AND across the list, OR within a criterion; **at most one `TextCriterion` per request** (a second is a validation `REJECT`, since two `$text` clauses cannot be ANDed) | client-side `ValueError` naming the rule is cheap and matches the "fail with a message naming the problem" posture (Q7) |
 | Blank criterion values are rejected server-side; `IdCriterion` ids and get/delete ids must be valid ObjectIds (malformed → `REJECT`, not "not found") | helpers reject empty inputs as usual; no ObjectId validation client-side (format is a server implementation detail) |
+| **`saveDataSet` requires every PV named in a data block to already exist IN THE ARCHIVE.**  Despite the error text (`no PV metadata found for names: [...]`), the check is a `distinct` on `pvName` over the *buckets* collection (`MongoAnnotationHandler.validateSaveDataSetRequest` → `MongoSyncQueryClient.executeQueryPvExistence`) — saved PV metadata does **not** satisfy it.  Found 2026-09-09 while writing the Phase 1 integration test; neither the proto nor the ticket mentions it | nothing to validate client-side (the client cannot know what is archived), but it shapes the tests and the cookbook: a dataset can only name PVs with ingested data, so the integration test ingests its own samples first, and the cookbook's worked example must use an archived PV.  `ingestData()` acks *before* the bucket is queryable, so a save issued immediately after ingesting still fails — the test probes until it succeeds rather than sleeping a fixed interval |
 | `getDataSet` / `getAnnotation` / `getCalculations` not-found → `ExceptionalResult` | same "business error" tier as `get_pv_metadata` |
 | `deleteDataSet` / `deleteAnnotation` **not-found is also a `REJECT`**, not a silent success (`DeleteAnnotationDispatcher:34-36`, "no Annotation record found for id: …") | same business-error tier, so no code change — but the cookbook teardown and the integration test's delete-twice leg must expect an error result on the second delete, not a success |
 | `DataBlock` validation is **only** `beginTime.epochSeconds >= 1`, `endTime.epochSeconds >= 1`, and a non-empty `pvNames` (`AnnotationValidationUtility.validateDataBlock`) — the server never checks `begin < end` | D4's client-side `begin < end` check is the *only* one there is, not a duplicate of a server check.  A reversed block is accepted today, which is also why the proto's silence on half-openness is a real ambiguity rather than a documentation gap |
