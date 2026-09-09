@@ -9,6 +9,8 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from assignment_spy import watch_assignments
+
 from dp_python_lib.client.query_client import (
     ConfigQuery,
     PvQuery,
@@ -270,10 +272,12 @@ class TestBuildRequest(unittest.TestCase):
         self.assertEqual(req.executionOptions.pageToken, "")
 
     def test_build_limit_zero_is_set(self):
-        # limit=0 is a legitimate value distinct from "unset"; it must be honored.
+        # limit=0 is a legitimate value distinct from "unset"; it must be honored (cf. issue #13).
+        # A proto3 scalar reads 0 whether or not it was assigned, so watch the assignment itself.
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=0)
-        req = self.client._build_query_samples_request(p)
-        self.assertEqual(req.executionOptions.limit, 0)
+        with watch_assignments(query_pb2, "QuerySamplesRequest", "executionOptions.limit") as assigned:
+            self.client._build_query_samples_request(p)
+        self.assertEqual(assigned, [0], "limit=0 must be assigned, not dropped by a truthiness guard")
 
     def test_build_uses_validated_timestamps_not_reconversion(self):
         # The spec must carry the timestamps QueryParams converted and range-checked at construction.  Mutating

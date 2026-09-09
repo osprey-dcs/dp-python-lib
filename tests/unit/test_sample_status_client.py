@@ -1,7 +1,6 @@
 import os
 import sys
 import unittest
-import unittest.mock
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
@@ -9,6 +8,8 @@ import grpc
 
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
+
+from assignment_spy import watch_assignments
 
 from dp_python_lib.client.sample_status_client import (
     QuerySampleStatusesRequestParams,
@@ -364,29 +365,10 @@ class TestQuerySampleStatuses(unittest.TestCase):
 
     def test_build_request_limit_zero_is_set(self):
         # limit=0 is meaningful ("server picks a default"); a truthiness guard would drop it (cf. issue #13).
-        # A proto3 scalar set to 0 is indistinguishable from an unset one -- same reflection, same empty wire
-        # bytes -- so the only way to tell "assigned 0" from "skipped" is to watch the assignment itself.
+        # A proto3 scalar reads 0 whether or not it was assigned, so watch the assignment itself.
         params = QuerySampleStatusesRequestParams(BEGIN, END, limit=0)
-        assigned = []
-
-        class _AssignmentSpy:
-            """Wraps a real request, recording assignments to .limit and forwarding everything else."""
-
-            def __init__(self, target):
-                object.__setattr__(self, "_target", target)
-
-            def __getattr__(self, name):
-                return getattr(object.__getattribute__(self, "_target"), name)
-
-            def __setattr__(self, name, value):
-                if name == "limit":
-                    assigned.append(value)
-                setattr(object.__getattribute__(self, "_target"), name, value)
-
-        spy = _AssignmentSpy(annotation_pb2.QuerySampleStatusesRequest())
-        with unittest.mock.patch.object(annotation_pb2, "QuerySampleStatusesRequest", return_value=spy):
+        with watch_assignments(annotation_pb2, "QuerySampleStatusesRequest", "limit") as assigned:
             self.client._build_query_sample_statuses_request(params)
-
         self.assertEqual(assigned, [0], "limit=0 must be assigned, not dropped by a truthiness guard")
 
     def test_build_request_omits_empty_filters(self):
