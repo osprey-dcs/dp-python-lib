@@ -108,43 +108,15 @@ class IngestionClient(ServiceApiClientBase):
         :param request: RegisgerProviderRequest object with parameters for call to registerProvider().
         :return: Returns a RegisterProviderApiResult with the method response and status information.
         """
-        self.logger.info("Calling registerProvider API for provider: %s", request.providerName)
-
-        try:
-            self.logger.debug("Invoking stub.registerProvider with request")
-            response = self._stub.registerProvider(request)
-            self.logger.debug("Received response from registerProvider API")
-
-            # Check if response contains an exceptional result (error)
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("RegisterProvider API returned business error: %s", error_msg)
-                return RegisterProviderApiResult(is_error=True, message=error_msg)
-
-            # Check if response contains registration result (success)
-            elif response.HasField("registrationResult"):
-                self.logger.info("Successfully registered provider: %s", request.providerName)
-                return RegisterProviderApiResult(is_error=False, message="", response=response)
-
-            # Unexpected response structure
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor registrationResult found"
-                self.logger.error(error_msg)
-                return RegisterProviderApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            # Safely get error code - may not be available in test mocks
-            try:
-                error_code = e.code()
-                self.logger.error("gRPC error during registerProvider: %s (code: %s)", e.details(), error_code)
-            except (AttributeError, TypeError):
-                self.logger.error("gRPC error during registerProvider: %s", e.details())
-            return RegisterProviderApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during registerProvider: %s", str(e))
-            return RegisterProviderApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.registerProvider,
+            request,
+            RegisterProviderApiResult,
+            "registrationResult",
+            "registerProvider",
+            request_log=lambda: self.logger.info("Calling registerProvider API for provider: %s", request.providerName),
+            success_log=lambda response: self.logger.info("Successfully registered provider: %s", request.providerName),
+        )
 
     def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:
         """

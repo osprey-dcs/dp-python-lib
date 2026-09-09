@@ -501,38 +501,19 @@ class SampleStatusClient(ServiceApiClientBase):
         :param request: SaveSampleStatusesRequest with parameters for the call.
         :return: A SaveSampleStatusesApiResult with the method response and status information.
         """
-        self.logger.info("Calling saveSampleStatuses API with %d frame(s)", len(request.frames))
-
-        try:
-            self.logger.debug("Invoking stub.saveSampleStatuses with request")
-            response = self._stub.saveSampleStatuses(request)
-            self.logger.debug("Received response from saveSampleStatuses API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("SaveSampleStatuses API returned business error: %s", error_msg)
-                return SaveSampleStatusesApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("saveSampleStatusesResult"):
-                self.logger.info(
-                    "Successfully saved %d sample status(es)", response.saveSampleStatusesResult.savedCount
-                )
-                return SaveSampleStatusesApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor saveSampleStatusesResult found"
-                self.logger.error(error_msg)
-                return SaveSampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during saveSampleStatuses: %s", e.details())
-            return SaveSampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during saveSampleStatuses: %s", str(e))
-            return SaveSampleStatusesApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.saveSampleStatuses,
+            request,
+            SaveSampleStatusesApiResult,
+            "saveSampleStatusesResult",
+            "saveSampleStatuses",
+            request_log=lambda: self.logger.info(
+                "Calling saveSampleStatuses API with %d frame(s)", len(request.frames)
+            ),
+            success_log=lambda response: self.logger.info(
+                "Successfully saved %d sample status(es)", response.saveSampleStatusesResult.savedCount
+            ),
+        )
 
     def save_sample_statuses(self, request_params: SaveSampleStatusesRequestParams) -> SaveSampleStatusesApiResult:
         """
@@ -604,39 +585,17 @@ class SampleStatusClient(ServiceApiClientBase):
         :param request: QuerySampleStatusesRequest with parameters for the call.
         :return: A QuerySampleStatusesApiResult with the method response and status information.
         """
-        self.logger.info("Calling querySampleStatuses API")
-
-        try:
-            self.logger.debug("Invoking stub.querySampleStatuses with request")
-            response = self._stub.querySampleStatuses(request)
-            self.logger.debug("Received response from querySampleStatuses API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("QuerySampleStatuses API returned business error: %s", error_msg)
-                return QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("querySampleStatusesResult"):
-                self.logger.info(
-                    "Successfully queried %d sample status bucket(s)",
-                    len(response.querySampleStatusesResult.sampleStatusBuckets),
-                )
-                return QuerySampleStatusesApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor querySampleStatusesResult found"
-                self.logger.error(error_msg)
-                return QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during querySampleStatuses: %s", e.details())
-            return QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during querySampleStatuses: %s", str(e))
-            return QuerySampleStatusesApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.querySampleStatuses,
+            request,
+            QuerySampleStatusesApiResult,
+            "querySampleStatusesResult",
+            "querySampleStatuses",
+            success_log=lambda response: self.logger.info(
+                "Successfully queried %d sample status bucket(s)",
+                len(response.querySampleStatusesResult.sampleStatusBuckets),
+            ),
+        )
 
     def query_sample_statuses(
         self,
@@ -828,38 +787,19 @@ class SampleStatusClient(ServiceApiClientBase):
         :param request: DeleteSampleStatusesRequest with parameters for the call.
         :return: A DeleteSampleStatusesApiResult with the method response and status information.
         """
-        self.logger.info("Calling deleteSampleStatuses API for domain=%s layer=%s", request.domain, request.layer)
-
-        try:
-            self.logger.debug("Invoking stub.deleteSampleStatuses with request")
-            response = self._stub.deleteSampleStatuses(request)
-            self.logger.debug("Received response from deleteSampleStatuses API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("DeleteSampleStatuses API returned business error: %s", error_msg)
-                return DeleteSampleStatusesApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("deleteSampleStatusesResult"):
-                self.logger.info(
-                    "Successfully deleted %d sample status(es)", response.deleteSampleStatusesResult.deletedCount
-                )
-                return DeleteSampleStatusesApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor deleteSampleStatusesResult found"
-                self.logger.error(error_msg)
-                return DeleteSampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during deleteSampleStatuses: %s", e.details())
-            return DeleteSampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during deleteSampleStatuses: %s", str(e))
-            return DeleteSampleStatusesApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.deleteSampleStatuses,
+            request,
+            DeleteSampleStatusesApiResult,
+            "deleteSampleStatusesResult",
+            "deleteSampleStatuses",
+            request_log=lambda: self.logger.info(
+                "Calling deleteSampleStatuses API for domain=%s layer=%s", request.domain, request.layer
+            ),
+            success_log=lambda response: self.logger.info(
+                "Successfully deleted %d sample status(es)", response.deleteSampleStatusesResult.deletedCount
+            ),
+        )
 
     def delete_sample_statuses(
         self,

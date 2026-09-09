@@ -701,35 +701,19 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: SaveConfigurationRequest with parameters for the call.
         :return: A SaveConfigurationApiResult with the method response and status information.
         """
-        self.logger.info("Calling saveConfiguration API for configuration: %s", request.configurationName)
-
-        try:
-            self.logger.debug("Invoking stub.saveConfiguration with request")
-            response = self._stub.saveConfiguration(request)
-            self.logger.debug("Received response from saveConfiguration API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("SaveConfiguration API returned business error: %s", error_msg)
-                return SaveConfigurationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("saveConfigurationResult"):
-                self.logger.info("Successfully saved configuration: %s", request.configurationName)
-                return SaveConfigurationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor saveConfigurationResult found"
-                self.logger.error(error_msg)
-                return SaveConfigurationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during saveConfiguration: %s", e.details())
-            return SaveConfigurationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during saveConfiguration: %s", str(e))
-            return SaveConfigurationApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.saveConfiguration,
+            request,
+            SaveConfigurationApiResult,
+            "saveConfigurationResult",
+            "saveConfiguration",
+            request_log=lambda: self.logger.info(
+                "Calling saveConfiguration API for configuration: %s", request.configurationName
+            ),
+            success_log=lambda response: self.logger.info(
+                "Successfully saved configuration: %s", request.configurationName
+            ),
+        )
 
     def save_configuration(self, request_params: SaveConfigurationRequestParams) -> SaveConfigurationApiResult:
         """
@@ -776,35 +760,17 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: GetConfigurationRequest with parameters for the call.
         :return: A GetConfigurationApiResult with the method response and status information.
         """
-        self.logger.info("Calling getConfiguration API for: %s", request.configurationName)
-
-        try:
-            self.logger.debug("Invoking stub.getConfiguration with request")
-            response = self._stub.getConfiguration(request)
-            self.logger.debug("Received response from getConfiguration API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("GetConfiguration API returned business error: %s", error_msg)
-                return GetConfigurationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("getConfigurationResult"):
-                self.logger.info("Successfully retrieved configuration: %s", request.configurationName)
-                return GetConfigurationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor getConfigurationResult found"
-                self.logger.error(error_msg)
-                return GetConfigurationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during getConfiguration: %s", e.details())
-            return GetConfigurationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during getConfiguration: %s", str(e))
-            return GetConfigurationApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.getConfiguration,
+            request,
+            GetConfigurationApiResult,
+            "getConfigurationResult",
+            "getConfiguration",
+            request_log=lambda: self.logger.info("Calling getConfiguration API for: %s", request.configurationName),
+            success_log=lambda response: self.logger.info(
+                "Successfully retrieved configuration: %s", request.configurationName
+            ),
+        )
 
     def get_configuration(self, configuration_name: str) -> GetConfigurationApiResult:
         """
@@ -858,38 +824,20 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: QueryConfigurationsRequest with parameters for the call.
         :return: A QueryConfigurationsApiResult with the method response and status information.
         """
-        self.logger.info("Calling queryConfigurations API with %d criteria", len(request.criteria))
-
-        try:
-            self.logger.debug("Invoking stub.queryConfigurations with request")
-            response = self._stub.queryConfigurations(request)
-            self.logger.debug("Received response from queryConfigurations API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("QueryConfigurations API returned business error: %s", error_msg)
-                return QueryConfigurationsApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("queryConfigurationsResult"):
-                self.logger.info(
-                    "QueryConfigurations returned %d records",
-                    len(response.queryConfigurationsResult.configurations),
-                )
-                return QueryConfigurationsApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor queryConfigurationsResult found"
-                self.logger.error(error_msg)
-                return QueryConfigurationsApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during queryConfigurations: %s", e.details())
-            return QueryConfigurationsApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during queryConfigurations: %s", str(e))
-            return QueryConfigurationsApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.queryConfigurations,
+            request,
+            QueryConfigurationsApiResult,
+            "queryConfigurationsResult",
+            "queryConfigurations",
+            request_log=lambda: self.logger.info(
+                "Calling queryConfigurations API with %d criteria", len(request.criteria)
+            ),
+            success_log=lambda response: self.logger.info(
+                "QueryConfigurations returned %d records",
+                len(response.queryConfigurationsResult.configurations),
+            ),
+        )
 
     def query_configurations(
         self,
@@ -967,35 +915,17 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: DeleteConfigurationRequest with parameters for the call.
         :return: A DeleteConfigurationApiResult with the method response and status information.
         """
-        self.logger.info("Calling deleteConfiguration API for: %s", request.configurationName)
-
-        try:
-            self.logger.debug("Invoking stub.deleteConfiguration with request")
-            response = self._stub.deleteConfiguration(request)
-            self.logger.debug("Received response from deleteConfiguration API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("DeleteConfiguration API returned business error: %s", error_msg)
-                return DeleteConfigurationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("deleteConfigurationResult"):
-                self.logger.info("Successfully deleted configuration: %s", request.configurationName)
-                return DeleteConfigurationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = "Unexpected response format: neither exceptionalResult nor deleteConfigurationResult found"
-                self.logger.error(error_msg)
-                return DeleteConfigurationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during deleteConfiguration: %s", e.details())
-            return DeleteConfigurationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during deleteConfiguration: %s", str(e))
-            return DeleteConfigurationApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.deleteConfiguration,
+            request,
+            DeleteConfigurationApiResult,
+            "deleteConfigurationResult",
+            "deleteConfiguration",
+            request_log=lambda: self.logger.info("Calling deleteConfiguration API for: %s", request.configurationName),
+            success_log=lambda response: self.logger.info(
+                "Successfully deleted configuration: %s", request.configurationName
+            ),
+        )
 
     def delete_configuration(self, configuration_name: str) -> DeleteConfigurationApiResult:
         """
@@ -1070,40 +1000,20 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: SaveConfigurationActivationRequest with parameters for the call.
         :return: A SaveConfigurationActivationApiResult with the method response and status information.
         """
-        self.logger.info(
-            "Calling saveConfigurationActivation API for configuration: %s",
-            request.configurationName,
+        return self._dispatch(
+            self._stub.saveConfigurationActivation,
+            request,
+            SaveConfigurationActivationApiResult,
+            "saveConfigurationActivationResult",
+            "saveConfigurationActivation",
+            request_log=lambda: self.logger.info(
+                "Calling saveConfigurationActivation API for configuration: %s",
+                request.configurationName,
+            ),
+            success_log=lambda response: self.logger.info(
+                "Successfully saved configuration activation for: %s", request.configurationName
+            ),
         )
-
-        try:
-            self.logger.debug("Invoking stub.saveConfigurationActivation with request")
-            response = self._stub.saveConfigurationActivation(request)
-            self.logger.debug("Received response from saveConfigurationActivation API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("SaveConfigurationActivation API returned business error: %s", error_msg)
-                return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("saveConfigurationActivationResult"):
-                self.logger.info("Successfully saved configuration activation for: %s", request.configurationName)
-                return SaveConfigurationActivationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = (
-                    "Unexpected response format: neither exceptionalResult nor saveConfigurationActivationResult found"
-                )
-                self.logger.error(error_msg)
-                return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during saveConfigurationActivation: %s", e.details())
-            return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during saveConfigurationActivation: %s", str(e))
-            return SaveConfigurationActivationApiResult(is_error=True, message=error_msg)
 
     def save_configuration_activation(
         self, request_params: SaveConfigurationActivationRequestParams
@@ -1201,37 +1111,14 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: GetConfigurationActivationRequest with parameters for the call.
         :return: A GetConfigurationActivationApiResult with the method response and status information.
         """
-        self.logger.info("Calling getConfigurationActivation API")
-
-        try:
-            self.logger.debug("Invoking stub.getConfigurationActivation with request")
-            response = self._stub.getConfigurationActivation(request)
-            self.logger.debug("Received response from getConfigurationActivation API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("GetConfigurationActivation API returned business error: %s", error_msg)
-                return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("getConfigurationActivationResult"):
-                self.logger.info("Successfully retrieved configuration activation")
-                return GetConfigurationActivationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = (
-                    "Unexpected response format: neither exceptionalResult nor getConfigurationActivationResult found"
-                )
-                self.logger.error(error_msg)
-                return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during getConfigurationActivation: %s", e.details())
-            return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during getConfigurationActivation: %s", str(e))
-            return GetConfigurationActivationApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.getConfigurationActivation,
+            request,
+            GetConfigurationActivationApiResult,
+            "getConfigurationActivationResult",
+            "getConfigurationActivation",
+            success_log=lambda response: self.logger.info("Successfully retrieved configuration activation"),
+        )
 
     def get_configuration_activation(
         self,
@@ -1295,41 +1182,20 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: QueryConfigurationActivationsRequest with parameters for the call.
         :return: A QueryConfigurationActivationsApiResult with the method response and status information.
         """
-        self.logger.info("Calling queryConfigurationActivations API with %d criteria", len(request.criteria))
-
-        try:
-            self.logger.debug("Invoking stub.queryConfigurationActivations with request")
-            response = self._stub.queryConfigurationActivations(request)
-            self.logger.debug("Received response from queryConfigurationActivations API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("QueryConfigurationActivations API returned business error: %s", error_msg)
-                return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("queryConfigurationActivationsResult"):
-                self.logger.info(
-                    "QueryConfigurationActivations returned %d records",
-                    len(response.queryConfigurationActivationsResult.configurationActivations),
-                )
-                return QueryConfigurationActivationsApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = (
-                    "Unexpected response format: neither exceptionalResult nor "
-                    "queryConfigurationActivationsResult found"
-                )
-                self.logger.error(error_msg)
-                return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during queryConfigurationActivations: %s", e.details())
-            return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during queryConfigurationActivations: %s", str(e))
-            return QueryConfigurationActivationsApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.queryConfigurationActivations,
+            request,
+            QueryConfigurationActivationsApiResult,
+            "queryConfigurationActivationsResult",
+            "queryConfigurationActivations",
+            request_log=lambda: self.logger.info(
+                "Calling queryConfigurationActivations API with %d criteria", len(request.criteria)
+            ),
+            success_log=lambda response: self.logger.info(
+                "QueryConfigurationActivations returned %d records",
+                len(response.queryConfigurationActivationsResult.configurationActivations),
+            ),
+        )
 
     def query_configuration_activations(
         self,
@@ -1430,38 +1296,14 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: DeleteConfigurationActivationRequest with parameters for the call.
         :return: A DeleteConfigurationActivationApiResult with the method response and status information.
         """
-        self.logger.info("Calling deleteConfigurationActivation API")
-
-        try:
-            self.logger.debug("Invoking stub.deleteConfigurationActivation with request")
-            response = self._stub.deleteConfigurationActivation(request)
-            self.logger.debug("Received response from deleteConfigurationActivation API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("DeleteConfigurationActivation API returned business error: %s", error_msg)
-                return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("deleteConfigurationActivationResult"):
-                self.logger.info("Successfully deleted configuration activation")
-                return DeleteConfigurationActivationApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = (
-                    "Unexpected response format: neither exceptionalResult nor "
-                    "deleteConfigurationActivationResult found"
-                )
-                self.logger.error(error_msg)
-                return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during deleteConfigurationActivation: %s", e.details())
-            return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during deleteConfigurationActivation: %s", str(e))
-            return DeleteConfigurationActivationApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.deleteConfigurationActivation,
+            request,
+            DeleteConfigurationActivationApiResult,
+            "deleteConfigurationActivationResult",
+            "deleteConfigurationActivation",
+            success_log=lambda response: self.logger.info("Successfully deleted configuration activation"),
+        )
 
     def delete_configuration_activation(
         self,
@@ -1523,40 +1365,17 @@ class MachineConfigClient(ServiceApiClientBase):
         :param request: GetActiveConfigurationsRequest with parameters for the call.
         :return: A GetActiveConfigurationsApiResult with the method response and status information.
         """
-        self.logger.info("Calling getActiveConfigurations API")
-
-        try:
-            self.logger.debug("Invoking stub.getActiveConfigurations with request")
-            response = self._stub.getActiveConfigurations(request)
-            self.logger.debug("Received response from getActiveConfigurations API")
-
-            if response.HasField("exceptionalResult"):
-                error_msg = response.exceptionalResult.message
-                self.logger.warning("GetActiveConfigurations API returned business error: %s", error_msg)
-                return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
-
-            elif response.HasField("getActiveConfigurationsResult"):
-                self.logger.info(
-                    "GetActiveConfigurations returned %d records",
-                    len(response.getActiveConfigurationsResult.configurationActivations),
-                )
-                return GetActiveConfigurationsApiResult(is_error=False, message="", response=response)
-
-            else:
-                error_msg = (
-                    "Unexpected response format: neither exceptionalResult nor getActiveConfigurationsResult found"
-                )
-                self.logger.error(error_msg)
-                return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during getActiveConfigurations: %s", e.details())
-            return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during getActiveConfigurations: %s", str(e))
-            return GetActiveConfigurationsApiResult(is_error=True, message=error_msg)
+        return self._dispatch(
+            self._stub.getActiveConfigurations,
+            request,
+            GetActiveConfigurationsApiResult,
+            "getActiveConfigurationsResult",
+            "getActiveConfigurations",
+            success_log=lambda response: self.logger.info(
+                "GetActiveConfigurations returned %d records",
+                len(response.getActiveConfigurationsResult.configurationActivations),
+            ),
+        )
 
     def get_active_configurations(self, timestamp: TimestampInput | None = None) -> GetActiveConfigurationsApiResult:
         """
