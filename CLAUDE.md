@@ -717,11 +717,12 @@ Notes:
 - The deferred domain-registry RPCs (`saveSampleStatusDomain` / `querySampleStatusDomains`) are reserved placeholders
   that return "not implemented", so they are not wrapped.
 - A pandas view of statuses is deferred; `sample_status_conversions` returns plain Python objects and needs no extras.
-- Verified end to end against a live Annotation Service built from dp-service `main` (the 1.16.0 API, which is not yet released — the newest tag is `rel-1.15.0`) (`tests/integration/test_sample_status_client_integration.py`):
-  exact nanosecond timestamp round-trip through both axis forms, absent-stays-absent, full-replace upsert, and layer
-  independence.  The tests probe for the API first and skip with an actionable message against a pre-1.16.0 server,
-  since reachability alone does not imply the RPCs exist.  Status *filtering* of query results is still unit-tested
-  only — it needs ingested sample data to attach to (#17).
+- Verified end to end by `tests/integration/test_sample_status_client_integration.py` against a live Annotation
+  Service built from dp-service `main` (the 1.16.0 API, **not yet released** — the newest tag everywhere is
+  `rel-1.15.0`): exact nanosecond timestamp round-trip through both axis forms, absent-stays-absent, full-replace
+  upsert, and layer independence.  The tests probe for the API first and skip with an actionable message against a
+  pre-1.16.0 server, since reachability alone does not imply the RPCs exist.  Status *filtering* of query results
+  is still unit-tested only — it needs ingested sample data to attach to (#17).
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)
