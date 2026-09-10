@@ -67,6 +67,7 @@ from dp_python_lib.client.machine_config_client import (
     SaveConfigurationActivationRequestParams,
     SaveConfigurationApiResult,
     SaveConfigurationRequestParams,
+    to_epoch_nanos,
     to_timestamp,
 )
 from dp_python_lib.client.mldp_client import MldpClient
@@ -180,5 +181,6 @@ __all__ = [
     "string_column",
     "timestamp_count",
     "timestamp_list",
+    "to_epoch_nanos",
     "to_timestamp",
 ]

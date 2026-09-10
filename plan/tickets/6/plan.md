@@ -70,6 +70,13 @@
     nothing it matched).  It now maps by `numbers.Integral` / `numbers.Real`, with NumPy's bool matched by type
     module and name so this module keeps its no-NumPy dependency.
 
+  Fixing the provenance finding needed a Timestamp -> epoch-nanoseconds conversion, which turned out to exist
+  privately in three modules already (`query_conversions`, `sample_status_conversions`, and, briefly, a fourth copy
+  added here).  Rather than add to that, it is now one public `to_epoch_nanos()` beside `to_timestamp()` in
+  `machine_config_client` -- the same conversion in the other direction, in the module four others already import
+  `to_timestamp()` from.  The two private aliases stay as one-line bindings so each module keeps the internal name
+  it has always used.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house

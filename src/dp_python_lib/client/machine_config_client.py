@@ -14,6 +14,26 @@ from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 TimestampInput = datetime | int | float | common_pb2.Timestamp
 
 
+NANOS_PER_SECOND = 1_000_000_000
+
+
+def to_epoch_nanos(timestamp: common_pb2.Timestamp) -> int:
+    """
+    Converts a common.Timestamp into a single integer of epoch nanoseconds -- the inverse of to_timestamp().
+
+    Lives here beside to_timestamp() because it is the same conversion in the other direction, and the modules
+    that need it (query, sample status, and DataFrame conversions) already import to_timestamp() from here.  It
+    was previously spelled out privately in each of them, which meant three copies of one arithmetic identity.
+
+    Integer arithmetic throughout, on a Python int, so there is no overflow and no precision loss: present-day
+    epoch nanoseconds need about 61 bits, and a float64 carries 53.
+
+    :param timestamp: The timestamp to convert.
+    :return: Epoch nanoseconds as a Python int.
+    """
+    return timestamp.epochSeconds * NANOS_PER_SECOND + timestamp.nanoseconds
+
+
 def to_timestamp(value: TimestampInput) -> common_pb2.Timestamp:
     """
     Converts a user-supplied time value into a common.Timestamp{epochSeconds, nanoseconds}.

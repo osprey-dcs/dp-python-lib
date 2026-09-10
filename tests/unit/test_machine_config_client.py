@@ -17,6 +17,7 @@ from dp_python_lib.client.machine_config_client import (
     QueryConfigurationsApiResult,
     SaveConfigurationApiResult,
     SaveConfigurationRequestParams,
+    to_epoch_nanos,
     to_timestamp,
 )
 from dp_python_lib.grpc import annotation_pb2, common_pb2
@@ -30,6 +31,27 @@ def _response_with_field(field_name):
     response = Mock()
     response.HasField = Mock(side_effect=lambda field: field == field_name)
     return response
+
+
+class TestToEpochNanos(unittest.TestCase):
+    """to_epoch_nanos() is to_timestamp()'s inverse, shared by the three conversions modules."""
+
+    def test_combines_seconds_and_nanoseconds(self):
+        ts = common_pb2.Timestamp()
+        ts.epochSeconds = 1_700_000_000
+        ts.nanoseconds = 123_456_789
+        self.assertEqual(to_epoch_nanos(ts), 1_700_000_000_123_456_789)
+
+    def test_round_trips_with_to_timestamp_exactly(self):
+        # The exactness is the point: present-day epoch nanoseconds need ~61 bits and a float64 carries 53, so a
+        # conversion routed through float seconds would move the instant.
+        original = 1_770_055_200_123_456_789
+        ts = common_pb2.Timestamp()
+        ts.epochSeconds, ts.nanoseconds = divmod(original, 1_000_000_000)
+        self.assertEqual(to_epoch_nanos(ts), original)
+
+    def test_zero_timestamp_is_zero(self):
+        self.assertEqual(to_epoch_nanos(common_pb2.Timestamp()), 0)
 
 
 class TestToTimestamp(unittest.TestCase):

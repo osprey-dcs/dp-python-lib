@@ -22,6 +22,7 @@ Design decisions (see .dev/plan/issue-7/plan.md, Q6 and section 2):
 from collections.abc import Iterator
 from typing import Any
 
+from dp_python_lib.client.machine_config_client import to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, query_pb2
 
 # Excel's hard row ceiling (1,048,576 rows including a header row).
@@ -98,9 +99,9 @@ _SCALAR_ARMS = frozenset(
 )
 
 
-def _timestamp_to_epoch_nanos(ts: common_pb2.Timestamp) -> int:
-    """Converts a common.Timestamp to an integer count of nanoseconds since the Unix epoch."""
-    return ts.epochSeconds * 1_000_000_000 + ts.nanoseconds
+# The Timestamp -> epoch-nanoseconds conversion is shared (see machine_config_client.to_epoch_nanos); this private
+# alias is the name this module has always used internally.
+_timestamp_to_epoch_nanos = to_epoch_nanos
 
 
 def data_value_to_python(value: common_pb2.DataValue) -> Any:

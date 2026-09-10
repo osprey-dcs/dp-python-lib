@@ -21,6 +21,7 @@ Design decisions (see plan/tickets/6/plan.md, D7):
 
 from typing import Any
 
+from dp_python_lib.client.machine_config_client import to_epoch_nanos
 from dp_python_lib.client.query_conversions import data_value_to_python
 from dp_python_lib.client.sample_status_conversions import expand_data_timestamps
 from dp_python_lib.grpc import annotation_pb2, common_pb2
@@ -49,21 +50,6 @@ _ARRAY_COLUMN_FIELDS = (
 
 # ImageColumn stores its per-sample payloads in `images` rather than `values`.
 _IMAGE_COLUMN_FIELD = "imageColumns"
-
-_NANOS_PER_SECOND = 1_000_000_000
-
-
-def _timestamp_to_nanos(timestamp: common_pb2.Timestamp) -> int:
-    """
-    Converts a common.Timestamp into a single integer of epoch nanoseconds.
-
-    Defined here rather than imported from sample_status_conversions: that module's copy is private, and reaching
-    across for it would make this module's dependencies read as though it needed the sample status API.
-
-    :param timestamp: The timestamp to convert.
-    :return: Epoch nanoseconds as a Python int (arbitrary precision, so no overflow).
-    """
-    return timestamp.epochSeconds * _NANOS_PER_SECOND + timestamp.nanoseconds
 
 
 def _require_pandas():
@@ -225,8 +211,8 @@ def _column_source_dict(entry: common_pb2.ColumnProvenance.ColumnSource) -> dict
 
     if entry.HasField("timeRange"):
         result["time_range"] = (
-            _timestamp_to_nanos(entry.timeRange.beginTime),
-            _timestamp_to_nanos(entry.timeRange.endTime),
+            to_epoch_nanos(entry.timeRange.beginTime),
+            to_epoch_nanos(entry.timeRange.endTime),
         )
     return result
 
