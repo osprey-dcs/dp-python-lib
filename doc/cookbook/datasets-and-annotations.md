@@ -117,8 +117,20 @@ print(saved_id)                    # server-assigned id, e.g. '6aa1bb271a768e97d
 ```
 
 `data_block()` requires `begin < end` and a non-empty PV list.  That check exists here because the
-server does not make it: it validates only that each bound is non-zero, so a reversed block would
-otherwise be stored happily.
+server does not make it: it validates only that each bound is non-zero and never compares the two,
+so a reversed block would otherwise be stored happily.  It also rejects a bare string for the PV
+list, which would otherwise be iterated into one PV name per character.
+
+A block's range is [half-open](conventions.md#half-open-ranges), `[begin, end)`, like every other
+range in the library, so back-to-back blocks — one ending at `T`, the next starting at `T` — cover
+the sample at `T` exactly once.  `saveDataSet` itself never compares the bounds; the interval only
+acquires meaning at export, where it reaches the same per-sample trimming that `query_samples()`
+does.
+
+**HDF5 export is the exception.**  It is bucket-granular: every bucket that *overlaps* the block is
+written whole and untrimmed, so an HDF5 file can contain samples outside the range you asked for,
+and back-to-back blocks sharing a straddling bucket write it twice.  CSV and XLSX trim to the exact
+range.  Nothing client-side can change this — it is a property of the export format.
 
 Note the tags come back **normalized** — lowercased, deduplicated, and sorted — so a tag saved as
 `CXI-3443` reads back as `cxi-3443`, and queries must match the lowercase form.
