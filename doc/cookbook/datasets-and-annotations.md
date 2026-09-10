@@ -3,9 +3,11 @@
 Naming a region of the archive so you can find it again, attaching derived values to it with a
 record of what they were computed from, and exporting the result.
 
-> **Verified against:** dp-grpc `rel-1.16.0`.
-> The modernized DataSet / Annotation / Export API is **new in 1.16.0** and will not work against a
-> `rel-1.15.0` server, which answers these calls with `UNIMPLEMENTED`.
+> **Target API version:** dp-grpc 1.16.0, which is **not yet released** — the newest tag is
+> `rel-1.15.0`.  The modernized DataSet / Annotation / Export API is new in 1.16.0 and will not work
+> against a `rel-1.15.0` server, which answers these calls with `UNIMPLEMENTED`.
+>
+> **Verified against:** a dp-service build from `main` at commit `fddf692`, carrying the 1.16.0 API.
 
 See [API conventions](conventions.md) for result checking, paging, and time handling.
 
@@ -618,8 +620,9 @@ calculations, are left dangling.
 
 ### How far these examples have been verified
 
-The dataset and annotation lifecycle **has** been exercised against a live 1.16.0 Annotation
-Service by `tests/integration/test_datasets_annotations_integration.py`: save/get round trips,
+The dataset and annotation lifecycle **has** been exercised against a live Annotation Service built
+from dp-service `main` at `fddf692` (the 1.16.0 API, pre-release) by
+`tests/integration/test_datasets_annotations_integration.py`: save/get round trips,
 every criterion including the key-only attribute search, lowercase tag normalization, paging,
 rejected page tokens, the `get_datasets()` batch fetch, calculations inline on `get_annotation()`
 versus id-only on `query_annotations()`, the full-replace clearing behavior, the delete cascade, and

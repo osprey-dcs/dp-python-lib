@@ -122,6 +122,23 @@
   this time by parsing the recipe as one continuous script and checking each handle is rebound before its next
   use.
 
+- **Copilot third-pass review, 2026-09-10.**  Three findings against `70d2102`, delivered as summary-level
+  "previously missed" notes rather than inline comments.  All three were real:
+  - **The pandas round trip widened dtypes.**  `data_frame_to_pandas()` handed pandas untyped Python lists, so a
+    `FloatColumn` came back as `float64` and an `Int32Column` as `int64`; converting back then emitted
+    `DoubleColumn`/`Int64Column`.  Each Series is now built with the dtype its column type implies.
+  - **The pandas round trip discarded all column metadata.**  `data_frame_to_pandas()` populated
+    `df.attrs["column_metadata"]` and `data_frame_from_pandas()` ignored it, so tags, attributes, and provenance
+    were silently stripped -- losing exactly the record of where the numbers came from that makes calculations
+    worth storing, and which this ticket sells as a headline feature.  Added `column_metadata_from_dict()`, the
+    inverse of `column_metadata_dict()`, and threaded it through.  A frame now round-trips to **byte equality**
+    apart from the deliberate `SamplingClock` -> `TimestampList` axis change.
+  - The recipe claimed to be "Verified against dp-grpc `rel-1.16.0`", a tag that does not exist -- the newest
+    release is `rel-1.15.0`.  It now separates the *target* API version (1.16.0, unreleased) from what was
+    actually tested (a dp-service build from `main` at `fddf692`).  `doc/cookbook/sample-status.md` carries the
+    same overclaim and is left alone here: it is not this PR's file, and correcting it belongs with whoever
+    reconciles the cookbook's version banners at release time.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house

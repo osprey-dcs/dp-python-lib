@@ -309,6 +309,34 @@ def _check_frame_alignment(frame: common_pb2.DataFrame, columns: dict[str, list]
             )
 
 
+# The protobuf column types whose pandas dtype is narrower than what inference from a plain Python list yields.
+# Double/Int64/Bool are listed too so the mapping is explicit rather than half-stated.
+_NARROW_DTYPE_BY_COLUMN_TYPE = {
+    common_pb2.FloatColumn: "float32",
+    common_pb2.Int32Column: "int32",
+    common_pb2.DoubleColumn: "float64",
+    common_pb2.Int64Column: "int64",
+    common_pb2.BoolColumn: "bool",
+}
+
+
+def _narrow_column_dtypes(frame: common_pb2.DataFrame) -> dict[str, str]:
+    """
+    Maps each scalar column's name to the pandas dtype its protobuf type implies.
+
+    Only the columns whose type pins a dtype appear; strings, arrays, images, and DataColumns are absent, so the
+    caller leaves those to pandas' inference.
+
+    :param frame: The frame whose columns to inspect.
+    :return: A dict of column name -> pandas dtype string.
+    """
+    return {
+        column.name: _NARROW_DTYPE_BY_COLUMN_TYPE[type(column)]
+        for column in iter_frame_columns(frame)
+        if type(column) in _NARROW_DTYPE_BY_COLUMN_TYPE
+    }
+
+
 def data_frame_to_pandas(frame: common_pb2.DataFrame, exclude_column_metadata: bool = False) -> Any:
     """
     Converts a DataFrame into a pandas DataFrame with a UTC DatetimeIndex.
@@ -338,7 +366,19 @@ def data_frame_to_pandas(frame: common_pb2.DataFrame, exclude_column_metadata: b
     _check_frame_alignment(frame, columns, len(epoch_nanos))
 
     index = pd.DatetimeIndex(pd.to_datetime(pd.Series(epoch_nanos, dtype="int64"), unit="ns", utc=True))
-    df = pd.DataFrame(columns, index=index)
+
+    # Build each Series with the dtype its protobuf column type implies.  Handing pandas an untyped list widens
+    # FloatColumn to float64 and Int32Column to int64, so a frame -> pandas -> frame round trip would come back
+    # as DoubleColumn/Int64Column.  Columns with no narrow equivalent (strings, arrays, images, DataColumn) are
+    # left to pandas' own inference.
+    narrow_dtypes = _narrow_column_dtypes(frame)
+    df = pd.DataFrame(
+        {
+            name: pd.Series(values, index=index, dtype=narrow_dtypes[name]) if name in narrow_dtypes else values
+            for name, values in columns.items()
+        },
+        index=index,
+    )
 
     if not exclude_column_metadata:
         df.attrs["column_metadata"] = {
@@ -408,7 +448,72 @@ def _timestamps_from_index(index: Any) -> common_pb2.DataTimestamps:
     return timestamps
 
 
-def _column_from_series(name: str, series: Any) -> Any:
+def _timestamp_from_nanos(epoch_nanos: int) -> common_pb2.Timestamp:
+    """
+    Builds a common.Timestamp from integer epoch nanoseconds -- the inverse of to_epoch_nanos().
+
+    :param epoch_nanos: Epoch nanoseconds.
+    :return: The equivalent common.Timestamp.
+    """
+    timestamp = common_pb2.Timestamp()
+    timestamp.epochSeconds, timestamp.nanoseconds = divmod(epoch_nanos, 1_000_000_000)
+    return timestamp
+
+
+def column_metadata_from_dict(summary: dict[str, Any] | None) -> common_pb2.ColumnMetadata | None:
+    """
+    Rebuilds a ColumnMetadata from the dict column_metadata_dict() produced -- the inverse of that function.
+
+    This is what lets a frame survive a pandas round trip with its provenance intact: data_frame_to_pandas() parks
+    each column's metadata in df.attrs["column_metadata"], and data_frame_from_pandas() feeds it back through
+    here.  Without it the attrs were carried and then silently dropped, losing exactly the record of where the
+    numbers came from that makes calculations worth storing.
+
+    :param summary: A dict as returned by column_metadata_dict(), or None.
+    :return: The equivalent ColumnMetadata, or None when the summary is absent or carries nothing.
+    """
+    if not summary:
+        return None
+
+    tags = summary.get("tags") or []
+    attributes = summary.get("attributes") or {}
+    provenance_summary = summary.get("provenance")
+    if not tags and not attributes and not provenance_summary:
+        return None
+
+    metadata = common_pb2.ColumnMetadata()
+    if tags:
+        metadata.tags[:] = list(tags)
+    for name, value in attributes.items():
+        attribute = metadata.attributes.add()
+        attribute.name = name
+        attribute.value = value
+
+    if provenance_summary:
+        provenance = metadata.provenance
+        if provenance_summary.get("source"):
+            provenance.source = provenance_summary["source"]
+        if provenance_summary.get("process"):
+            provenance.process = provenance_summary["process"]
+        for entry in provenance_summary.get("derived_from") or []:
+            source = provenance.derivedFrom.add()
+            if "pv_name" in entry:
+                source.pvName = entry["pv_name"]
+            elif "calculations_column" in entry:
+                column = entry["calculations_column"]
+                source.calculationsColumn.calculationsId = column["calculations_id"]
+                source.calculationsColumn.frameName = column["frame_name"]
+                source.calculationsColumn.columnName = column["column_name"]
+            time_range = entry.get("time_range")
+            if time_range is not None:
+                begin_nanos, end_nanos = time_range
+                source.timeRange.beginTime.CopyFrom(_timestamp_from_nanos(begin_nanos))
+                source.timeRange.endTime.CopyFrom(_timestamp_from_nanos(end_nanos))
+
+    return metadata
+
+
+def _column_from_series(name: str, series: Any, metadata: common_pb2.ColumnMetadata | None = None) -> Any:
     """
     Builds the typed column matching a pandas Series' dtype.
 
@@ -420,6 +525,7 @@ def _column_from_series(name: str, series: Any) -> Any:
 
     :param name: The column's name.
     :param series: The pandas Series holding its values.
+    :param metadata: Optional ColumnMetadata to attach (see column_metadata_from_dict()).
     :return: The matching typed column message.
     :raises ValueError: if the dtype has no mapping, or the series contains a missing value.
     """
@@ -438,15 +544,15 @@ def _column_from_series(name: str, series: Any) -> Any:
     dtype_name = str(dtype)
 
     if dtype_name == "float64":
-        return builders.double_column(name, [float(v) for v in series])
+        return builders.double_column(name, [float(v) for v in series], metadata=metadata)
     if dtype_name == "float32":
-        return builders.float_column(name, [float(v) for v in series])
+        return builders.float_column(name, [float(v) for v in series], metadata=metadata)
     if dtype_name in ("int64", "Int64"):
-        return builders.int64_column(name, [int(v) for v in series])
+        return builders.int64_column(name, [int(v) for v in series], metadata=metadata)
     if dtype_name in ("int32", "Int32"):
-        return builders.int32_column(name, [int(v) for v in series])
+        return builders.int32_column(name, [int(v) for v in series], metadata=metadata)
     if dtype_name in ("bool", "boolean"):
-        return builders.bool_column(name, [bool(v) for v in series])
+        return builders.bool_column(name, [bool(v) for v in series], metadata=metadata)
     if dtype_name in ("object", "string", "str") or dtype_name.startswith("string"):
         values = list(series)
         if not all(isinstance(value, str) for value in values):
@@ -459,7 +565,7 @@ def _column_from_series(name: str, series: Any) -> Any:
                 f"object columns are mapped to StringColumn, so convert the values first or build the column "
                 f"explicitly with a data_frame builder"
             )
-        return builders.string_column(name, values)
+        return builders.string_column(name, values, metadata=metadata)
 
     raise ValueError(
         f"column '{name}' has dtype {dtype_name}, which has no typed-column mapping.  Supported dtypes are "
@@ -476,6 +582,9 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
 
     The index becomes an explicit TimestampList; see _timestamps_from_index() for why a SamplingClock is never
     inferred.  Missing values are rejected fail-loud, since a dense typed column cannot express a gap.
+
+    Per-column metadata is read back from df.attrs["column_metadata"] when present, so a frame that went out
+    through data_frame_to_pandas() returns with its tags, attributes, and provenance intact.
 
     Converting back with data_frame_to_pandas() preserves every value, dtype, and timestamp, but can return the
     columns grouped by type rather than in their original order -- see that function's docstring.
@@ -505,8 +614,15 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
             f"a merge with overlapping names)."
         )
 
+    # data_frame_to_pandas() parks each column's ColumnMetadata here; carrying it back is what keeps provenance
+    # alive across a round trip.  A frame built by hand simply has no attrs, and every column gets None.
+    metadata_by_column = df.attrs.get("column_metadata") or {}
+
     data_timestamps = _timestamps_from_index(df.index)
-    columns = [_column_from_series(str(name), df[name]) for name in df.columns]
+    columns = [
+        _column_from_series(str(name), df[name], metadata=column_metadata_from_dict(metadata_by_column.get(str(name))))
+        for name in df.columns
+    ]
     return builders.data_frame(data_timestamps, columns)
 
 

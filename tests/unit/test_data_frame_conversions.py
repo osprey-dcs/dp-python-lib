@@ -602,5 +602,123 @@ class TestIndexUnitAndNaT(unittest.TestCase):
         self.assertIn("NaT", str(ctx.exception))
 
 
+def _columns_of(frame):
+    """Yields a frame's columns, for rebuilding it on a different time axis."""
+    return dfc.iter_frame_columns(frame)
+
+
+@unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas)")
+class TestPandasRoundTripPreservesTypesAndMetadata(unittest.TestCase):
+    """A frame that goes out through pandas must come back as the same frame, not a widened, stripped one."""
+
+    def _metadata(self):
+        return dfb.column_metadata(
+            tags=["derived"],
+            attributes={"unit": "mm"},
+            provenance=dfb.provenance(
+                source="rig",
+                process="1 Hz RMS",
+                derived_from=[
+                    dfb.pv_source("BPMS:GUNB:314:X", (T0, T1)),
+                    dfb.calculations_source("cid", "orbit-rms", "x_rms"),
+                ],
+            ),
+        )
+
+    def _frame(self):
+        return dfb.data_frame(
+            _axis(2),
+            [
+                dfb.float_column("f", [1.5, 2.5], metadata=self._metadata()),
+                dfb.int32_column("i32", [1, 2]),
+                dfb.int64_column("i64", [3, 4]),
+                dfb.double_column("d", [1.0, 2.0]),
+                dfb.bool_column("b", [True, False]),
+                dfb.string_column("s", ["a", "b"]),
+            ],
+        )
+
+    def test_narrow_dtypes_reach_pandas(self):
+        # An untyped list would let pandas widen float32 to float64 and int32 to int64.
+        df = dfc.data_frame_to_pandas(self._frame())
+        self.assertEqual(str(df["f"].dtype), "float32")
+        self.assertEqual(str(df["i32"].dtype), "int32")
+        self.assertEqual(str(df["i64"].dtype), "int64")
+        self.assertEqual(str(df["d"].dtype), "float64")
+        self.assertEqual(str(df["b"].dtype), "bool")
+
+    def test_column_types_survive_the_round_trip(self):
+        original = self._frame()
+        restored = dfc.data_frame_from_pandas(dfc.data_frame_to_pandas(original))
+
+        def kinds(frame):
+            return {
+                column.name: field
+                for field in (
+                    "doubleColumns",
+                    "floatColumns",
+                    "int64Columns",
+                    "int32Columns",
+                    "boolColumns",
+                    "stringColumns",
+                )
+                for column in getattr(frame, field)
+            }
+
+        self.assertEqual(kinds(restored), kinds(original))
+
+    def test_metadata_and_provenance_survive_the_round_trip(self):
+        original = self._frame()
+        restored = dfc.data_frame_from_pandas(dfc.data_frame_to_pandas(original))
+        self.assertEqual(restored.floatColumns[0].metadata, original.floatColumns[0].metadata)
+
+    def test_whole_frame_round_trips_apart_from_the_deliberate_axis_change(self):
+        # Everything except the axis form comes back byte for byte.  The axis is deliberately NOT preserved: a
+        # SamplingClock becomes an explicit TimestampList, because inferring a clock back from an index that
+        # merely looks regular would quietly move timestamps.  The instants themselves are identical.
+        original = dfb.data_frame(dfb.timestamp_list([T0, T1]), list(_columns_of(self._frame())))
+        restored = dfc.data_frame_from_pandas(dfc.data_frame_to_pandas(original))
+        self.assertEqual(restored, original)
+
+    def test_sampling_clock_axis_becomes_a_timestamp_list_with_the_same_instants(self):
+        original = self._frame()  # a SamplingClock axis
+        restored = dfc.data_frame_from_pandas(dfc.data_frame_to_pandas(original))
+
+        self.assertEqual(original.dataTimestamps.WhichOneof("value"), "samplingClock")
+        self.assertEqual(restored.dataTimestamps.WhichOneof("value"), "timestampList")
+        self.assertEqual(dfc.data_frame_timestamps(restored), dfc.data_frame_timestamps(original))
+
+    def test_excluded_metadata_is_simply_absent(self):
+        # With exclude_column_metadata=True there are no attrs to carry, and the columns come back bare.
+        original = self._frame()
+        df = dfc.data_frame_to_pandas(original, exclude_column_metadata=True)
+        restored = dfc.data_frame_from_pandas(df)
+        self.assertFalse(restored.floatColumns[0].HasField("metadata"))
+
+    def test_hand_built_frame_without_attrs_still_converts(self):
+        import pandas as pd
+
+        index = pd.DatetimeIndex(pd.to_datetime([T0_NANOS, T0_NANOS + 1_000_000_000], unit="ns", utc=True))
+        df = pd.DataFrame({"d": [1.0, 2.0]}, index=index)
+        frame = dfc.data_frame_from_pandas(df)
+        self.assertFalse(frame.doubleColumns[0].HasField("metadata"))
+
+
+class TestColumnMetadataFromDict(unittest.TestCase):
+    def test_none_and_empty_summaries_yield_none(self):
+        self.assertIsNone(dfc.column_metadata_from_dict(None))
+        self.assertIsNone(dfc.column_metadata_from_dict({}))
+        self.assertIsNone(dfc.column_metadata_from_dict({"tags": [], "attributes": {}, "provenance": None}))
+
+    def test_inverts_column_metadata_dict(self):
+        original = dfb.column_metadata(
+            tags=["a"],
+            attributes={"k": "v"},
+            provenance=dfb.provenance(process="p", derived_from=[dfb.pv_source("PV", (T0, T1))]),
+        )
+        column = dfb.double_column("d", [1.0], metadata=original)
+        self.assertEqual(dfc.column_metadata_from_dict(dfc.column_metadata_dict(column)), original)
+
+
 if __name__ == "__main__":
     unittest.main()
