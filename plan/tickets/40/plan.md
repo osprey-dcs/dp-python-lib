@@ -10,6 +10,12 @@
   same upstream commits `plan/tickets/6/plan.md` was verified against).  Triage verified every premise in the
   ticket body against the protos, the server source, and this repo's own history; three corrections to the
   ticket are recorded below and folded into [Implementation tasks](#implementation-tasks).
+- **Integration coverage added 2026-09-10**, after PR #47 merged: this plan verified server behavior by
+  *reading* dp-service, and `tests/integration/test_query_helper_relaxations_integration.py` now asserts it
+  against a live ecosystem.  The load-bearing shape is a pair — the key-only query must find a record, and a
+  query for a value that record does *not* have must not.  Alone, the first assertion cannot distinguish a
+  working existence filter from a match-all.  Confirmed non-vacuous by temporarily reintroducing the old
+  behavior and watching the test fail.
 
 ## Overview
 
