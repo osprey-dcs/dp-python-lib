@@ -614,10 +614,25 @@ Invariants worth knowing before touching this code:
 - **`save_annotation()` replaces in full, including calculations**: omitting them clears *and deletes* the stored
   object, and a replacement returns a new `calculationsId`.  `get_annotation()` is the only method returning
   calculations inline; `query_annotations()` results carry the id with empty content.
-- Two criterion-helper differences from the older `PvMetadataQuery` / `ConfigurationQuery` helpers, both following
-  the proto: `attributes(key)` accepts an absent `values` list as a key-only existence search, and `criteria` is
-  optional because the server treats an empty list as match-all.  Back-porting these to the five existing helpers is
-  [#40](https://github.com/osprey-dcs/dp-python-lib/issues/40) / [#41](https://github.com/osprey-dcs/dp-python-lib/issues/41).
+- Two conventions these clients introduced, both following the proto, **now shared by every criteria-based client**
+  after the [#40](https://github.com/osprey-dcs/dp-python-lib/issues/40) /
+  [#41](https://github.com/osprey-dcs/dp-python-lib/issues/41) back-ports (`plan/tickets/40/plan.md`,
+  `plan/tickets/41/plan.md`):
+  - **`attributes(key)` / `attr(key)` accept an absent or empty `values` list as a key-only existence search** —
+    match every record possessing the key, whatever its value.  All seven attribute helpers now do this
+    (`PvMetadataQuery`, `ConfigurationQuery`, `ConfigurationActivationQuery`, `DataSetQuery`, `AnnotationQuery`,
+    `PvQuery.attr`, `ConfigQuery.attr`).  It is the one exception to the "helpers reject empty input" rule, because
+    unlike `tags([])` it *narrows* the result set rather than matching everything.  The **key** is still required,
+    and that check is load-bearing on the two v2 query selectors, where the server does not validate it: a blank key
+    would reach Mongo as an existence test on `"attributes."` and silently match nothing.  Server side, empty values
+    build `Filters.exists("attributes.<key>")` (`MongoQueryFilterBuilder.attributeFilter()`), not an `$in: []`
+  - **`criteria` is optional on every paged annotation-service query/iter method**, because the server treats an
+    empty list as match-all — `iter_pv_metadata()` with no arguments is the browse-all form.  The server's default
+    page size (100, hardcoded in `MongoSyncAnnotationClient.DEFAULT_QUERY_LIMIT`, **not** configurable) applies
+    **unconditionally**: dropping the last criterion does not change the page size, so a bare `query_*()` still
+    returns one page and a token.  That is why `iter_*` is the right call for browsing.  Note the v2 query methods
+    are deliberately *not* included: `QueryParams` still requires a PV selector or config criteria, since a
+    time-series query with no selection is unbounded rather than a browse-all
 - `ExportFormat` makes the server-rejected `EXPORT_FORMAT_UNSPECIFIED` unreachable, and `ExportDataRequestParams`
   requires at least one of `dataset_id` / `data_blocks` / `calculations_spec`.  The exported file lives on the
   **server's** filesystem and there is no retrieval RPC, so there is no download convenience.

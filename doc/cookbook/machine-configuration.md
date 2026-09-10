@@ -374,6 +374,18 @@ for configuration in client.annotation.machine_config.iter_configurations([
     print(configuration.configurationName)
 ```
 
+Omit the criteria entirely to browse everything — an empty criteria list matches all records:
+
+```python
+# cookbook:partial
+for configuration in client.annotation.machine_config.iter_configurations():
+    print(configuration.configurationName)
+```
+
+The default page size still applies, so prefer `iter_configurations()` over a bare
+`query_configurations()` when you want the whole set.  The same holds for
+`iter_configuration_activations()`, which on a busy machine can be a much larger collection.
+
 `C` offers `name`, `category`, `tags`, `attributes`, and `parent`; `CA` offers `timestamp`,
 `time_range`, `configuration_name`, `client_activation_id`, `category`, `tags`, and `attributes`.
 

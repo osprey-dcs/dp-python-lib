@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from typing import TypeAlias
 
 import grpc
 
@@ -12,6 +13,13 @@ from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 # and DataFrames depended on the machine configuration API.  This module is now just another caller.
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
+
+# The fully-qualified activation criterion name is 109 characters, which overflows the 120-column limit as soon
+# as it appears in an annotated parameter.  Alias it once rather than reflowing every signature that uses it.
+# TypeAlias (not a bare assignment) so mypy accepts it in an annotation position.
+_ActivationCriterion: TypeAlias = (
+    annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion
+)
 
 
 class ConfigurationQuery:
@@ -754,20 +762,22 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def _build_query_configurations_request(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> annotation_pb2.QueryConfigurationsRequest:
         """
         Builds a QueryConfigurationsRequest from the supplied criteria and paging parameters.
-        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers).
+        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationsRequest for the specified params.
         """
-        self.logger.debug("Building QueryConfigurationsRequest with %d criteria", len(criteria))
+        self.logger.debug("Building QueryConfigurationsRequest with %d criteria", len(criteria) if criteria else 0)
         request = annotation_pb2.QueryConfigurationsRequest()
-        request.criteria.extend(criteria)
+        if criteria:
+            request.criteria.extend(criteria)
         if limit is not None:
             request.limit = limit
         if page_token:
@@ -799,18 +809,25 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def query_configurations(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> QueryConfigurationsApiResult:
         """
         User-facing method for invoking the queryConfigurations() API method.  Returns a single page of results; use
         iter_configurations() to page through all results transparently.
-        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers).
+
+        An omitted or empty criteria list matches all records.  The server's default page size still applies, so
+        this returns one page and a next-page token rather than every configuration -- use iter_configurations()
+        to browse everything.
+
+        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers), or None
+            to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationsApiResult with a single page of results and status information.
         """
+        criteria = criteria or []
         self.logger.info("Starting queryConfigurations operation with %d criteria", len(criteria))
 
         request = self._build_query_configurations_request(criteria, limit=limit, page_token=page_token)
@@ -825,7 +842,7 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def iter_configurations(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion],
+        criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion] | None = None,
         limit: int | None = None,
     ) -> Iterator[common_pb2.Configuration]:
         """
@@ -834,7 +851,11 @@ class MachineConfigClient(ServiceApiClientBase):
 
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
-        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers).
+        Omit criteria (or pass an empty list) to browse every configuration: an empty list matches all records,
+        and this generator pages through them all.  Mind the size of the collection before doing so.
+
+        :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers), or None
+            to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :return: An iterator over all matching Configuration records across all pages.
         """
@@ -1112,20 +1133,24 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def _build_query_configuration_activations_request(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
+        criteria: list["_ActivationCriterion"] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> annotation_pb2.QueryConfigurationActivationsRequest:
         """
         Builds a QueryConfigurationActivationsRequest from the supplied criteria and paging parameters.
-        :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery).
+        :param criteria: List of QueryConfigurationActivationsCriterion objects (see
+            ConfigurationActivationQuery), or None to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationActivationsRequest for the specified params.
         """
-        self.logger.debug("Building QueryConfigurationActivationsRequest with %d criteria", len(criteria))
+        self.logger.debug(
+            "Building QueryConfigurationActivationsRequest with %d criteria", len(criteria) if criteria else 0
+        )
         request = annotation_pb2.QueryConfigurationActivationsRequest()
-        request.criteria.extend(criteria)
+        if criteria:
+            request.criteria.extend(criteria)
         if limit is not None:
             request.limit = limit
         if page_token:
@@ -1157,18 +1182,25 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def query_configuration_activations(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
+        criteria: list["_ActivationCriterion"] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> QueryConfigurationActivationsApiResult:
         """
         User-facing method for invoking the queryConfigurationActivations() API method.  Returns a single page of
         results; use iter_configuration_activations() to page through all results transparently.
-        :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery).
+
+        An omitted or empty criteria list matches all records.  The server's default page size still applies, so
+        this returns one page and a next-page token rather than every activation -- use
+        iter_configuration_activations() to browse everything.
+
+        :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery),
+            or None to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryConfigurationActivationsApiResult with a single page of results and status information.
         """
+        criteria = criteria or []
         self.logger.info("Starting queryConfigurationActivations operation with %d criteria", len(criteria))
 
         request = self._build_query_configuration_activations_request(criteria, limit=limit, page_token=page_token)
@@ -1183,7 +1215,7 @@ class MachineConfigClient(ServiceApiClientBase):
 
     def iter_configuration_activations(
         self,
-        criteria: list[annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion],
+        criteria: list["_ActivationCriterion"] | None = None,
         limit: int | None = None,
     ) -> Iterator[common_pb2.ConfigurationActivation]:
         """
@@ -1192,7 +1224,11 @@ class MachineConfigClient(ServiceApiClientBase):
 
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
-        :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery).
+        Omit criteria (or pass an empty list) to browse every activation: an empty list matches all records, and
+        this generator pages through them all.  Mind the size of the collection before doing so.
+
+        :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery),
+            or None to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :return: An iterator over all matching ConfigurationActivation records across all pages.
         """

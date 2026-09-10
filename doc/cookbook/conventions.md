@@ -137,6 +137,21 @@ Some things to keep in mind:
 - **Omitting `limit` does not mean "no limit".**  The server applies its own default page size
   (currently 100) when `limit` is absent or zero, so a `query_*` call without one still returns a
   page, not the whole result set.  Check `next_page_token`.
+- **Omitting the criteria browses everything.**  On the annotation-service queries — PV metadata,
+  configurations, activations, datasets, annotations — an omitted or empty criteria list matches
+  *all* records rather than being rejected, so `iter_pv_metadata()` with no arguments walks the
+  whole catalogue:
+
+  ```python
+  # cookbook:partial
+  for record in client.annotation.pv_metadata.iter_pv_metadata():
+      print(record.pvName)
+  ```
+
+  The default page size still applies unconditionally — it does not change just because you
+  dropped the last criterion — so the bare `query_*` form returns one page and a token, not the
+  collection.  `iter_*` is the right call here.  Mind how large the collection is before iterating
+  it.
 - **There is no total count.**  The API deliberately omits it — computing one requires a separate
   expensive query — so you cannot know the result size in advance.
 - **Results come back in a stable order.**  The server sorts each collection by its natural key —

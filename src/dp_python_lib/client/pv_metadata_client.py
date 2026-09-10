@@ -404,20 +404,22 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def _build_query_pv_metadata_request(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> annotation_pb2.QueryPvMetadataRequest:
         """
         Builds a QueryPvMetadataRequest from the supplied criteria and paging parameters.
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryPvMetadataRequest for the specified params.
         """
-        self.logger.debug("Building QueryPvMetadataRequest with %d criteria", len(criteria))
+        self.logger.debug("Building QueryPvMetadataRequest with %d criteria", len(criteria) if criteria else 0)
         request = annotation_pb2.QueryPvMetadataRequest()
-        request.criteria.extend(criteria)
+        if criteria:
+            request.criteria.extend(criteria)
         if limit is not None:
             request.limit = limit
         if page_token:
@@ -444,18 +446,25 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def query_pv_metadata(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> QueryPvMetadataApiResult:
         """
         User-facing method for invoking the queryPvMetadata() API method.  Returns a single page of results; use
         iter_pv_metadata() to page through all results transparently.
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+
+        An omitted or empty criteria list matches all records.  The server's default page size still applies, so
+        this returns one page and a next-page token rather than the whole catalogue -- use iter_pv_metadata() to
+        browse everything.
+
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryPvMetadataApiResult with a single page of results and status information.
         """
+        criteria = criteria or []
         self.logger.info("Starting queryPvMetadata operation with %d criteria", len(criteria))
 
         request = self._build_query_pv_metadata_request(criteria, limit=limit, page_token=page_token)
@@ -470,7 +479,7 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def iter_pv_metadata(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
     ) -> Iterator[common_pb2.PvMetadata]:
         """
@@ -479,7 +488,11 @@ class PvMetadataClient(ServiceApiClientBase):
 
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+        Omit criteria (or pass an empty list) to browse the whole catalogue: an empty list matches all records,
+        and this generator pages through them all.  Mind the size of the collection before doing so.
+
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :return: An iterator over all matching PvMetadata records across all pages.
         """

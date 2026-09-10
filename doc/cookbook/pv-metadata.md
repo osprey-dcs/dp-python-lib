@@ -350,6 +350,20 @@ This reads every matching record to filter client-side, so keep the server-side 
 as you can.  Note also that string equality is exact: `"0.489650"` and `"0.48965"` are different
 attribute values even though the numbers are equal.
 
+### Browsing the whole catalogue
+
+Omit the criteria entirely to walk every record — an empty criteria list matches all:
+
+```python
+# cookbook:partial
+for record in client.annotation.pv_metadata.iter_pv_metadata():
+    print(record.pvName)
+```
+
+The server's default page size still applies, so use `iter_pv_metadata()` rather than a bare
+`query_pv_metadata()`, which returns only the first page.  Check how big the catalogue is before
+iterating all of it.
+
 ### Which PVs have this attribute at all?
 
 Omit the values list — or pass an empty one — for a **key-only existence search**: every PV

@@ -419,6 +419,14 @@ class TestQueryConfigurationActivations(unittest.TestCase):
         response.queryConfigurationActivationsResult.nextPageToken = next_token
         return response
 
+    def test_build_request_criteria_omitted_matches_all(self):
+        # An omitted or empty criteria list is match-all on the server (#41), not a rejection.
+        for request in (
+            self.client._build_query_configuration_activations_request(),
+            self.client._build_query_configuration_activations_request([]),
+        ):
+            self.assertEqual(len(request.criteria), 0)
+
     def test_build_request(self):
         criteria = [ConfigurationActivationQuery.configuration_name(["cfg-1"])]
         request = self.client._build_query_configuration_activations_request(criteria, limit=25, page_token="tok")
