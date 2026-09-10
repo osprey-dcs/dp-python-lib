@@ -325,8 +325,8 @@ def _build_scalar_column(
     :return: The constructed typed column message.
     :raises ValueError: if name is empty or values is empty.
     """
-    if not name:
-        raise ValueError(f"{builder_name}() requires a non-empty name")
+    if not name or not name.strip():
+        raise ValueError(f"{builder_name}() requires a non-blank name, got {name!r}")
     if not values:
         raise ValueError(f"{builder_name}() requires a non-empty values list for column '{name}'")
 
@@ -497,8 +497,8 @@ def data_column(
     :return: A common.DataColumn.
     :raises ValueError: if name or values is empty, or if a value's type has no DataValue mapping.
     """
-    if not name:
-        raise ValueError("data_column() requires a non-empty name")
+    if not name or not name.strip():
+        raise ValueError(f"data_column() requires a non-blank name, got {name!r}")
     if not values:
         raise ValueError(f"data_column() requires a non-empty values list for column '{name}'")
 
@@ -570,7 +570,10 @@ def _column_sample_count(column: Any) -> int | None:
     floor division round it into a passing count.  The read path (data_frame_conversions._reshape_array_values)
     applies the same rule, and a frame this accepted but that could not be read back would be the worst outcome.
 
-    :param column: A typed column, a legacy DataColumn, or a SerializedDataColumn.
+    An ImageColumn counts its `images`, and a DataColumn its `dataValues`; only the scalar and array columns keep
+    their per-sample entries in `values`.
+
+    :param column: A typed column, a legacy DataColumn, an ImageColumn, or a SerializedDataColumn.
     :return: The sample count, or None for a SerializedDataColumn (whose payload is opaque) and for an array
         column whose dims are missing, non-positive, or do not evenly divide its values.
     """
@@ -578,6 +581,10 @@ def _column_sample_count(column: Any) -> int | None:
         return None
     if isinstance(column, common_pb2.DataColumn):
         return len(column.dataValues)
+    if isinstance(column, common_pb2.ImageColumn):
+        # ImageColumn holds one encoded payload per sample in `images`; it has no `values` field at all, so the
+        # generic path below would raise AttributeError on a column this function claims to support.
+        return len(column.images)
     if isinstance(column, _ARRAY_COLUMN_TYPES):
         product = _array_sample_size(column)
         if product is None:
@@ -606,8 +613,11 @@ def _check_column(column: Any, index: int, expected_count: int, seen_names: set[
         )
 
     name = column.name
-    if not name:
-        raise ValueError(f"data_frame() requires a non-empty name for every column; column at index {index} has none")
+    if not name or not name.strip():
+        # Blank, not merely empty: the rule is a non-blank name, and a whitespace-only one is not a name.
+        raise ValueError(
+            f"data_frame() requires a non-blank name for every column; column at index {index} has {name!r}"
+        )
     if name in seen_names:
         raise ValueError(
             f"data_frame() requires unique column names within a frame; '{name}' appears more than once "

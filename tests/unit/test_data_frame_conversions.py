@@ -344,9 +344,12 @@ class TestDataFrameFromPandas(unittest.TestCase):
 
         self.assertEqual(back["d"].tolist(), [1.0, 2.0, 3.0])
         self.assertEqual(back["s"].tolist(), ["a", "b", "c"])
+        # Compare the instants themselves, not raw int64 views: a view is in the index's own storage unit, and
+        # date_range() yields a microsecond-unit index here while the converter always emits nanoseconds.  The
+        # earlier form compared two different units and only passed because both sides were equally wrong.
         self.assertEqual(
-            [int(v) for v in back.index.view("int64")],
-            [int(v) for v in index.view("int64")],
+            [entry.value for entry in back.index],
+            [entry.value for entry in index],
         )
 
     def test_nan_is_fail_loud_with_sparsity_guidance(self):
@@ -532,6 +535,71 @@ class TestPandasRoundTripColumnOrder(unittest.TestCase):
         self.assertEqual(list(original.dtypes), list(realigned.dtypes))
         for name in original.columns:
             self.assertEqual(list(original[name]), list(realigned[name]))
+
+
+class TestEmptyAxisIsRejected(unittest.TestCase):
+    def test_set_but_empty_timestamp_list_is_rejected(self):
+        # expand_data_timestamps() returns [] for this, and the oneof still reports as set, so without an explicit
+        # check a corrupt frame converts to a zero-row table instead of failing loudly.
+        frame = common_pb2.DataFrame()
+        frame.dataTimestamps.timestampList.SetInParent()
+        with self.assertRaises(ValueError) as ctx:
+            dfc.data_frame_timestamps(frame)
+        self.assertIn("no timestamps", str(ctx.exception))
+
+
+class TestArrayColumnDimensions(unittest.TestCase):
+    """column_values() flattens each sample; the dims that give it shape are recoverable separately (plan D7)."""
+
+    def _frame(self, dims, values, count):
+        column = common_pb2.DoubleArrayColumn()
+        column.name = "waveform"
+        column.dimensions.dims.extend(dims)
+        column.values[:] = values
+        return dfb.data_frame(_axis(count), [column])
+
+    def test_dimensions_distinguish_shapes_with_equal_sample_size(self):
+        # [2, 2] and [4] both yield four values per sample; without the dims they are indistinguishable.
+        square = self._frame([2, 2], [float(i) for i in range(8)], 2)
+        flat = self._frame([4], [float(i) for i in range(8)], 2)
+
+        self.assertEqual(dfc.data_frame_columns(square), dfc.data_frame_columns(flat))
+        self.assertEqual(dfc.data_frame_column_dimensions(square), {"waveform": [2, 2]})
+        self.assertEqual(dfc.data_frame_column_dimensions(flat), {"waveform": [4]})
+
+    def test_non_array_columns_have_no_dimensions(self):
+        self.assertIsNone(dfc.column_dimensions(dfb.double_column("d", [1.0])))
+        frame = dfb.data_frame(_axis(1), [dfb.double_column("d", [1.0])])
+        self.assertEqual(dfc.data_frame_column_dimensions(frame), {})
+
+
+@unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas)")
+class TestIndexUnitAndNaT(unittest.TestCase):
+    """The index's storage unit is not guaranteed to be nanoseconds, and NaT has an integer representation."""
+
+    def test_non_nanosecond_index_units_convert_exactly(self):
+        import pandas as pd
+
+        # A raw int64 view is in the index's OWN unit, so a datetime64[us] index would land 1000x too early.
+        for unit, expected_nanos in (
+            ("s", 1_700_000_000_000_000_000),
+            ("ms", 1_700_000_000_123_000_000),
+            ("us", 1_700_000_000_123_456_000),
+            ("ns", 1_700_000_000_123_456_789),
+        ):
+            with self.subTest(unit=unit):
+                index = pd.DatetimeIndex(pd.to_datetime([1_700_000_000_123_456_789], unit="ns", utc=True)).as_unit(unit)
+                timestamp = dfc._timestamps_from_index(index).timestampList.timestamps[0]
+                actual = timestamp.epochSeconds * 1_000_000_000 + timestamp.nanoseconds
+                self.assertEqual(actual, expected_nanos)
+
+    def test_nat_in_the_index_is_rejected(self):
+        import pandas as pd
+
+        index = pd.DatetimeIndex([pd.NaT, pd.Timestamp("2026-01-01", tz="UTC")])
+        with self.assertRaises(ValueError) as ctx:
+            dfc._timestamps_from_index(index)
+        self.assertIn("NaT", str(ctx.exception))
 
 
 if __name__ == "__main__":

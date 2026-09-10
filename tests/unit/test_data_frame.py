@@ -194,6 +194,11 @@ class TestDataColumnEscapeHatch(unittest.TestCase):
         self.assertIn("complex", message)
         self.assertIn("index 0", message)
 
+    def test_rejects_whitespace_only_name(self):
+        with self.assertRaises(ValueError) as ctx:
+            dfb.data_column("   ", [1])
+        self.assertIn("non-blank", str(ctx.exception))
+
     def test_rejects_empty_name_and_values(self):
         with self.assertRaises(ValueError):
             dfb.data_column("", [1])
@@ -352,6 +357,34 @@ class TestDataFrameAssembly(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             dfb.data_frame(_axis(3), [column])
         self.assertIn("2 values", str(ctx.exception))
+
+    def test_accepts_prebuilt_image_column(self):
+        # ImageColumn keeps one payload per sample in `images`; it has no `values` field at all, so a generic
+        # len(column.values) count raises AttributeError on a column type data_frame() claims to support.
+        column = common_pb2.ImageColumn()
+        column.name = "camera"
+        column.images.extend([b"frame-0", b"frame-1"])
+        frame = dfb.data_frame(_axis(2), [column])
+        self.assertEqual([c.name for c in frame.imageColumns], ["camera"])
+
+    def test_image_column_count_is_validated_against_the_axis(self):
+        column = common_pb2.ImageColumn()
+        column.name = "camera"
+        column.images.extend([b"only-one"])
+        with self.assertRaises(ValueError) as ctx:
+            dfb.data_frame(_axis(3), [column])
+        self.assertIn("1 values", str(ctx.exception))
+
+    def test_rejects_whitespace_only_column_name(self):
+        # The rule is a non-blank name; "  " is empty of content while passing a bare falsiness check.
+        for blank in ("  ", "\t", "\n"):
+            with self.subTest(name=blank):
+                column = common_pb2.DoubleColumn()
+                column.name = blank
+                column.values[:] = [1.0]
+                with self.assertRaises(ValueError) as ctx:
+                    dfb.data_frame(_axis(1), [column])
+                self.assertIn("non-blank", str(ctx.exception))
 
     def test_array_column_with_ragged_values_is_rejected(self):
         # 5 values with a per-sample size of 2 is not a whole number of samples.  Floor division would round it to

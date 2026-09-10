@@ -111,9 +111,9 @@ saved = client.annotation.datasets.save_dataset(SaveDataSetRequestParams(
 if saved.result_status.is_error:
     raise RuntimeError(saved.result_status.message)
 
-saved_id = saved.dataset_id
-assert saved_id is not None        # guaranteed once is_error is False; accessors are Optional
-print(saved_id)                    # server-assigned id, e.g. '6aa1bb271a768e97db44d426'
+dataset_id = saved.dataset_id
+assert dataset_id is not None      # guaranteed once is_error is False; accessors are Optional
+print(dataset_id)                  # server-assigned id, e.g. '6aa1bb271a768e97db44d426'
 ```
 
 `data_block()` requires `begin < end` and a non-empty PV list.  That check exists here because the
@@ -218,8 +218,8 @@ result = client.annotation.annotations.save_annotation(SaveAnnotationRequestPara
 if result.result_status.is_error:
     raise RuntimeError(result.result_status.message)
 
-saved_annotation_id = result.annotation_id
-assert saved_annotation_id is not None
+annotation_id = result.annotation_id
+assert annotation_id is not None
 ```
 
 To attach *numbers*, build a `Calculations` payload.  A frame is one time axis plus its columns:
@@ -246,8 +246,8 @@ result = client.annotation.annotations.save_annotation(SaveAnnotationRequestPara
     calculations=calculations({"orbit-rms": frame}),
     modified_by="cmcchesney",
 ))
-saved_calculations_id = result.calculations_id
-assert saved_calculations_id is not None
+calculations_id = result.calculations_id
+assert calculations_id is not None
 ```
 
 `calculations()` takes a **dict** of frame name to frame, which makes frame-name uniqueness true by

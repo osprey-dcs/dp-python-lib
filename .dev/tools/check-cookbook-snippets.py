@@ -140,12 +140,20 @@ params: QueryParams = QueryParams(
 # and `params` are carried above.  Server-assigned ids are strings.
 t0: datetime = datetime(2026, 2, 2, 18, 0, tzinfo=timezone.utc)
 t1: datetime = datetime(2026, 2, 2, 19, 0, tzinfo=timezone.utc)
-# Typed `str` because the recipe's snippets narrow the Optional accessors with an assert before
-# carrying the id forward -- which is the pattern conventions.md teaches, so the declared type here
-# is the post-narrowing one.
-dataset_id: str = "6aa1bb271a768e97db44d426"
-annotation_id: str = "6aa1bb271a768e97db44d427"
-calculations_id: str = "6aa1bb271a768e97db44d428"
+# Declared without an annotation so mypy infers `str` for the standalone snippets that consume these,
+# while the recipe's own snippets can still rebind them from an Optional accessor and narrow with an
+# assert, as conventions.md teaches.  An explicit `str` would conflict with those real assignments; an
+# explicit `str | None` would force every later snippet to re-narrow a handle the recipe already did.
+#
+# Seeding a handle here cannot prove the recipe actually binds that name -- a snippet binding `saved_id`
+# while later ones read `dataset_id` type-checked cleanly and was still broken end to end.  Names carried
+# across snippets are verified by reading the recipe as one continuous script, not by this preamble.
+# `str | None` is what the accessors return; the recipe narrows with an assert before use, and the
+# standalone snippets below do the same, so consumers see a plain `str`.
+dataset_id: str | None = "6aa1bb271a768e97db44d426"
+annotation_id: str | None = "6aa1bb271a768e97db44d427"
+calculations_id: str | None = "6aa1bb271a768e97db44d428"
+assert dataset_id is not None and annotation_id is not None and calculations_id is not None
 # --- end preamble ---
 """
 

@@ -80,6 +80,27 @@
   caller was repointed at it, and `machine_config_client` is now just another caller.  Done inside this ticket
   rather than deferred, since the feature is unreleased and a follow-up would ship the wart in the release.
 
+- **Copilot review of PR #45, 2026-09-10.**  Seven findings against `f101ff6`; one (array floor division) duplicated a
+  finding already fixed, and the other six were real:
+  - `data_frame()` counted every column as `len(column.values)`, but an `ImageColumn` keeps its per-sample payloads
+    in `images` and has no `values` field, so every prebuilt image column -- a kind the module documents as
+    supported -- raised `AttributeError` instead of being assembled.
+  - `_timestamps_from_index()` read the index as a raw int64 view, which is expressed in the index's own storage
+    unit.  pandas 2+ keeps second/millisecond/microsecond resolutions, so a `datetime64[us]` index was serialized
+    1000x too early, silently.  It now reads `Timestamp.value`, which is nanoseconds regardless of unit, and
+    rejects `NaT` (whose integer form is a valid-looking instant).  A round-trip test had compared raw int64 views
+    on both sides, so it passed while both were equally wrong.
+  - Column-name validation accepted whitespace-only names, though the documented rule is non-blank.
+  - `data_frame_timestamps()` documented that it rejects an empty axis but returned `[]` for a set-but-empty
+    `timestampList`, converting a corrupt frame to a zero-row table.
+  - Array dims were consumed to delimit samples and then discarded, so `[2, 2]` and `[4]` were indistinguishable --
+    D7 calls for the dims to travel alongside the values.  Added `column_dimensions()` /
+    `data_frame_column_dimensions()` rather than changing `column_values()`'s one-entry-per-sample contract.
+  - The cookbook's first snippet bound `saved_id` while every later snippet read `dataset_id` (likewise
+    `saved_annotation_id` / `saved_calculations_id`).  Every snippet type-checked because the checker preamble
+    pre-seeded those names -- the recipe was broken only when read end to end, which is how a reader reads it.
+    The preamble now documents that seeding a name cannot prove the recipe binds it.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house

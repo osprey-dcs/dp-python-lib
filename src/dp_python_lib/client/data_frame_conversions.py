@@ -51,6 +51,15 @@ _ARRAY_COLUMN_FIELDS = (
 # ImageColumn stores its per-sample payloads in `images` rather than `values`.
 _IMAGE_COLUMN_FIELD = "imageColumns"
 
+# The array column message types, whose flat values are delimited by their declared dims.
+_ARRAY_COLUMN_MESSAGE_TYPES = (
+    common_pb2.DoubleArrayColumn,
+    common_pb2.FloatArrayColumn,
+    common_pb2.Int32ArrayColumn,
+    common_pb2.Int64ArrayColumn,
+    common_pb2.BoolArrayColumn,
+)
+
 
 def _require_pandas():
     """Imports and returns pandas, or raises an actionable error if the optional [analysis] extra is missing."""
@@ -77,7 +86,14 @@ def data_frame_timestamps(frame: common_pb2.DataFrame) -> list[int]:
     """
     if not frame.HasField("dataTimestamps"):
         raise ValueError("DataFrame has no dataTimestamps; every frame must carry a time axis")
-    return expand_data_timestamps(frame.dataTimestamps)
+
+    epoch_nanos = expand_data_timestamps(frame.dataTimestamps)
+    if not epoch_nanos:
+        # expand_data_timestamps() returns [] for a set-but-empty timestampList, which reports its oneof arm as
+        # set.  Rejecting it here honors this function's documented contract and matches timestamp_count() on the
+        # write side; otherwise a corrupt frame converts to a zero-row table instead of failing loudly.
+        raise ValueError("DataFrame time axis describes no timestamps; every frame must cover at least one sample")
+    return epoch_nanos
 
 
 def _reshape_array_values(column: Any) -> list[list]:
@@ -108,6 +124,41 @@ def _reshape_array_values(column: Any) -> list[list]:
     return [values[i : i + product] for i in range(0, len(values), product)]
 
 
+def column_dimensions(column: Any) -> list[int] | None:
+    """
+    Returns an array column's declared dimensions, or None for any other column kind.
+
+    column_values() reshapes an array column into one flat list per sample, which delimits the samples but does
+    not preserve the shape WITHIN one: a 2x2 sample and a 4-element sample both come back as four values.  Plan
+    D7 calls for the dims to travel alongside those values, and this is the accessor that supplies them, kept
+    separate so column_values()'s "one entry per sample" contract stays uniform across all column kinds.
+
+    :param column: Any column message.
+    :return: The dims as a list of ints for an array column, or None if the column is not an array column.
+    """
+    if not isinstance(column, _ARRAY_COLUMN_MESSAGE_TYPES):
+        return None
+    return list(column.dimensions.dims)
+
+
+def data_frame_column_dimensions(frame: common_pb2.DataFrame) -> dict[str, list[int]]:
+    """
+    Returns the declared dimensions of every array column in a frame, keyed by column name.
+
+    Pairs with data_frame_columns(): that gives one flat list per sample, this gives the shape those values have.
+    Non-array columns are absent from the result rather than mapped to None, so a caller can test membership.
+
+    :param frame: The DataFrame to inspect.
+    :return: A dict mapping each array column's name to its dims; empty when the frame has no array columns.
+    """
+    dimensions: dict[str, list[int]] = {}
+    for column in iter_frame_columns(frame):
+        dims = column_dimensions(column)
+        if dims is not None:
+            dimensions[column.name] = dims
+    return dimensions
+
+
 def column_values(column: Any) -> list:
     """
     Extracts one Python value per sample from any supported column message.
@@ -120,6 +171,9 @@ def column_values(column: Any) -> list:
     bytes payload per sample; and a legacy DataColumn is converted per value by data_value_to_python(), so an unset
     oneof becomes None -- the only representation of a gap in this API.
 
+    An array column's per-sample list is flat: the dims that give it shape are available separately from
+    column_dimensions(), so that every column kind here yields exactly one entry per sample.
+
     :param column: A typed column, a legacy DataColumn, or an ImageColumn.
     :return: One value per sample, in axis order.
     :raises ValueError: if the column type is unsupported, or an array column's dims do not divide its values.
@@ -128,16 +182,7 @@ def column_values(column: Any) -> list:
         return [data_value_to_python(value) for value in column.dataValues]
     if isinstance(column, common_pb2.ImageColumn):
         return list(column.images)
-    if isinstance(
-        column,
-        (
-            common_pb2.DoubleArrayColumn,
-            common_pb2.FloatArrayColumn,
-            common_pb2.Int32ArrayColumn,
-            common_pb2.Int64ArrayColumn,
-            common_pb2.BoolArrayColumn,
-        ),
-    ):
+    if isinstance(column, _ARRAY_COLUMN_MESSAGE_TYPES):
         return _reshape_array_values(column)
     if hasattr(column, "values"):
         return list(column.values)
@@ -311,6 +356,10 @@ def _timestamps_from_index(index: Any) -> common_pb2.DataTimestamps:
     that merely looks regular would quietly change the timestamps -- the one thing this API cannot tolerate.  Build
     a clock explicitly with sampling_clock() when that is what the data is.
 
+    Each instant is read as Timestamp.value, which is nanoseconds whatever the index's own storage unit; a raw
+    int64 view is in that unit, so a datetime64[us] index would land 1000x too early.  NaT is rejected rather than
+    passed through, since its integer form is a valid-looking instant.
+
     :param index: A pandas DatetimeIndex.
     :return: A DataTimestamps carrying a TimestampList.
     :raises ValueError: if the index is empty, not a DatetimeIndex, or not strictly increasing.
@@ -331,9 +380,19 @@ def _timestamps_from_index(index: Any) -> common_pb2.DataTimestamps:
             "e.g. df.index = df.index.tz_localize('UTC')"
         )
 
-    epoch_nanos = [int(value) for value in index.view("int64")] if hasattr(index, "view") else None
-    if epoch_nanos is None:
-        epoch_nanos = [int(value) for value in index.astype("int64")]
+    # NaT has an integer representation (the int64 minimum), so a raw integer view would serialize it as a real
+    # instant.  Reject it before converting: an absent timestamp is not a time axis position.
+    if index.isna().any():
+        missing = [int(position) for position in index.isna().nonzero()[0][:5]]
+        raise ValueError(
+            f"DataFrame index contains NaT at row position(s) {missing}; every row must have a real timestamp to "
+            f"become a time axis.  Drop those rows, or supply the timestamps they should carry."
+        )
+
+    # Timestamp.value is always nanoseconds regardless of the index's own storage unit.  A raw int64 view is NOT:
+    # pandas 2+ keeps second, millisecond, and microsecond resolutions, and viewing a datetime64[us] index as
+    # int64 yields microseconds -- silently placing every instant 1000x too early.
+    epoch_nanos = [entry.value for entry in index]
 
     timestamps = common_pb2.DataTimestamps()
     previous = None
