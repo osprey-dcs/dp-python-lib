@@ -777,5 +777,52 @@ class TestEnumColumnRoundTrip(unittest.TestCase):
                 self.assertIn("enum id", str(ctx.exception))
 
 
+class TestStructuralColumnFields(unittest.TestCase):
+    """
+    Some column kinds carry information their values cannot be interpreted without.  column_values() keeps its
+    one-entry-per-sample shape, so those fields travel in companion accessors -- the same split as array dims.
+    """
+
+    def _frame(self):
+        image = common_pb2.ImageColumn()
+        image.name = "cam"
+        image.images.extend([b"frame-0", b"frame-1"])
+        image.imageDescriptor.width = 640
+        image.imageDescriptor.height = 480
+        image.imageDescriptor.channels = 3
+        image.imageDescriptor.encoding = "rgb8"
+
+        struct = common_pb2.StructColumn()
+        struct.name = "readings"
+        struct.schemaId = "schema-1"
+        struct.values.extend([b"payload-0", b"payload-1"])
+
+        return dfb.data_frame(dfb.timestamp_list([T0, T1]), [image, struct])
+
+    def test_image_descriptor_is_recoverable(self):
+        # Without width/height/channels/encoding the payload bytes cannot be decoded at all.
+        self.assertEqual(
+            dfc.data_frame_image_descriptors(self._frame()),
+            {"cam": {"width": 640, "height": 480, "channels": 3, "encoding": "rgb8"}},
+        )
+
+    def test_struct_schema_id_is_recoverable(self):
+        self.assertEqual(dfc.data_frame_schema_ids(self._frame()), {"readings": "schema-1"})
+
+    def test_values_still_yield_one_entry_per_sample(self):
+        self.assertEqual(
+            dfc.data_frame_columns(self._frame()),
+            {"cam": [b"frame-0", b"frame-1"], "readings": [b"payload-0", b"payload-1"]},
+        )
+
+    def test_other_column_kinds_have_neither(self):
+        plain = dfb.double_column("d", [1.0])
+        self.assertIsNone(dfc.image_descriptor_dict(plain))
+        self.assertIsNone(dfc.column_schema_id(plain))
+        frame = dfb.data_frame(_axis(1), [plain])
+        self.assertEqual(dfc.data_frame_image_descriptors(frame), {})
+        self.assertEqual(dfc.data_frame_schema_ids(frame), {})
+
+
 if __name__ == "__main__":
     unittest.main()

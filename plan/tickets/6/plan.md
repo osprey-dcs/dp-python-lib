@@ -152,6 +152,19 @@
     attribution in this plan's own reference list, and a sentence in `CLAUDE.md` that an earlier edit had
     mangled mid-clause.  All four corrected.
 
+- **Copilot fifth-pass review, 2026-09-10.**  Two findings against `94986fd`, both real:
+  - **A hand-built `TimestampList` bypassed the strict-ordering rule.**  `timestamp_count()` checked only that it
+    was non-empty, so duplicate or decreasing timestamps -- which `timestamp_list()` rejects -- were accepted by
+    both `data_frame()` and `SampleStatusFrame`, producing a frame `data_frame_from_pandas()` then refuses.  Two
+    samples claiming one instant is also inexpressible in the sample-status identity model.  This is the third
+    instance of the same shape (after array dims and `periodNanos`): a builder enforces a rule that the shared
+    count/validate helper does not, so a pre-built message walks straight past it.
+  - **`ImageColumn` and `StructColumn` lost their structural fields on read.**  `column_values()` yields the raw
+    payloads, but an image's `imageDescriptor` (width/height/channels/encoding) and a struct's `schemaId` are what
+    make those bytes interpretable, and neither was reachable from the conversion output.  Added
+    `image_descriptor_dict()` / `column_schema_id()` and their frame-level companions, following the precedent
+    already set for array dims and enum ids rather than folding them into `column_values()`.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house

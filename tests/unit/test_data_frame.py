@@ -336,6 +336,37 @@ class TestDataFrameAssembly(unittest.TestCase):
             dfb.data_frame(_axis(1), ["not a column"])
         self.assertIn("unsupported column type", str(ctx.exception))
 
+    def test_rejects_out_of_order_prebuilt_timestamp_list(self):
+        # timestamp_list() enforces strict ordering, but a hand-built axis bypasses that builder.  Two samples
+        # claiming one instant is inexpressible in the identity model, and data_frame_from_pandas() rejects the
+        # index such an axis produces -- so accepting it here would build an un-round-trippable frame.
+        for label, seconds in (("decreasing", [2, 1]), ("duplicate", [1, 1])):
+            with self.subTest(case=label):
+                axis = common_pb2.DataTimestamps()
+                for second in seconds:
+                    entry = axis.timestampList.timestamps.add()
+                    entry.epochSeconds = 1_700_000_000 + second
+                with self.assertRaises(ValueError) as ctx:
+                    dfb.data_frame(axis, [dfb.double_column("d", [1.0, 2.0])])
+                self.assertIn("strictly increasing", str(ctx.exception))
+
+    def test_rejects_prebuilt_timestamp_list_duplicated_at_nanosecond_precision(self):
+        axis = common_pb2.DataTimestamps()
+        for _ in range(2):
+            entry = axis.timestampList.timestamps.add()
+            entry.epochSeconds = 1_700_000_000
+            entry.nanoseconds = 5
+        with self.assertRaises(ValueError):
+            dfb.data_frame(axis, [dfb.double_column("d", [1.0, 2.0])])
+
+    def test_accepts_strictly_increasing_prebuilt_timestamp_list(self):
+        axis = common_pb2.DataTimestamps()
+        for second in (1, 2):
+            entry = axis.timestampList.timestamps.add()
+            entry.epochSeconds = 1_700_000_000 + second
+        frame = dfb.data_frame(axis, [dfb.double_column("d", [1.0, 2.0])])
+        self.assertEqual(len(frame.dataTimestamps.timestampList.timestamps), 2)
+
     def test_rejects_zero_period_sampling_clock(self):
         # sampling_clock() makes this unreachable, but a hand-built axis bypasses it.  expand_data_timestamps()
         # rejects a non-positive period on the read side, so accepting it here would build an unreadable frame --

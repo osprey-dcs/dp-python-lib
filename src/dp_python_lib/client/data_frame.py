@@ -150,14 +150,15 @@ def timestamp_count(timestamps: common_pb2.DataTimestamps) -> int:
     An empty or malformed axis is rejected here rather than allowed to surface later as a confusing column-length
     mismatch.  The axis builders already make this unreachable -- sampling_clock() requires count >= 1 and a
     positive period, and timestamp_list() requires a non-empty list -- but a hand-built DataTimestamps can still
-    carry a zero-count or zero-period SamplingClock, or an empty TimestampList, and all report their oneof arm as
-    set.  Rejecting them keeps this in step with expand_data_timestamps(), which applies the same rules on the
-    read path; anything data_frame() accepts must be readable back.
+    carry a zero-count or zero-period SamplingClock, or an empty or out-of-order TimestampList, and all report
+    their oneof arm as set.  Rejecting them keeps this in step with the read path -- expand_data_timestamps() for
+    the clock rules, data_frame_from_pandas() for the ordering one; anything data_frame() accepts must be readable
+    back.
 
     :param timestamps: The time axis to measure.
     :return: The number of timestamps on the axis.
-    :raises ValueError: if neither axis form is set, if the axis describes no timestamps, or if a SamplingClock's
-        periodNanos is not positive.
+    :raises ValueError: if neither axis form is set, if the axis describes no timestamps, if a SamplingClock's
+        periodNanos is not positive, or if a TimestampList is not strictly increasing.
     """
     axis = timestamps.WhichOneof("value")
     if axis == "samplingClock":
@@ -172,9 +173,23 @@ def timestamp_count(timestamps: common_pb2.DataTimestamps) -> int:
             raise ValueError(f"DataTimestamps samplingClock requires periodNanos > 0, got {period}")
         return count
     if axis == "timestampList":
-        count = len(timestamps.timestampList.timestamps)
+        entries = timestamps.timestampList.timestamps
+        count = len(entries)
         if count < 1:
             raise ValueError("DataTimestamps timestampList requires at least one timestamp, got an empty list")
+        # Strict ordering, as timestamp_list() enforces -- a hand-built axis bypasses that builder entirely.
+        # Duplicate or decreasing timestamps mean two samples claim one instant, which the identity model cannot
+        # express, and data_frame_from_pandas() rejects the index they produce, so accepting them here would build
+        # a frame the library cannot round-trip.
+        previous = entries[0]
+        for index, current in enumerate(entries[1:], start=1):
+            if (current.epochSeconds, current.nanoseconds) <= (previous.epochSeconds, previous.nanoseconds):
+                raise ValueError(
+                    f"DataTimestamps timestampList requires strictly increasing timestamps; entry {index} "
+                    f"({current.epochSeconds}.{current.nanoseconds:09d}) does not follow entry {index - 1} "
+                    f"({previous.epochSeconds}.{previous.nanoseconds:09d})"
+                )
+            previous = current
         return count
     raise ValueError("DataTimestamps must specify either a samplingClock or a timestampList")
 

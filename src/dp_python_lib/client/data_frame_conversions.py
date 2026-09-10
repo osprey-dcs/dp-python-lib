@@ -159,6 +159,68 @@ def data_frame_column_dimensions(frame: common_pb2.DataFrame) -> dict[str, list[
     return dimensions
 
 
+def image_descriptor_dict(column: Any) -> dict[str, Any] | None:
+    """
+    Returns an ImageColumn's descriptor -- width, height, channels, encoding -- as a plain dict, or None for any
+    other column kind.
+
+    column_values() yields one encoded payload per sample, which nothing can decode on its own: the descriptor is
+    what says how to interpret those bytes.  It is kept separate for the same reason column_dimensions() is, so
+    that column_values() stays "exactly one entry per sample" across every column kind.
+
+    :param column: Any column message.
+    :return: A dict with 'width', 'height', 'channels', and 'encoding' for an ImageColumn, else None.
+    """
+    if not isinstance(column, common_pb2.ImageColumn):
+        return None
+    descriptor = column.imageDescriptor
+    return {
+        "width": descriptor.width,
+        "height": descriptor.height,
+        "channels": descriptor.channels,
+        "encoding": descriptor.encoding,
+    }
+
+
+def column_schema_id(column: Any) -> str | None:
+    """
+    Returns a StructColumn's schemaId, or None for any other column kind.
+
+    A struct column's values are opaque serialized payloads; the schema id is what names the schema needed to
+    interpret them, so the values alone are not usable without it.
+
+    :param column: Any column message.
+    :return: The schemaId for a StructColumn, else None.
+    """
+    if not isinstance(column, common_pb2.StructColumn):
+        return None
+    return column.schemaId
+
+
+def data_frame_image_descriptors(frame: common_pb2.DataFrame) -> dict[str, dict[str, Any]]:
+    """
+    Returns every ImageColumn's descriptor in a frame, keyed by column name.
+
+    Pairs with data_frame_columns(), which gives the payloads these describe.  Non-image columns are absent.
+
+    :param frame: The frame to inspect.
+    :return: A dict of column name -> descriptor dict; empty when the frame has no image columns.
+    """
+    return {column.name: image_descriptor_dict(column) for column in frame.imageColumns}
+
+
+def data_frame_schema_ids(frame: common_pb2.DataFrame) -> dict[str, str]:
+    """
+    Returns every StructColumn's schemaId in a frame, keyed by column name.
+
+    Pairs with data_frame_columns(), which gives the payloads the schema describes.  Non-struct columns are absent.
+
+    :param frame: The frame to inspect.
+    :return: A dict of column name -> schemaId; empty when the frame has no struct columns.
+    """
+    return {column.name: column.schemaId for column in frame.structColumns}
+
+
 def column_values(column: Any) -> list:
     """
     Extracts one Python value per sample from any supported column message.
@@ -171,8 +233,10 @@ def column_values(column: Any) -> list:
     bytes payload per sample; and a legacy DataColumn is converted per value by data_value_to_python(), so an unset
     oneof becomes None -- the only representation of a gap in this API.
 
-    An array column's per-sample list is flat: the dims that give it shape are available separately from
-    column_dimensions(), so that every column kind here yields exactly one entry per sample.
+    Every column kind here yields exactly one entry per sample.  The structural information some kinds carry
+    alongside their values lives in companion accessors rather than being folded into the result: an array
+    column's dims in column_dimensions(), an image column's descriptor in image_descriptor_dict(), and a struct
+    column's schema id in column_schema_id().  Those payloads cannot be interpreted without them.
 
     :param column: A typed column, a legacy DataColumn, or an ImageColumn.
     :return: One value per sample, in axis order.
