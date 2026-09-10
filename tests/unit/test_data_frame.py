@@ -336,6 +336,18 @@ class TestDataFrameAssembly(unittest.TestCase):
             dfb.data_frame(_axis(1), ["not a column"])
         self.assertIn("unsupported column type", str(ctx.exception))
 
+    def test_rejects_zero_period_sampling_clock(self):
+        # sampling_clock() makes this unreachable, but a hand-built axis bypasses it.  expand_data_timestamps()
+        # rejects a non-positive period on the read side, so accepting it here would build an unreadable frame --
+        # and every sample after the first would carry the first one's timestamp.
+        axis = common_pb2.DataTimestamps()
+        axis.samplingClock.startTime.epochSeconds = 1_700_000_000
+        axis.samplingClock.periodNanos = 0
+        axis.samplingClock.count = 3
+        with self.assertRaises(ValueError) as ctx:
+            dfb.data_frame(axis, [dfb.double_column("d", [1.0, 2.0, 3.0])])
+        self.assertIn("periodNanos > 0", str(ctx.exception))
+
     def test_rejects_empty_axis(self):
         with self.assertRaises(ValueError):
             dfb.data_frame(common_pb2.DataTimestamps(), [dfb.double_column("d", [1.0])])

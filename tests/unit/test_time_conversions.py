@@ -31,6 +31,48 @@ class TestToEpochNanos(unittest.TestCase):
         self.assertEqual(to_epoch_nanos(common_pb2.Timestamp()), 0)
 
 
+class TestDatetimeConversionIsExact(unittest.TestCase):
+    """
+    A datetime must not route through datetime.timestamp().
+
+    That returns a float64, which cannot hold present-day epoch seconds at sub-microsecond resolution, so the
+    fractional part comes back slightly wrong -- it moved 99.7% of microsecond-precision datetimes by up to ~119ns.
+    Sample-status matching and provenance ranges are exact at nanosecond precision, so that is a correctness bug,
+    not a rounding nicety.
+    """
+
+    def test_microsecond_datetimes_convert_exactly(self):
+        for microsecond in (1, 999, 123_456, 250_000, 999_999):
+            with self.subTest(microsecond=microsecond):
+                dt = datetime(2026, 7, 14, 18, 0, 0, microsecond, tzinfo=timezone.utc)
+                self.assertEqual(to_timestamp(dt).nanoseconds, microsecond * 1_000)
+
+    def test_every_microsecond_of_a_second_is_exact(self):
+        # Exhaustive over the fractional field at a present-day instant: the float path failed almost all of these.
+        base = datetime(2026, 7, 14, 18, 0, 0, tzinfo=timezone.utc)
+        wrong = [
+            microsecond
+            for microsecond in range(0, 1_000_000, 977)  # a prime stride, ~1024 samples across the range
+            if to_timestamp(base.replace(microsecond=microsecond)).nanoseconds != microsecond * 1_000
+        ]
+        self.assertEqual(wrong, [])
+
+    def test_round_trips_through_to_epoch_nanos(self):
+        dt = datetime(2026, 7, 14, 18, 0, 0, 123_456, tzinfo=timezone.utc)
+        expected = int(datetime(2026, 7, 14, 18, 0, 0, tzinfo=timezone.utc).timestamp()) * 1_000_000_000
+        self.assertEqual(to_epoch_nanos(to_timestamp(dt)), expected + 123_456_000)
+
+    def test_non_utc_offset_yields_the_same_instant(self):
+        aware = datetime(2026, 7, 14, 13, 0, 0, 123_456, tzinfo=timezone(timedelta(hours=-5)))
+        utc = datetime(2026, 7, 14, 18, 0, 0, 123_456, tzinfo=timezone.utc)
+        self.assertEqual(to_epoch_nanos(to_timestamp(aware)), to_epoch_nanos(to_timestamp(utc)))
+
+    def test_epoch_and_pre_epoch(self):
+        self.assertEqual(to_epoch_nanos(to_timestamp(datetime(1970, 1, 1, tzinfo=timezone.utc))), 0)
+        with self.assertRaises(ValueError):
+            to_timestamp(datetime(1969, 12, 31, 23, 59, 59, tzinfo=timezone.utc))
+
+
 class TestToTimestamp(unittest.TestCase):
     """Unit tests for the to_timestamp() conversion helper."""
 

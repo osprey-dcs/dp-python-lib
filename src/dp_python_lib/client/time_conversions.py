@@ -19,7 +19,7 @@ Design decisions:
 """
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dp_python_lib.grpc import common_pb2
 
@@ -29,6 +29,12 @@ TimestampInput = datetime | int | float | common_pb2.Timestamp
 
 
 NANOS_PER_SECOND = 1_000_000_000
+
+_NANOS_PER_MICROSECOND = 1_000
+_SECONDS_PER_DAY = 86_400
+# The reference instant for the datetime -> Timestamp conversion.  Subtracting two aware datetimes yields a
+# timedelta whose days/seconds/microseconds are exact integers, which is what keeps that path lossless.
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def to_epoch_nanos(timestamp: common_pb2.Timestamp) -> int:
@@ -69,8 +75,22 @@ def to_timestamp(value: TimestampInput) -> common_pb2.Timestamp:
                 "to_timestamp() requires a timezone-aware datetime; naive datetimes are rejected "
                 "to avoid silent local-timezone bugs. Use datetime.now(timezone.utc) or attach tzinfo."
             )
-        epoch = value.timestamp()
-        return to_timestamp(epoch)
+        # Integer arithmetic, NOT value.timestamp(): that returns a float64, which cannot hold present-day epoch
+        # seconds at sub-microsecond resolution, so the fractional part comes back slightly wrong.  It moved 99.7%
+        # of microsecond-precision datetimes by up to ~119 ns -- fatal for an API whose sample-status matching and
+        # provenance ranges are exact at nanosecond precision.  A datetime's own resolution is exactly
+        # microseconds, so converting through its integer fields is lossless.
+        delta = value - _EPOCH
+        epoch_seconds = delta.days * _SECONDS_PER_DAY + delta.seconds
+        if epoch_seconds < 0:
+            raise ValueError(
+                f"to_timestamp() cannot represent {value.isoformat()}: common.Timestamp.epochSeconds is unsigned, "
+                f"so instants before 1970-01-01T00:00:00Z have no representation."
+            )
+        timestamp = common_pb2.Timestamp()
+        timestamp.epochSeconds = epoch_seconds
+        timestamp.nanoseconds = delta.microseconds * _NANOS_PER_MICROSECOND
+        return timestamp
 
     if isinstance(value, bool):
         # bool is a subclass of int; reject it explicitly as it is virtually always a mistake.

@@ -246,8 +246,16 @@ result = client.annotation.annotations.save_annotation(SaveAnnotationRequestPara
     calculations=calculations({"orbit-rms": frame}),
     modified_by="cmcchesney",
 ))
+if result.result_status.is_error:
+    raise RuntimeError(result.result_status.message)
+
+# No annotation_id was passed, so this SAVED A SECOND ANNOTATION rather than adding calculations to
+# the one above.  Rebind both handles: the rest of this recipe works with the annotation that owns
+# the calculations.  To attach them to the first annotation instead, pass annotation_id= and the
+# fields to carry forward -- see "Updating without losing the calculations" below.
+annotation_id = result.annotation_id
 calculations_id = result.calculations_id
-assert calculations_id is not None
+assert annotation_id is not None and calculations_id is not None
 ```
 
 `calculations()` takes a **dict** of frame name to frame, which makes frame-name uniqueness true by
@@ -483,7 +491,7 @@ if read.result_status.is_error:
 existing = read.annotation
 assert existing is not None          # guaranteed once is_error is False
 
-client.annotation.annotations.save_annotation(SaveAnnotationRequestParams(
+replaced = client.annotation.annotations.save_annotation(SaveAnnotationRequestParams(
     name="Orbit drift during CXI_3443 (revised)",
     owner_id=existing.ownerId,
     dataset_ids=list(existing.dataSetIds),
@@ -495,6 +503,13 @@ client.annotation.annotations.save_annotation(SaveAnnotationRequestParams(
     annotation_id=annotation_id,
     modified_by="cmcchesney",
 ))
+if replaced.result_status.is_error:
+    raise RuntimeError(replaced.result_status.message)
+
+# Carrying calculations through a replace stores a NEW object and deletes the old one, so the id
+# you were holding is now dangling.  Rebind it, or a later export/read will fail.
+calculations_id = replaced.calculations_id
+assert calculations_id is not None
 ```
 
 A replace that *does* carry new calculations returns a **new** `calculations_id`; the previous

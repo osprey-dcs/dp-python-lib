@@ -147,21 +147,29 @@ def timestamp_count(timestamps: common_pb2.DataTimestamps) -> int:
     """
     Returns the number of timestamps a DataTimestamps describes, for validating parallel-array lengths.
 
-    An empty axis is rejected here rather than allowed to surface later as a confusing column-length mismatch.
-    The axis builders already make this unreachable -- sampling_clock() requires count >= 1 and timestamp_list()
-    requires a non-empty list -- but a hand-built DataTimestamps can still carry a zero-count SamplingClock or an
-    empty TimestampList, and both report their oneof arm as set.  Rejecting them keeps this in step with
-    expand_data_timestamps(), which applies the same rule on the read path.
+    An empty or malformed axis is rejected here rather than allowed to surface later as a confusing column-length
+    mismatch.  The axis builders already make this unreachable -- sampling_clock() requires count >= 1 and a
+    positive period, and timestamp_list() requires a non-empty list -- but a hand-built DataTimestamps can still
+    carry a zero-count or zero-period SamplingClock, or an empty TimestampList, and all report their oneof arm as
+    set.  Rejecting them keeps this in step with expand_data_timestamps(), which applies the same rules on the
+    read path; anything data_frame() accepts must be readable back.
 
     :param timestamps: The time axis to measure.
     :return: The number of timestamps on the axis.
-    :raises ValueError: if neither axis form is set, or if the axis describes no timestamps.
+    :raises ValueError: if neither axis form is set, if the axis describes no timestamps, or if a SamplingClock's
+        periodNanos is not positive.
     """
     axis = timestamps.WhichOneof("value")
     if axis == "samplingClock":
         count = timestamps.samplingClock.count
         if count < 1:
             raise ValueError(f"DataTimestamps samplingClock requires count >= 1, got {count}")
+        period = timestamps.samplingClock.periodNanos
+        if period <= 0:
+            # Checked here as well as in sampling_clock(), which a hand-built axis bypasses.  The read path
+            # (expand_data_timestamps) rejects a non-positive period, so accepting one here would build a frame
+            # the library cannot read back -- and every sample after the first would share the first's timestamp.
+            raise ValueError(f"DataTimestamps samplingClock requires periodNanos > 0, got {period}")
         return count
     if axis == "timestampList":
         count = len(timestamps.timestampList.timestamps)

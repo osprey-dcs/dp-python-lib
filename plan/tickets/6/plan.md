@@ -101,6 +101,27 @@
     pre-seeded those names -- the recipe was broken only when read end to end, which is how a reader reads it.
     The preamble now documents that seeding a name cannot prove the recipe binds it.
 
+- **Copilot second-pass review, 2026-09-10.**  Four findings against `86621d1`, all real:
+  - **`to_timestamp()` lost sub-microsecond precision on every datetime.**  The datetime branch routed through
+    `value.timestamp()`, a float64, which cannot hold present-day epoch seconds at that resolution: 99.7% of
+    microsecond-precision datetimes came back with a wrong nanosecond field, by up to ~119 ns.  This is the exact
+    contract sample-status matching and provenance ranges rest on, and it predates this ticket -- the relocation
+    into `time_conversions.py` is simply what put it under review.  Now integer arithmetic off the timedelta from
+    the epoch, which is lossless because a datetime's own resolution is exactly microseconds.  The float/int epoch
+    seconds path is unchanged.
+  - `timestamp_count()` accepted a hand-built `SamplingClock` with `periodNanos == 0`, which
+    `expand_data_timestamps()` rejects -- the same write/read asymmetry class as the array-dims finding, and one
+    where every sample after the first would have carried the first sample's timestamp.
+  - The cookbook's calculations save omitted `annotation_id`, so it created a *second* annotation while the recipe
+    kept reading the first (calculation-free) one; every later `get_annotation()` read the wrong record.
+  - The cookbook's replace discarded its result, but a replace carrying calculations stores a new object and
+    deletes the old, so the `calculations_id` the later export used was dangling.
+
+  The two cookbook findings share a root cause with the earlier `saved_id` one: snippets are type-checked in
+  isolation against a seeded preamble, which cannot see that a *sequence* of snippets is incoherent.  Verified
+  this time by parsing the recipe as one continuous script and checking each handle is rebound before its next
+  use.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house
