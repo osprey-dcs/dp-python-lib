@@ -381,7 +381,8 @@ This is useful for finding gaps in the catalogue.  Combine it with a positive cr
 it, and the difference is what you need to fill in.
 
 The *key* is still required: `Q.attributes("", ["0.49"])` raises `ValueError`.  The same holds for
-`C.attributes()`, `CA.attributes()`, and the `PV.attr()` / `CFG.attr()` query selectors.
+the `key` argument of `C.attributes`, `CA.attributes`, and the `PV.attr` / `CFG.attr` query
+selectors.
 
 ### Other details
 
