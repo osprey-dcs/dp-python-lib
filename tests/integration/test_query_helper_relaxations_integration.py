@@ -15,12 +15,14 @@ key-only form finds it anyway.  That is the assertion that distinguishes a worki
 against an empty list.
 
 Prerequisites:
-- MLDP services running (annotation service at localhost:50053; TestV2SelectorRelaxations also needs ingestion at
-  localhost:50051).  Tests self-skip when they are absent.
+- MLDP services running (annotation service at localhost:50053; TestV2SelectorRelaxations additionally needs
+  ingestion at localhost:50051 and query at localhost:50052).  Tests self-skip when they are absent.
 - Run with: pytest tests/integration/test_query_helper_relaxations_integration.py -v
 
-Every record is namespaced with a per-run id and removed via addCleanup, so repeated runs do not accumulate state
-and a mid-test failure still tears down.
+Every *catalogue* record (PV metadata, configurations, activations) is namespaced with a per-run id and removed via
+addCleanup, so a mid-test failure still tears down.  The samples TestV2SelectorRelaxations ingests are the one
+exception: the archive has no delete RPC, so each run leaves SAMPLE_COUNT samples behind under a run-unique PV name
+-- the same residue test_datasets_annotations_integration.py leaves, and for the same reason.
 """
 
 import logging
@@ -48,6 +50,7 @@ from dp_python_lib.grpc import ingestion_pb2, ingestion_pb2_grpc
 
 ANNOTATION_ADDRESS = "localhost:50053"
 INGESTION_ADDRESS = "localhost:50051"
+QUERY_ADDRESS = "localhost:50052"
 
 # The value stored on every probe record.  Key-only searches must find these WITHOUT naming the value; the
 # NON_MATCHING_VALUE below is what a value-based query is asked for instead, to prove the two differ.
@@ -84,7 +87,10 @@ class TestAnnotationServiceRelaxations(unittest.TestCase):
         _require_service(cls.logger, "annotation", ANNOTATION_ADDRESS)
 
         cls.client = MldpClient()
-        cls.run_id = int(time.time())
+        # Milliseconds, matching test_datasets_annotations_integration.py and
+        # test_sample_status_client_integration.py: a whole-second id is not a per-run namespace, since two
+        # runners started in the same second would share every record name below.
+        cls.run_id = str(int(time.time() * 1000))
         cls.logger.info("Query-helper relaxation integration run id: %s", cls.run_id)
 
     # ------------------------------------------------------------------
@@ -311,11 +317,19 @@ class TestV2SelectorRelaxations(unittest.TestCase):
     def setUpClass(cls):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         cls.logger = logging.getLogger(__name__)
-        for label, address in (("annotation", ANNOTATION_ADDRESS), ("ingestion", INGESTION_ADDRESS)):
+        # The query service is a prerequisite here as much as the other two: _query_columns() calls
+        # client.query.query_samples().  Without this probe the class fails at the RPC instead of self-skipping.
+        for label, address in (
+            ("annotation", ANNOTATION_ADDRESS),
+            ("ingestion", INGESTION_ADDRESS),
+            ("query", QUERY_ADDRESS),
+        ):
             _require_service(cls.logger, label, address)
 
         cls.client = MldpClient()
-        cls.run_id = int(time.time())
+        if cls.client.query is None:
+            raise unittest.SkipTest("MldpClient has no query channel configured; cannot exercise the v2 selector.")
+        cls.run_id = str(int(time.time() * 1000))
         cls.pv_name = f"ITEST:RELAX:V2:{cls.run_id}"
         cls.attribute_key = f"itest_v2_key_{cls.run_id}"
 
@@ -380,17 +394,21 @@ class TestV2SelectorRelaxations(unittest.TestCase):
         if result.result_status.is_error:
             raise unittest.SkipTest(f"could not catalogue the test PV: {result.result_status.message}")
 
-    def _query_columns(self, criterion, attempts=20, delay_seconds=0.5):
+    def _query_columns(self, criterion, attempts=20, delay_seconds=0.5, name_list=False):
         """
         Runs a v2 query selecting on `criterion`, returning the column names it produced.
 
         ingestData() acks before the bucket is queryable, so poll rather than sleeping a fixed interval -- the same
         reason test_datasets_annotations_integration.py probes for archive visibility.
+
+        `name_list=True` ignores `criterion` and selects the run's PV by name instead, which is how the caller
+        establishes bucket visibility without relying on the attribute selector under test.
         """
+        selector = PvQuery.name_list([self.pv_name]) if name_list else PvQuery.metadata([criterion])
         params = QueryParams(
             begin_time=self.begin_time,
             end_time=self.end_time,
-            pv_selector=PvQuery.metadata([criterion]),
+            pv_selector=selector,
         )
         for _ in range(attempts):
             result = self.client.query.query_samples(params)
@@ -405,6 +423,17 @@ class TestV2SelectorRelaxations(unittest.TestCase):
         return []
 
     def test_v2_key_only_attribute_selector_returns_samples(self):
+        # An empty result means two different things -- "the selector matched nothing" and "the bucket is not
+        # queryable yet" -- and the negative assertion below reads it as the first.  So establish visibility up
+        # front with a selector that does NOT depend on the behavior under test: a plain name list.  Once this
+        # passes, an empty result from an attribute selector can only be the selector.
+        self.assertIn(
+            self.pv_name,
+            self._query_columns(None, name_list=True),
+            "the ingested samples never became queryable; cannot distinguish an empty selector result from an "
+            "invisible bucket",
+        )
+
         # --- #40 on the v2 path: a key-only selector selects the PV and returns its samples ---
         for label, criterion in (
             ("values omitted", PvQuery.attr(self.attribute_key)),
@@ -418,7 +447,8 @@ class TestV2SelectorRelaxations(unittest.TestCase):
                 )
 
         # Same distinguishing check as the annotation-service tests: a non-matching value selects nothing, so the
-        # hits above came from key existence rather than from an unfiltered match.
+        # hits above came from key existence rather than from an unfiltered match.  Meaningful because the
+        # visibility assertion above already proved an empty result here is the selector's doing.
         self.assertEqual(
             self._query_columns(PvQuery.attr(self.attribute_key, [NON_MATCHING_VALUE]), attempts=1),
             [],
