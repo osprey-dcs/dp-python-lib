@@ -104,10 +104,26 @@ from dp_python_lib.client import (
     QuerySampleStatusesRequestParams,
     sampling_clock,
     timestamp_list,
+    DataSetClient,
+    DataSetQuery,
+    DataSetQuery as DS,
+    SaveDataSetRequestParams,
+    data_block,
+    AnnotationsClient,
+    AnnotationQuery,
+    AnnotationQuery as AQ,
+    SaveAnnotationRequestParams,
+    calculations,
+    ExportClient,
+    ExportFormat,
+    ExportDataRequestParams,
+    calculations_spec,
 )
 
 from dp_python_lib.client import query_conversions as qc
 from dp_python_lib.client import sample_status_conversions as ssc
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
 
 client: MldpClient = MldpClient()
 begin: datetime = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -117,6 +133,27 @@ end: datetime = datetime(2024, 1, 2, tzinfo=timezone.utc)
 # building the query.  Snippets that demonstrate query *construction* build their own.
 params: QueryParams = QueryParams(
     begin_time=begin, end_time=end, pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))
+
+# The datasets-and-annotations recipe is one continuous worked example: it saves a dataset, then an
+# annotation on it, then calculations, then exports and deletes them.  These are the handles the
+# recipe establishes in its own earlier snippets and legitimately carries forward, the way `client`
+# and `params` are carried above.  Server-assigned ids are strings.
+t0: datetime = datetime(2026, 2, 2, 18, 0, tzinfo=timezone.utc)
+t1: datetime = datetime(2026, 2, 2, 19, 0, tzinfo=timezone.utc)
+# Declared without an annotation so mypy infers `str` for the standalone snippets that consume these,
+# while the recipe's own snippets can still rebind them from an Optional accessor and narrow with an
+# assert, as conventions.md teaches.  An explicit `str` would conflict with those real assignments; an
+# explicit `str | None` would force every later snippet to re-narrow a handle the recipe already did.
+#
+# Seeding a handle here cannot prove the recipe actually binds that name -- a snippet binding `saved_id`
+# while later ones read `dataset_id` type-checked cleanly and was still broken end to end.  Names carried
+# across snippets are verified by reading the recipe as one continuous script, not by this preamble.
+# `str | None` is what the accessors return; the recipe narrows with an assert before use, and the
+# standalone snippets below do the same, so consumers see a plain `str`.
+dataset_id: str | None = "6aa1bb271a768e97db44d426"
+annotation_id: str | None = "6aa1bb271a768e97db44d427"
+calculations_id: str | None = "6aa1bb271a768e97db44d428"
+assert dataset_id is not None and annotation_id is not None and calculations_id is not None
 # --- end preamble ---
 """
 

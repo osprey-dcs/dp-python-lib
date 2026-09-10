@@ -17,10 +17,10 @@ def calculations(frames: dict[str, common_pb2.DataFrame]) -> annotation_pb2.Calc
     Taking a dict rather than a list makes frame-name uniqueness true by construction; the server rejects duplicate
     frame names, and a list would let a caller build one.
 
-    Each frame is a common.DataFrame: a time axis plus the columns sampled on it.  Assemble that message directly
-    for now -- the data_frame builders (dp_python_lib.client.data_frame), which validate a frame's internal shape
-    (column count against the time axis, unique column names, non-empty names and values) so an error names the
-    offending column, arrive in the follow-up PR for issue #6.
+    Each frame is a common.DataFrame: a time axis plus the columns sampled on it.  Build one with the data_frame
+    builders (from dp_python_lib.client import data_frame as dfb; dfb.data_frame(...)), which validate the frame's
+    internal shape -- column count against the time axis, unique column names, non-empty names and values -- so an
+    error names the offending column.
 
     Note the proto's naming trap: the repeated field is 'calculationDataFrames' (singular "calculation") while the
     message it holds is 'CalculationsDataFrame' (plural).

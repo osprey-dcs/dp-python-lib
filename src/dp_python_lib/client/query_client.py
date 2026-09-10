@@ -4,9 +4,9 @@ from typing import Any
 
 import grpc
 
-from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import common_pb2, query_pb2, query_pb2_grpc
 
 

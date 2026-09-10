@@ -3,99 +3,29 @@ from collections.abc import Iterator
 
 import grpc
 
-from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
+from dp_python_lib.client.data_frame import sampling_clock, timestamp_list
+from dp_python_lib.client.data_frame import timestamp_count as _timestamp_count
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
-
-def sampling_clock(
-    start_time: TimestampInput,
-    period_nanos: int,
-    count: int,
-) -> common_pb2.DataTimestamps:
-    """
-    Builds a DataTimestamps with a SamplingClock time axis, the compact form for dense labeling of regularly-sampled
-    data.  The clock must match the archived data's clock exactly -- status-to-sample matching is by exact timestamp
-    at nanosecond precision, so an off-by-one-nanosecond period misses every sample after the first.
-
-    :param start_time: Time of the first sample (tz-aware datetime, epoch seconds, or common.Timestamp).
-    :param period_nanos: Period between samples, in nanoseconds.  Must be > 0.
-    :param count: Number of samples in the interval.  Must be >= 1.
-    :return: A DataTimestamps carrying a SamplingClock.
-    :raises ValueError: if period_nanos is not positive or count is less than 1.
-    """
-    if period_nanos <= 0:
-        raise ValueError(f"sampling_clock() requires period_nanos > 0, got {period_nanos}")
-    if count < 1:
-        raise ValueError(f"sampling_clock() requires count >= 1, got {count}")
-
-    timestamps = common_pb2.DataTimestamps()
-    timestamps.samplingClock.startTime.CopyFrom(to_timestamp(start_time))
-    timestamps.samplingClock.periodNanos = period_nanos
-    timestamps.samplingClock.count = count
-    return timestamps
-
-
-def timestamp_list(values: list[TimestampInput]) -> common_pb2.DataTimestamps:
-    """
-    Builds a DataTimestamps with an explicit TimestampList time axis, the form for sparse labeling -- naming only the
-    samples being labeled.  The unlabeled samples carry no assertion; there is no need to mark the rest "good".
-
-    Timestamps must be strictly increasing, which is validated here rather than deferred to the server.  Supply
-    timestamps taken from data query results (or exact SamplingClock arithmetic); a recomputed or rounded timestamp
-    will silently fail to match its sample.
-
-    :param values: The timestamps to label (tz-aware datetimes, epoch seconds, or common.Timestamp objects).
-    :return: A DataTimestamps carrying a TimestampList.
-    :raises ValueError: if values is empty or the timestamps are not strictly increasing.
-    """
-    if not values:
-        raise ValueError("timestamp_list() requires a non-empty values list")
-
-    converted = [to_timestamp(value) for value in values]
-
-    previous = converted[0]
-    for index, current in enumerate(converted[1:], start=1):
-        if (current.epochSeconds, current.nanoseconds) <= (previous.epochSeconds, previous.nanoseconds):
-            raise ValueError(
-                f"timestamp_list() requires strictly increasing timestamps; entry {index} "
-                f"({current.epochSeconds}.{current.nanoseconds:09d}) does not follow entry {index - 1} "
-                f"({previous.epochSeconds}.{previous.nanoseconds:09d})"
-            )
-        previous = current
-
-    timestamps = common_pb2.DataTimestamps()
-    timestamps.timestampList.timestamps.extend(converted)
-    return timestamps
-
-
-def _timestamp_count(timestamps: common_pb2.DataTimestamps) -> int:
-    """
-    Returns the number of timestamps a DataTimestamps describes, for validating parallel-array lengths.
-
-    An empty axis is rejected here rather than allowed to surface later as a confusing column-length mismatch.
-    The axis builders already make this unreachable -- sampling_clock() requires count >= 1 and timestamp_list()
-    requires a non-empty list -- but a hand-built DataTimestamps can still carry a zero-count SamplingClock or an
-    empty TimestampList, and both report their oneof arm as set.  Rejecting them keeps this in step with
-    expand_data_timestamps(), which applies the same rule on the read path.
-
-    :param timestamps: The time axis to measure.
-    :return: The number of timestamps on the axis.
-    :raises ValueError: if neither axis form is set, or if the axis describes no timestamps.
-    """
-    axis = timestamps.WhichOneof("value")
-    if axis == "samplingClock":
-        count = timestamps.samplingClock.count
-        if count < 1:
-            raise ValueError(f"DataTimestamps samplingClock requires count >= 1, got {count}")
-        return count
-    if axis == "timestampList":
-        count = len(timestamps.timestampList.timestamps)
-        if count < 1:
-            raise ValueError("DataTimestamps timestampList requires at least one timestamp, got an empty list")
-        return count
-    raise ValueError("DataTimestamps must specify either a samplingClock or a timestampList")
+# sampling_clock(), timestamp_list(), and timestamp_count() moved to data_frame.py in issue #6 Phase 2, once
+# calculations frames became a second caller.  They are re-exported here (and from dp_python_lib.client) so existing
+# imports keep working; __all__ names them explicitly so the re-export reads as deliberate rather than as an unused
+# import.  _timestamp_count is the private alias this module has always used.
+__all__ = [
+    "DeleteSampleStatusesApiResult",
+    "QuerySampleStatusesApiResult",
+    "QuerySampleStatusesRequestParams",
+    "SampleStatusClient",
+    "SampleStatusColumn",
+    "SampleStatusFrame",
+    "SaveSampleStatusesApiResult",
+    "SaveSampleStatusesRequestParams",
+    "sampling_clock",
+    "timestamp_list",
+]
 
 
 class SampleStatusColumn:

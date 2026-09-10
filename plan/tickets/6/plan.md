@@ -36,6 +36,134 @@
   dp-service `fddf692` (annotation on `localhost:50053`, ingestion on `:50051`): 18 tests, 12 subtests.  Writing it
   surfaced one further server behavior the triage had not found — `saveDataSet` requires its PVs to exist in the
   archive — now recorded in section 3 and in `CLAUDE.md`.
+- **Phases 2 and 3 implemented 2026-09-09.**  `data_frame.py` (axis builders relocated from `sample_status_client`
+  and re-exported, typed scalar column builders, the `data_column()` escape hatch, provenance helpers, and
+  `data_frame()` assembly with the server's shape rules checked client-side) and `data_frame_conversions.py` (the
+  pure-Python read side plus the pandas bridges behind `[analysis]`).  87 new unit tests; 657 total with the extra
+  installed, 601 passing and 56 skipping cleanly without it (verified in a venv that has no pandas).  One naming
+  collision surfaced and was resolved: the `data_frame()` *function* is deliberately not re-exported from
+  `dp_python_lib.client`, because binding that name would shadow the `data_frame` *module* and break the
+  `from dp_python_lib.client import data_frame as dfb` form this plan's own reference snippet uses.
+- **Phase 4 implemented 2026-09-09.**  `doc/cookbook/datasets-and-annotations.md` (continuing the shared worked
+  example: a dataset over the CXI shift's first hour, an orbit-drift annotation, a 1 Hz RMS calculation with
+  provenance, and the export), the cookbook README table and worked-example note, the `README.md` move of the three
+  Annotation Service bullets from TODO to Current state, and the `CLAUDE.md` usage section.  The integration test
+  grew the Phase 4 legs — builder-made calculations read back through `data_frame_conversions` with a sub-second
+  axis (so the round trip exercises nanosecond arithmetic rather than whole seconds), provenance survival, and four
+  export cases — for 25 tests, 12 subtests, all passing against dp-service `fddf692`.  The checker preamble gained
+  the new names plus the recipe's shared worked-example handles.  The `CLAUDE.md` snippet was extracted and **run
+  against the live server**, not just type-checked: every documented call succeeds end to end.
+- **PR #45 review fixes, 2026-09-10.**  Five findings, two of them defects:
+  - `data_frame()` accepted an array column whose value count was not a whole multiple of `prod(dims)`, floor-
+    dividing it into a passing sample count — building a frame that `data_frame_conversions` then refused to read
+    back.  The write path now applies the same whole-multiple rule the read path already did, so the two agree by
+    construction; a regression test asserts both reject the identical input.
+  - `column_metadata_dict()` dropped a provenance source's `timeRange` entirely, losing "which part of the source
+    was used" — the substantive half of provenance for a derived column.  It is now reported as epoch nanoseconds,
+    and each source carries only the origin arm actually set rather than the unset arm as an empty string.  The
+    integration test asserts the range survives a real server round trip.
+  - `data_frame_from_pandas()` on duplicate column labels failed deep inside as pandas' "truth value of a Series is
+    ambiguous"; it now rejects them up front by name.
+  - A pandas round trip reorders columns (grouped by proto field), which was true but undocumented and easy to read
+    as a bug.  Documented in both docstrings and the cookbook, and pinned by a test.
+  - `data_column()` accepted `np.float64` (a `float` subclass) but rejected `np.int64` and `np.bool_` (subclasses of
+    nothing it matched).  It now maps by `numbers.Integral` / `numbers.Real`, with NumPy's bool matched by type
+    module and name so this module keeps its no-NumPy dependency.
+
+  Fixing the provenance finding needed a Timestamp -> epoch-nanoseconds conversion, which turned out to exist
+  privately in three modules already (`query_conversions`, `sample_status_conversions`, and, briefly, a fourth copy
+  added here).  That prompted a second look at where the time converters live at all.  They were defined in
+  `machine_config_client`, the first module to need them, and six others had grown imports of `to_timestamp()` from
+  there -- so datasets, queries, and DataFrames all read as though they depended on the machine configuration API.
+  Both directions now live in a new leaf module, `client/time_conversions.py`, which imports only stdlib and the
+  generated protos: `to_timestamp()`, `to_epoch_nanos()`, `TimestampInput`, and `NANOS_PER_SECOND`.  Every internal
+  caller was repointed at it, and `machine_config_client` is now just another caller.  Done inside this ticket
+  rather than deferred, since the feature is unreleased and a follow-up would ship the wart in the release.
+
+- **Copilot review of PR #45, 2026-09-10.**  Seven findings against `f101ff6`; one (array floor division) duplicated a
+  finding already fixed, and the other six were real:
+  - `data_frame()` counted every column as `len(column.values)`, but an `ImageColumn` keeps its per-sample payloads
+    in `images` and has no `values` field, so every prebuilt image column -- a kind the module documents as
+    supported -- raised `AttributeError` instead of being assembled.
+  - `_timestamps_from_index()` read the index as a raw int64 view, which is expressed in the index's own storage
+    unit.  pandas 2+ keeps second/millisecond/microsecond resolutions, so a `datetime64[us]` index was serialized
+    1000x too early, silently.  It now reads `Timestamp.value`, which is nanoseconds regardless of unit, and
+    rejects `NaT` (whose integer form is a valid-looking instant).  A round-trip test had compared raw int64 views
+    on both sides, so it passed while both were equally wrong.
+  - Column-name validation accepted whitespace-only names, though the documented rule is non-blank.
+  - `data_frame_timestamps()` documented that it rejects an empty axis but returned `[]` for a set-but-empty
+    `timestampList`, converting a corrupt frame to a zero-row table.
+  - Array dims were consumed to delimit samples and then discarded, so `[2, 2]` and `[4]` were indistinguishable --
+    D7 calls for the dims to travel alongside the values.  Added `column_dimensions()` /
+    `data_frame_column_dimensions()` rather than changing `column_values()`'s one-entry-per-sample contract.
+  - The cookbook's first snippet bound `saved_id` while every later snippet read `dataset_id` (likewise
+    `saved_annotation_id` / `saved_calculations_id`).  Every snippet type-checked because the checker preamble
+    pre-seeded those names -- the recipe was broken only when read end to end, which is how a reader reads it.
+    The preamble now documents that seeding a name cannot prove the recipe binds it.
+
+- **Copilot second-pass review, 2026-09-10.**  Four findings against `86621d1`, all real:
+  - **`to_timestamp()` lost sub-microsecond precision on every datetime.**  The datetime branch routed through
+    `value.timestamp()`, a float64, which cannot hold present-day epoch seconds at that resolution: 99.7% of
+    microsecond-precision datetimes came back with a wrong nanosecond field, by up to ~119 ns.  This is the exact
+    contract sample-status matching and provenance ranges rest on, and it predates this ticket -- the relocation
+    into `time_conversions.py` is simply what put it under review.  Now integer arithmetic off the timedelta from
+    the epoch, which is lossless because a datetime's own resolution is exactly microseconds.  The float/int epoch
+    seconds path is unchanged.
+  - `timestamp_count()` accepted a hand-built `SamplingClock` with `periodNanos == 0`, which
+    `expand_data_timestamps()` rejects -- the same write/read asymmetry class as the array-dims finding, and one
+    where every sample after the first would have carried the first sample's timestamp.
+  - The cookbook's calculations save omitted `annotation_id`, so it created a *second* annotation while the recipe
+    kept reading the first (calculation-free) one; every later `get_annotation()` read the wrong record.
+  - The cookbook's replace discarded its result, but a replace carrying calculations stores a new object and
+    deletes the old, so the `calculations_id` the later export used was dangling.
+
+  The two cookbook findings share a root cause with the earlier `saved_id` one: snippets are type-checked in
+  isolation against a seeded preamble, which cannot see that a *sequence* of snippets is incoherent.  Verified
+  this time by parsing the recipe as one continuous script and checking each handle is rebound before its next
+  use.
+
+- **Copilot third-pass review, 2026-09-10.**  Three findings against `70d2102`, delivered as summary-level
+  "previously missed" notes rather than inline comments.  All three were real:
+  - **The pandas round trip widened dtypes.**  `data_frame_to_pandas()` handed pandas untyped Python lists, so a
+    `FloatColumn` came back as `float64` and an `Int32Column` as `int64`; converting back then emitted
+    `DoubleColumn`/`Int64Column`.  Each Series is now built with the dtype its column type implies.
+  - **The pandas round trip discarded all column metadata.**  `data_frame_to_pandas()` populated
+    `df.attrs["column_metadata"]` and `data_frame_from_pandas()` ignored it, so tags, attributes, and provenance
+    were silently stripped -- losing exactly the record of where the numbers came from that makes calculations
+    worth storing, and which this ticket sells as a headline feature.  Added `column_metadata_from_dict()`, the
+    inverse of `column_metadata_dict()`, and threaded it through.  A frame now round-trips to **byte equality**
+    apart from the deliberate `SamplingClock` -> `TimestampList` axis change.
+  - The recipe claimed to be "Verified against dp-grpc `rel-1.16.0`", a tag that does not exist -- the newest
+    release is `rel-1.15.0`.  It now separates the *target* API version (1.16.0, unreleased) from what was
+    actually tested (a dp-service build from `main` at `fddf692`).  `doc/cookbook/sample-status.md` carries the
+    same overclaim and is left alone here: it is not this PR's file, and correcting it belongs with whoever
+    reconciles the cookbook's version banners at release time.
+
+- **Copilot fourth-pass review, 2026-09-10.**  Three findings against `a29064d`, all real:
+  - **Enum columns lost their kind and their `enumId` through the pandas round trip.**  `EnumColumn.values` is
+    int32, so leaving it out of the narrow-dtype mapping widened the codes to int64 and rebuilt the column as an
+    `Int64Column` -- and the `enumId`, which is the only thing saying what those codes mean, was dropped
+    entirely.  The dtype mapping now covers it, and the id rides in `df.attrs["enum_ids"]`, carried even under
+    `exclude_column_metadata=True` because it is structural rather than descriptive.  An enum id on a
+    non-integer column is now a named error instead of a silently wrong column kind.
+  - Two comments in `query_conversions` and `sample_status_conversions` still pointed at
+    `machine_config_client.to_epoch_nanos` after the move to `time_conversions.py` -- my own stale references
+    from `9e07226`, left behind by `4c6a8e1`.  A sweep for the same mistake found two more: a stale module
+    attribution in this plan's own reference list, and a sentence in `CLAUDE.md` that an earlier edit had
+    mangled mid-clause.  All four corrected.
+
+- **Copilot fifth-pass review, 2026-09-10.**  Two findings against `94986fd`, both real:
+  - **A hand-built `TimestampList` bypassed the strict-ordering rule.**  `timestamp_count()` checked only that it
+    was non-empty, so duplicate or decreasing timestamps -- which `timestamp_list()` rejects -- were accepted by
+    both `data_frame()` and `SampleStatusFrame`, producing a frame `data_frame_from_pandas()` then refuses.  Two
+    samples claiming one instant is also inexpressible in the sample-status identity model.  This is the third
+    instance of the same shape (after array dims and `periodNanos`): a builder enforces a rule that the shared
+    count/validate helper does not, so a pre-built message walks straight past it.
+  - **`ImageColumn` and `StructColumn` lost their structural fields on read.**  `column_values()` yields the raw
+    payloads, but an image's `imageDescriptor` (width/height/channels/encoding) and a struct's `schemaId` are what
+    make those bytes interpretable, and neither was reachable from the conversion output.  Added
+    `image_descriptor_dict()` / `column_schema_id()` and their frame-level companions, following the precedent
+    already set for array dims and enum ids rather than folding them into `column_values()`.
 
 ## Overview
 
@@ -183,7 +311,7 @@ attributes a reader of this table might reach for do not exist.
 
 ### 4. What already exists in this repo to reuse
 
-- `to_timestamp()` / `TimestampInput` (`machine_config_client.py`) — every `DataBlock` and `TimeRange` bound.
+- `to_timestamp()` / `TimestampInput` (`time_conversions.py`) — every `DataBlock` and `TimeRange` bound.
 - `sampling_clock()` / `timestamp_list()` / `_timestamp_count()` (`sample_status_client.py`) — the
   `DataTimestamps` axis builders a calculations frame needs.  They belong in a shared module now that a second
   caller exists; re-export from `sample_status_client` so nothing breaks.

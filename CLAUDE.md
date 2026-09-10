@@ -150,12 +150,15 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `src/dp_python_lib/client/ingestion_client.py` - Ingestion service client with methods like `register_provider()`
 - `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (`.pv_metadata`, `.machine_config`, `.sample_status`, `.datasets`, `.annotations`, `.export` — every implemented `DpAnnotationService` feature area)
 - `src/dp_python_lib/client/pv_metadata_client.py` - PV metadata client (`save_pv_metadata()`, `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`) plus the `PvMetadataQuery` (`Q`) criterion helpers
-- `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers and the `to_timestamp()` helper (tz-aware datetime / epoch seconds / `common.Timestamp`). Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire
-- `src/dp_python_lib/client/sample_status_client.py` - Sample status client (`save_sample_statuses()`, `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, `delete_sample_statuses()`) plus the `sampling_clock()` / `timestamp_list()` axis builders and the `SampleStatusColumn` / `SampleStatusFrame` construction classes. A status's identity key is `(pvName, timestamp, domain, layer)`; `delete_sample_statuses()` requires either `pv_names` or an explicit `all_pvs=True` opt-in for the destructive wildcard
+- `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers. The shared time converters it used to own now live in `time_conversions.py`. Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire
+- `src/dp_python_lib/client/sample_status_client.py` - Sample status client (`save_sample_statuses()`, `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, `delete_sample_statuses()`) plus the `SampleStatusColumn` / `SampleStatusFrame` construction classes.  The `sampling_clock()` / `timestamp_list()` axis builders now live in `data_frame.py` (issue #6 Phase 2, once calculations frames became a second caller) and are re-exported here, so existing imports are unaffected. A status's identity key is `(pvName, timestamp, domain, layer)`; `delete_sample_statuses()` requires either `pv_names` or an explicit `all_pvs=True` opt-in for the destructive wildcard
 - `src/dp_python_lib/client/sample_status_conversions.py` - Per-sample expansion of query results (no optional extras required): `expand_data_timestamps()` (SamplingClock positions computed in **integer nanoseconds**, never float seconds — the exact-match contract depends on it), `bucket_to_rows()` / `buckets_to_rows()` / `iter_rows()` yielding `SampleStatusRow` objects with absent confidence/reason surfaced as `None` rather than fabricated `0.0`/`""`
 - `src/dp_python_lib/client/dataset_client.py` - DataSet client (`save_dataset()`, `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, plus the `get_datasets(ids)` batch fetch that avoids the annotation-listing N+1) with the `DataSetQuery` (`DS`) criterion helpers and the `data_block()` builder. `data_block()` is the only place `begin < end` is checked — the server does not
 - `src/dp_python_lib/client/annotations_client.py` - Annotations client (`save_annotation()`, `get_annotation()`, `query_annotations()`, `iter_annotations()`, `delete_annotation()`, `get_calculations()`) with the `AnnotationQuery` (`AQ`) criterion helpers and the `calculations()` builder, which takes a `dict[str, DataFrame]` so frame-name uniqueness is true by construction. Note `AnnotationsClient` (feature client) vs `AnnotationClient` (facade)
 - `src/dp_python_lib/client/export_client.py` - Export client (`export_data()`) with the `ExportFormat` str enum and the `calculations_spec()` builder
+- `src/dp_python_lib/client/time_conversions.py` - The two shared time converters and the `TimestampInput` alias: `to_timestamp()` (tz-aware datetime / epoch seconds / `common.Timestamp` → `Timestamp`; naive datetimes raise) and its inverse `to_epoch_nanos()` (`Timestamp` → integer epoch nanoseconds), plus `NANOS_PER_SECOND`. **The datetime path uses integer arithmetic, never `datetime.timestamp()`** — that returns a float64, which cannot hold present-day epoch seconds at sub-microsecond resolution and moved 99.7% of microsecond datetimes by up to ~119ns, breaking the exact-match contract sample status and provenance depend on. Both were defined in `machine_config_client` as the first module to need them, and six others grew imports from there — which read as though datasets, queries, and DataFrames depended on the machine configuration API; `to_epoch_nanos()` had also been written out privately three separate times. **A leaf module**: it imports only stdlib and the generated protos, so any client module can use it without an import cycle. New time conversions belong here
+- `src/dp_python_lib/client/data_frame.py` - Builders for `common.DataFrame`, the shared time-series payload (also ingestion's `ingestionDataFrame`, so #17 extends this rather than forking it): the `sampling_clock()` / `timestamp_list()` / `timestamp_count()` axis helpers **relocated here from `sample_status_client`** (and re-exported from it, so existing imports keep working), the typed scalar column builders (`double_column`, `float_column`, `int64_column`, `int32_column`, `bool_column`, `string_column`, `enum_column`), the legacy `data_column()` escape hatch (a `None` entry becomes an unset oneof — the only way to express a gap on a shared axis), the provenance helpers (`column_metadata`, `provenance`, `pv_source`, `calculations_source`), and `data_frame()` assembly, which routes columns by type and enforces the server's **shape** rules client-side (non-blank names, non-empty values, count match, name uniqueness across all types) while leaving its size caps server-side. Column names must be **non-blank**, not merely non-empty, and `timestamp_count()` validates a hand-built axis the way the builders do: a `SamplingClock` needs a positive `periodNanos` as well as a non-zero count, and a `TimestampList` must be **strictly increasing** (duplicates included — two samples cannot claim one instant). The read path rejects all of these, and anything `data_frame()` accepts must be readable back. Shared with `SampleStatusFrame`, which validates the same way. Sample counts come from the right field per kind: `dataValues` for a `DataColumn`, `images` for an `ImageColumn` (which has no `values` field at all), and `len(values) / prod(dims)` for an array column. An array column's sample count is `len(values) / prod(dims)`, and a value count that is not a **whole multiple** of `prod(dims)` is rejected rather than floor-divided into a passing count — the read path applies the same rule, so a frame this accepts is always one `data_frame_conversions` can read back. `data_column()` maps integers and floats by `numbers.Integral` / `numbers.Real` (and NumPy's bool by type name, without importing NumPy), so NumPy scalars map like their Python counterparts: `np.float64` subclasses `float` but `np.int64` and `np.bool_` subclass nothing here, and matching on exact Python type would accept some and reject others. Array/image/struct/serialized builders are #17's; hand-built ones pass through
+- `src/dp_python_lib/client/data_frame_conversions.py` - Reading a `DataFrame` back. Pure Python (no extras): `data_frame_timestamps()` (integer-nanosecond axis expansion), `column_values()` (standalone per-column converter, written so the bucket query #16 can reuse it; it yields exactly one entry per sample for every column kind, with the structural fields a payload cannot be interpreted without kept in companion accessors: array dims via `column_dimensions()` / `data_frame_column_dimensions()` so `[2,2]` and `[4]` stay distinguishable, an image's width/height/channels/encoding via `image_descriptor_dict()` / `data_frame_image_descriptors()`, and a struct's `schemaId` via `column_schema_id()` / `data_frame_schema_ids()`), `data_frame_columns()`, `column_metadata_dict()`. An axis that is set but empty is rejected rather than converted to a zero-row table. Behind `[analysis]`: `data_frame_to_pandas()` (UTC index built from int64 nanos, `ColumnMetadata` in `df.attrs`; each Series carries the **narrow dtype its column type implies** — `float32`/`int32`, not pandas' widened inference), `data_frame_from_pandas()` (dtype→typed column; a NaN anywhere is fail-loud, since a dense typed column cannot express a gap; rebuilds each column's `ColumnMetadata` from `df.attrs` via `column_metadata_from_dict()`). **A frame round-trips through pandas to byte equality** apart from the deliberate `SamplingClock`→`TimestampList` axis change: column types and provenance both survive. An `EnumColumn`'s codes are int32 and indistinguishable from a plain `Int32Column` by dtype, so its `enumId` rides in `df.attrs["enum_ids"]` — carried even under `exclude_column_metadata=True`, since without it the column cannot be rebuilt as an enum at all, and the `calculations_to_dataframes()` / `calculations_from_dataframes()` bridges. The pandas direction always emits a `TimestampList`, never an inferred `SamplingClock`; reads each instant as `Timestamp.value` (**always nanoseconds**, unlike a raw int64 view, which is in the index's own storage unit — a `datetime64[us]` index viewed as int64 lands 1000× too early); rejects `NaT`, whose integer form is a valid-looking instant; and rejects duplicate column names up front (a duplicated label makes `df[name]` a DataFrame, which would otherwise fail deep inside as pandas' "truth value of a Series is ambiguous"). `column_metadata_dict()` reports **only the origin arm actually set** on each provenance source — a PV source has no `calculations_column` key and vice versa — plus `time_range` as epoch nanoseconds when present; an absent range has no key rather than a fabricated `(0, 0)`. A pandas round trip preserves every value, dtype, and timestamp but **not column order**: a `DataFrame` stores each column kind in its own repeated field, so columns come back grouped by type
 - `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `src/dp_python_lib/client/query_conversions.py` - Pythonic conversions for query results (optional `[analysis]` extra: pandas/numpy/openpyxl, imported lazily). `data_value_to_python()` (oneof extractor: scalars→native, timestamp→epoch-nanos, array→list, structure→dict, image→`Image` wrapper, fail-loud on unhandled arm), `column_table_to_dataframe()` (UTC datetime index + one column per DataColumn; dense-alignment and duplicate-column-name fail-loud; ColumnMetadata in `df.attrs`), `column_table_to_numpy()` (dict of 1-D arrays; complex arms stay 1-D object arrays rather than collapsing to 2-D), `dataframe_to_excel()` (thin `to_excel()` wrapper: row-limit guard, tz-drop, complex-cell stringification), and `query_samples_to_dataframe()`/`stream_query_samples_to_dataframes()` whole-query conveniences (unary concats by column name; streaming yields per-page frames lazily)
 - `src/dp_python_lib/client/service_api_client_base.py` - Base class for the service clients: owns the channel and the one-per-client gRPC stub, and provides `_dispatch()`, the shared three-tier sender that all 18 unary `_send_*` methods delegate to
@@ -172,6 +175,9 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `tests/unit/test_export_client.py` - Unit tests for ExportClient (`ExportFormat` mapping and unreachable `UNSPECIFIED`, `calculations_spec()`, the zero-source rejection, three-tier error handling)
 - `tests/unit/test_annotation_client.py` - Unit tests pinning the `AnnotationClient` facade wiring (every feature client present, one shared channel, one stub apiece)
 - `tests/integration/test_datasets_annotations_integration.py` - Live-server round trip for datasets/annotations/calculations; ingests its own samples first, because `saveDataSet` requires archived PVs
+- `tests/unit/test_time_conversions.py` - Unit tests for the shared time converters (`to_timestamp()` input forms and the naive-datetime/bool/unsupported-type rejections; `to_epoch_nanos()` exactness and its round trip with `to_timestamp()`)
+- `tests/unit/test_data_frame.py` - Unit tests for the data_frame builders (axis relocation, each typed column, `data_column()` bool-before-int and unset-oneof handling, provenance helpers, and every `data_frame()` shape rule incl. array dims and serialized-column name-only checks)
+- `tests/unit/test_data_frame_conversions.py` - Unit tests for data_frame_conversions (nanosecond-exact expansion, per-column conversion incl. array reshaping, duplicate-name fail-loud, and — skipping cleanly without `[analysis]` — the pandas round trip, dtype mapping, and NaN fail-loud)
 - `tests/unit/test_query_client.py` - Unit tests for QueryClient (request building, three-tier error handling, unary paging, streaming, `PvQuery`/`ConfigQuery` helpers, `QueryParams` validation)
 - `tests/unit/test_query_conversions.py` - Unit tests for query_conversions (each DataValue arm, dense-alignment and duplicate-column-name fail-loud, int-gap float-upcast, timestamp columns, 1-D object arrays for complex arms, metadata in attrs, concat-by-name, Excel row-limit/stringification/native-bytes; DataFrame/NumPy/Excel tests skip cleanly when the `[analysis]` extra is absent)
 - `pyproject.toml` - Project metadata and dependencies
@@ -525,10 +531,62 @@ Notes:
 
 ### DataSets, Annotations, and Export API (Annotation Service)
 
-Phase 1 of issue #6 (`plan/tickets/6/plan.md`) added three feature clients on the `annotation` facade:
+Issue #6 (`plan/tickets/6/plan.md`) added three feature clients on the `annotation` facade:
 `client.annotation.datasets` (`DataSetClient`), `client.annotation.annotations` (`AnnotationsClient`), and
-`client.annotation.export` (`ExportClient`).  The full usage section lands with the cookbook recipe in PR 2; the
-invariants worth knowing before touching this code:
+`client.annotation.export` (`ExportClient`).  A DataSet names a region of the archive; an Annotation describes one
+or more DataSets and may own a Calculations payload of derived values; export writes any of it to a file on the
+server.  Worked example: `doc/cookbook/datasets-and-annotations.md`.
+
+```python
+from datetime import datetime, timezone
+from dp_python_lib.client import (
+    MldpClient, SaveDataSetRequestParams, SaveAnnotationRequestParams, ExportDataRequestParams, ExportFormat,
+    DataSetQuery as DS, AnnotationQuery as AQ, data_block, calculations, calculations_spec, sampling_clock,
+)
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
+
+client = MldpClient()
+ds, an, ex = client.annotation.datasets, client.annotation.annotations, client.annotation.export
+t0 = datetime(2026, 2, 2, 18, tzinfo=timezone.utc)
+t1 = datetime(2026, 2, 2, 19, tzinfo=timezone.utc)
+
+# a region of the archive: one DataBlock per (time range, PV list).  Every PV must already have
+# ingested data -- see the archive-existence invariant below.
+dataset_id = ds.save_dataset(SaveDataSetRequestParams(
+    name="CXI shift, hour 1", owner_id="cmcchesney",
+    data_blocks=[data_block(t0, t1, ["BPMS:GUNB:314:X"])],
+    tags=["cxi-3443"], attributes={"EXP": "CXI_3443"}, modified_by="cmcchesney")).dataset_id
+
+# derived values with column-level provenance, one frame per time axis
+frame = dfb.data_frame(
+    sampling_clock(start_time=t0, period_nanos=1_000_000_000, count=3),
+    [dfb.double_column("x_rms", [0.31, 0.29, 0.33], metadata=dfb.column_metadata(
+        provenance=dfb.provenance(process="1 Hz RMS",
+                                  derived_from=[dfb.pv_source("BPMS:GUNB:314:X", (t0, t1))])))])
+saved = an.save_annotation(SaveAnnotationRequestParams(
+    name="Orbit drift", owner_id="cmcchesney", dataset_ids=[dataset_id],
+    tags=["reviewed"], calculations=calculations({"orbit-rms": frame})))
+
+# find it again; query results carry ids, so resolve a page's datasets in ONE call
+for a in an.iter_annotations([AQ.tags(["reviewed"]), AQ.attributes("EXP")]):   # key-only search
+    print(a.name, a.dataSetIds, bool(a.calculationsId))
+datasets = ds.get_datasets([i for a in an.iter_annotations([AQ.datasets([dataset_id])])
+                            for i in a.dataSetIds])
+
+# read the calculations back (get_annotation is the only method returning them inline)
+calcs = an.get_calculations(saved.calculations_id).calculations
+columns = dfc.data_frame_columns(calcs.calculationDataFrames[0].frame)   # plain Python, no extras
+frames = dfc.calculations_to_dataframes(calcs)                          # pandas, [analysis] extra
+
+# export; then tear down annotations first, since delete_dataset is refused while referenced
+ex.export_data(ExportDataRequestParams(ExportFormat.HDF5, dataset_id=dataset_id,
+                                       calculations_spec=calculations_spec(saved.calculations_id)))
+an.delete_annotation(saved.annotation_id)
+ds.delete_dataset(dataset_id)
+```
+
+Invariants worth knowing before touching this code:
 
 - **`saveDataSet` requires every PV named in a data block to already exist in the archive** — that is, to have
   *ingested data*.  The server's error text says `no PV metadata found for names: [...]`, but the check is a
@@ -575,6 +633,10 @@ invariants worth knowing before touching this code:
   large `$in` and an oversized request message.  A short result is logged at WARNING, since an id withheld for any
   other reason is indistinguishable from a dangling one.
 - `patchDataSet` / `patchAnnotation` are reserved "not implemented" placeholders and are not wrapped.
+- Calculations are built with `data_frame.py` and read back with `data_frame_conversions.py`; both are shared with
+  #16/#17 rather than local to this area.  `data_frame_from_pandas()` always emits a `TimestampList`, never an
+  inferred `SamplingClock`, and rejects `NaN` fail-loud: a dense typed column cannot express a gap, so use
+  `data_column()` or a separate frame.
 
 ### Sample Status API (Annotation Service)
 

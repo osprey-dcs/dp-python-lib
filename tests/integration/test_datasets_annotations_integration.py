@@ -10,6 +10,8 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
 from dp_python_lib.client.annotations_client import (
     AnnotationQuery,
     SaveAnnotationRequestParams,
@@ -20,8 +22,14 @@ from dp_python_lib.client.dataset_client import (
     SaveDataSetRequestParams,
     data_block,
 )
+from dp_python_lib.client.export_client import ExportDataRequestParams, ExportFormat, calculations_spec
 from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
+
+
+def _epoch_nanos(when: datetime) -> int:
+    """Epoch nanoseconds for a tz-aware datetime, for comparing against the conversions' integer-nanos output."""
+    return int(when.timestamp()) * 1_000_000_000 + when.microsecond * 1_000
 
 
 class TestDataSetsAnnotationsIntegration(unittest.TestCase):
@@ -68,6 +76,7 @@ class TestDataSetsAnnotationsIntegration(unittest.TestCase):
         cls.client = MldpClient()
         cls.datasets = cls.client.annotation.datasets
         cls.annotations = cls.client.annotation.annotations
+        cls.export = cls.client.annotation.export
 
         cls._verify_modernized_api_available()
 
@@ -528,6 +537,149 @@ class TestDataSetsAnnotationsIntegration(unittest.TestCase):
         second = self.annotations.delete_annotation(saved.annotation_id)
         self.assertTrue(second.result_status.is_error)
         self.assertIsNone(second.annotation_id)
+
+    # ------------------------------------------------------------------
+    # Builder-made calculations, read back through the conversions (Phase 2)
+    # ------------------------------------------------------------------
+
+    CALC_START = datetime(2024, 2, 2, 18, 0, 0, tzinfo=timezone.utc)
+    CALC_PERIOD_NANOS = 250_000_000
+    CALC_VALUES = (12.7, 12.8, 12.9)
+
+    def _builder_calculations(self):
+        """
+        A Calculations payload built entirely through data_frame.py, with column-level provenance.
+
+        Deliberately uses a sub-second period, so the axis round trip exercises the nanosecond arithmetic rather
+        than whole seconds a float could also represent.
+        """
+        axis = dfb.sampling_clock(self.CALC_START, self.CALC_PERIOD_NANOS, len(self.CALC_VALUES))
+        column = dfb.double_column(
+            "x_rms",
+            list(self.CALC_VALUES),
+            metadata=dfb.column_metadata(
+                tags=["derived"],
+                attributes={"unit": "mm"},
+                provenance=dfb.provenance(
+                    source="itest-rig",
+                    process="1 Hz RMS",
+                    derived_from=[dfb.pv_source(self.pv_name, (self.begin_time, self.end_time))],
+                ),
+            ),
+        )
+        return calculations({"orbit-rms": dfb.data_frame(axis, [column])})
+
+    def test_builder_calculations_round_trip_is_nanosecond_exact(self):
+        """
+        Save calculations built by data_frame.py, read them back, and check the axis reproduces exactly.
+
+        This is the leg that would fail silently if any part of the path routed timestamps through float seconds:
+        a float64 cannot represent present-day epoch nanoseconds, so the expanded positions would drift.
+        """
+        dataset_id = self._save_dataset()
+        saved = self._save_annotation([dataset_id], calculations=self._builder_calculations())
+
+        fetched = self.annotations.get_calculations(saved.calculations_id)
+        self.assertFalse(fetched.result_status.is_error, fetched.result_status.message)
+
+        frames = fetched.calculations.calculationDataFrames
+        self.assertEqual([f.name for f in frames], ["orbit-rms"])
+        frame = frames[0].frame
+
+        start_nanos = int(self.CALC_START.timestamp()) * 1_000_000_000
+        expected = [start_nanos + i * self.CALC_PERIOD_NANOS for i in range(len(self.CALC_VALUES))]
+        self.assertEqual(dfc.data_frame_timestamps(frame), expected)
+
+        self.assertEqual(dfc.data_frame_columns(frame), {"x_rms": list(self.CALC_VALUES)})
+
+    def test_builder_provenance_survives_the_round_trip(self):
+        """Column-level provenance is the reason calculations are worth storing; it must come back intact."""
+        dataset_id = self._save_dataset()
+        saved = self._save_annotation([dataset_id], calculations=self._builder_calculations())
+
+        frame = self.annotations.get_calculations(saved.calculations_id).calculations.calculationDataFrames[0].frame
+        metadata = dfc.column_metadata_dict(frame.doubleColumns[0])
+
+        self.assertEqual(metadata["tags"], ["derived"])
+        self.assertEqual(metadata["attributes"], {"unit": "mm"})
+        self.assertEqual(metadata["provenance"]["source"], "itest-rig")
+        self.assertEqual(metadata["provenance"]["process"], "1 Hz RMS")
+        source = metadata["provenance"]["derived_from"][0]
+        self.assertEqual(source["pv_name"], self.pv_name)
+        # The source's time range is the substantive half of provenance: which part of the PV's history was used.
+        # It must survive the server round trip, exact to the nanosecond, like every other instant in this library.
+        self.assertEqual(
+            source["time_range"],
+            (_epoch_nanos(self.begin_time), _epoch_nanos(self.end_time)),
+        )
+        # A pvName source carries no calculations_column key at all, rather than an empty placeholder.
+        self.assertNotIn("calculations_column", source)
+
+    # ------------------------------------------------------------------
+    # Export (Phase 4)
+    # ------------------------------------------------------------------
+
+    def test_calculations_only_csv_export(self):
+        """
+        A calculations-only export needs no ingested data of its own, which makes it the cheapest end-to-end
+        check that exportData() works.
+        """
+        dataset_id = self._save_dataset()
+        saved = self._save_annotation([dataset_id], calculations=self._builder_calculations())
+
+        result = self.export.export_data(
+            ExportDataRequestParams(
+                ExportFormat.CSV,
+                calculations_spec=calculations_spec(saved.calculations_id),
+            )
+        )
+
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+        self.assertTrue(result.file_path, "a successful export must report a server-side file path")
+        # file_url is empty unless the deployment publishes over HTTP; empty is normal, not a failure.
+        self.assertIsNotNone(result.file_url)
+
+    def test_export_accepts_a_bare_format_string(self):
+        """ExportFormat coercion is part of the params contract, so exercise it against the real server too."""
+        dataset_id = self._save_dataset()
+        saved = self._save_annotation([dataset_id], calculations=self._builder_calculations())
+
+        result = self.export.export_data(
+            ExportDataRequestParams("csv", calculations_spec=calculations_spec(saved.calculations_id))
+        )
+
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+
+    def test_export_with_a_column_filter(self):
+        """calculations_spec() narrows the export to named columns of named frames."""
+        dataset_id = self._save_dataset()
+        saved = self._save_annotation([dataset_id], calculations=self._builder_calculations())
+
+        result = self.export.export_data(
+            ExportDataRequestParams(
+                ExportFormat.CSV,
+                calculations_spec=calculations_spec(saved.calculations_id, {"orbit-rms": ["x_rms"]}),
+            )
+        )
+
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+
+    def test_export_of_an_unknown_calculations_id_is_rejected(self):
+        result = self.export.export_data(
+            ExportDataRequestParams(ExportFormat.CSV, calculations_spec=calculations_spec("000000000000000000000000"))
+        )
+
+        self.assertTrue(result.result_status.is_error)
+        self.assertIsNone(result.file_path)
+
+    def test_dataset_export_to_hdf5(self):
+        """The dataset path exports the archived samples the run ingested."""
+        dataset_id = self._save_dataset()
+
+        result = self.export.export_data(ExportDataRequestParams(ExportFormat.HDF5, dataset_id=dataset_id))
+
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+        self.assertTrue(result.file_path)
 
 
 if __name__ == "__main__":
