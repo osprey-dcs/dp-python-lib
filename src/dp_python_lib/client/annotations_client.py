@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 import grpc
 
-from dp_python_lib.client.dataset_client import _check_at_most_one_text_criterion
+from dp_python_lib.client.query_support import check_at_most_one_text_criterion
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
@@ -17,8 +17,10 @@ def calculations(frames: dict[str, common_pb2.DataFrame]) -> annotation_pb2.Calc
     Taking a dict rather than a list makes frame-name uniqueness true by construction; the server rejects duplicate
     frame names, and a list would let a caller build one.
 
-    Build each frame with data_frame.data_frame(); it validates the frame's internal shape (column count against the
-    time axis, unique column names, non-empty names and values) so an error names the offending column.
+    Each frame is a common.DataFrame: a time axis plus the columns sampled on it.  Assemble that message directly
+    for now -- the data_frame builders (dp_python_lib.client.data_frame), which validate a frame's internal shape
+    (column count against the time axis, unique column names, non-empty names and values) so an error names the
+    offending column, arrive in the follow-up PR for issue #6.
 
     Note the proto's naming trap: the repeated field is 'calculationDataFrames' (singular "calculation") while the
     message it holds is 'CalculationsDataFrame' (plural).
@@ -243,7 +245,15 @@ class SaveAnnotationRequestParams:
         :param calculations: Derived values to store with the annotation (see calculations()).  saveAnnotation() is
             the only write path for calculations, and omitting them on a replace clears the stored object.
         :param annotation_id: Id of an existing annotation to replace in full.  Omit to create a new one.
+        :raises ValueError: if name, owner_id, or dataset_ids is empty.
         """
+        if not name:
+            raise ValueError("SaveAnnotationRequestParams requires a non-empty name")
+        if not owner_id:
+            raise ValueError("SaveAnnotationRequestParams requires a non-empty owner_id")
+        if not dataset_ids:
+            raise ValueError("SaveAnnotationRequestParams requires a non-empty dataset_ids list")
+
         self.name = name
         self.owner_id = owner_id
         self.dataset_ids = dataset_ids
@@ -678,7 +688,7 @@ class AnnotationsClient(ServiceApiClientBase):
         :raises ValueError: if criteria contains more than one text criterion.
         """
         criteria = criteria or []
-        _check_at_most_one_text_criterion(criteria, "query_annotations()")
+        check_at_most_one_text_criterion(criteria, "query_annotations()")
 
         self.logger.info("Starting queryAnnotations operation with %d criteria", len(criteria))
 

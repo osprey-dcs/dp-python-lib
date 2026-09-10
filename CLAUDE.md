@@ -159,6 +159,7 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `src/dp_python_lib/client/query_client.py` - v2 time-series query client (sample-oriented) exposed as `client.query`. Low-level wrappers `query_samples()` (unary, one resumable page) and `iter_query_samples()` (transparent paging), plus `iter_query_samples_stream()` (server-streaming, fire-and-consume, lazy). Queries are described by a kind-neutral `QueryParams` built from the `PvQuery` (`PV`) and `ConfigQuery` (`CFG`) criterion helpers; shares a `_build_query_spec()` seam so a future bucket request builder reuses it. Results wrap the raw `ColumnTable` (`.column_table`, `.next_page_token`); `.to_dataframe()`/`.to_numpy()` delegate to `query_conversions` (Phase 2, optional `[analysis]` extra)
 - `src/dp_python_lib/client/query_conversions.py` - Pythonic conversions for query results (optional `[analysis]` extra: pandas/numpy/openpyxl, imported lazily). `data_value_to_python()` (oneof extractor: scalars→native, timestamp→epoch-nanos, array→list, structure→dict, image→`Image` wrapper, fail-loud on unhandled arm), `column_table_to_dataframe()` (UTC datetime index + one column per DataColumn; dense-alignment and duplicate-column-name fail-loud; ColumnMetadata in `df.attrs`), `column_table_to_numpy()` (dict of 1-D arrays; complex arms stay 1-D object arrays rather than collapsing to 2-D), `dataframe_to_excel()` (thin `to_excel()` wrapper: row-limit guard, tz-drop, complex-cell stringification), and `query_samples_to_dataframe()`/`stream_query_samples_to_dataframes()` whole-query conveniences (unary concats by column name; streaming yields per-page frames lazily)
 - `src/dp_python_lib/client/service_api_client_base.py` - Base class for the service clients: owns the channel and the one-per-client gRPC stub, and provides `_dispatch()`, the shared three-tier sender that all 18 unary `_send_*` methods delegate to
+- `src/dp_python_lib/client/query_support.py` - Helpers shared by the criteria-based query clients, currently `check_at_most_one_text_criterion()` (Mongo cannot AND two `$text` clauses). It is generic over the different criterion types because each names its oneof `criterion` and its full-text arm `textCriterion`. New shared query helpers belong here rather than in whichever feature client happened to need one first — importing a private name across feature modules makes the importing module's dependencies misleading
 - `tests/unit/test_service_api_client_base.py` - Unit tests for `_dispatch` itself (success, business error, unrecognized response, `RpcError` with and without a resolvable `code()`, unexpected exception, and the `request_log`/`success_log` hooks)
 - `tests/unit/test_ingestion_client.py` - Unit tests for IngestionClient functionality
 - `tests/unit/test_pv_metadata_client.py` - Unit tests for PvMetadataClient functionality
@@ -539,7 +540,16 @@ invariants worth knowing before touching this code:
   sleeping a fixed interval, and ingests through the generated stub because `IngestionClient` wraps only
   `registerProvider()` until #17.
 - **The server does not check `begin < end` on a `DataBlock`** (it checks only that each bound is non-zero and that
-  `pvNames` is non-empty), so `data_block()`'s check is the only one there is.
+  `pvNames` is non-empty, and never compares the two bounds), so `data_block()`'s check is the only one there is.
+- **A `DataBlock`'s range is half-open, `[begin, end)`** — the same convention as the v2 query API's `QueryParams`,
+  established by reading dp-service rather than the proto, which says nothing.  `saveDataSet` never compares the
+  bounds at all; the interval acquires meaning only at export.  There, bucket selection and per-sample trimming are
+  literally the *same* functions `querySamples()` uses (`MongoQueryFilterBuilder.bucketOverlapsRangeFilter` and
+  `TabularDataUtility.isRetained`, whose contract is "a sample exactly at an interval's end belongs to the next
+  interval, not this one").  So back-to-back blocks cover the boundary sample exactly once.  **The exception is
+  HDF5**: `ExportDataJobAbstractBucketed` writes every *overlapping bucket* whole and untrimmed, with no time range
+  passed to the writer, so an HDF5 export can contain samples outside the requested range and can write a straddling
+  bucket twice.  Nothing client-side can change that — it is a property of the format, and worth telling users.
 - **Delete-not-found is a business error**, not a silent success, on both `delete_dataset()` and
   `delete_annotation()`.  `delete_dataset()` is also refused while any annotation references the dataset — delete the
   annotations first; there is deliberately no cascade.
@@ -553,6 +563,17 @@ invariants worth knowing before touching this code:
 - `ExportFormat` makes the server-rejected `EXPORT_FORMAT_UNSPECIFIED` unreachable, and `ExportDataRequestParams`
   requires at least one of `dataset_id` / `data_blocks` / `calculations_spec`.  The exported file lives on the
   **server's** filesystem and there is no retrieval RPC, so there is no download convenience.
+- **Empty string and `None` mean different things on two result properties**, and the distinction is load-bearing in
+  both: `SaveAnnotationApiResult.calculations_id` is `""` when the request carried no calculations but `None` when
+  the call *failed*, and `ExportDataApiResult.file_url` is `""` when the deployment simply does not publish exports
+  over HTTP but `None` on error.  In both cases `""` is a successful outcome — test with `is None`, not truthiness.
+- **The params classes validate the server's required fields client-side.**  `SaveDataSetRequestParams` requires
+  `name` / `owner_id` / `data_blocks`, and `SaveAnnotationRequestParams` requires `name` / `owner_id` /
+  `dataset_ids`, each raising `ValueError` naming the field rather than spending a round trip to learn it.
+- **`get_datasets()` chunks its id list** (`ID_QUERY_CHUNK_SIZE`, 100) because the ids come from the `dataSetIds` of
+  a whole page of annotations and are effectively unbounded; one criterion carrying all of them becomes a single
+  large `$in` and an oversized request message.  A short result is logged at WARNING, since an id withheld for any
+  other reason is indistinguishable from a dangling one.
 - `patchDataSet` / `patchAnnotation` are reserved "not implemented" placeholders and are not wrapped.
 
 ### Sample Status API (Annotation Service)

@@ -75,6 +75,12 @@ class TestDataBlockBuilder(unittest.TestCase):
         with self.assertRaises(ValueError):
             data_block(datetime(2026, 7, 14), END, ["A:1"])  # noqa: DTZ001 -- naive input is the condition under test
 
+    def test_rejects_bare_string_pv_names(self):
+        # Without the guard this assigns one PV name per character, saving a silently wrong DataSet.
+        with self.assertRaises(ValueError) as ctx:
+            data_block(BEGIN, END, "A:1")
+        self.assertIn("bare string", str(ctx.exception))
+
 
 class TestDataSetClientBuildRequests(unittest.TestCase):
     """Unit tests for the request-building helpers (no gRPC calls)."""
@@ -169,6 +175,35 @@ class TestDataSetClientBuildRequests(unittest.TestCase):
         with watch_assignments(annotation_pb2, "QueryDataSetsRequest", "pageToken") as assigned:
             self.client._build_query_datasets_request([DataSetQuery.tags(["x"])], page_token="")
         self.assertEqual(assigned, [], "an empty page token must not be assigned")
+
+
+class TestSaveDataSetRequestParamsValidation(unittest.TestCase):
+    """
+    Unit tests for the params validation.  The server requires all three, so catching them here turns a round trip
+    into an immediate error naming the field.
+    """
+
+    def setUp(self):
+        self.block = data_block(BEGIN, END, ["A:1"])
+
+    def test_rejects_empty_name(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveDataSetRequestParams(name="", owner_id="cmcchesney", data_blocks=[self.block])
+        self.assertIn("name", str(ctx.exception))
+
+    def test_rejects_empty_owner_id(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveDataSetRequestParams(name="ramp study", owner_id="", data_blocks=[self.block])
+        self.assertIn("owner_id", str(ctx.exception))
+
+    def test_rejects_empty_data_blocks(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveDataSetRequestParams(name="ramp study", owner_id="cmcchesney", data_blocks=[])
+        self.assertIn("data_blocks", str(ctx.exception))
+
+    def test_accepts_required_fields(self):
+        params = SaveDataSetRequestParams(name="ramp study", owner_id="cmcchesney", data_blocks=[self.block])
+        self.assertEqual(params.name, "ramp study")
 
 
 class TestDataSetQueryHelpers(unittest.TestCase):
@@ -676,6 +711,46 @@ class TestGetDataSetsBatch(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             self.client.get_datasets(["a"])
+
+    def test_chunks_long_id_lists(self):
+        # The id list is caller-supplied and unbounded, so it must not become one oversized $in.
+        ids = [f"id-{i}" for i in range(250)]
+        mock_stub = Mock()
+        mock_stub.queryDataSets.side_effect = [self._page(ids[0:100]), self._page(ids[100:200]), self._page(ids[200:])]
+        self.client._stub = mock_stub
+
+        found = self.client.get_datasets(ids)
+
+        self.assertEqual(len(found), 250)
+        self.assertEqual(mock_stub.queryDataSets.call_count, 3)
+        sent = [list(call.args[0].criteria[0].idCriterion.ids) for call in mock_stub.queryDataSets.call_args_list]
+        self.assertEqual([len(chunk) for chunk in sent], [100, 100, 50])
+        self.assertEqual([i for chunk in sent for i in chunk], ids, "chunking must preserve order and lose nothing")
+
+    def test_chunk_size_is_configurable(self):
+        mock_stub = Mock()
+        mock_stub.queryDataSets.side_effect = [self._page(["a", "b"]), self._page(["c"])]
+        self.client._stub = mock_stub
+
+        self.client.get_datasets(["a", "b", "c"], chunk_size=2)
+
+        self.assertEqual(mock_stub.queryDataSets.call_count, 2)
+
+    def test_rejects_non_positive_chunk_size(self):
+        with self.assertRaises(ValueError) as ctx:
+            self.client.get_datasets(["a"], chunk_size=0)
+        self.assertIn("chunk_size", str(ctx.exception))
+
+    def test_short_result_is_logged_at_warning(self):
+        # A withheld id is indistinguishable from a dangling one, so the shortfall must not pass silently.
+        mock_stub = Mock()
+        mock_stub.queryDataSets.return_value = self._page(["a"])
+        self.client._stub = mock_stub
+
+        with self.assertLogs(self.client.logger, level="WARNING") as captured:
+            self.client.get_datasets(["a", "missing"])
+
+        self.assertIn("resolved only 1 of 2", "\n".join(captured.output))
 
 
 if __name__ == "__main__":

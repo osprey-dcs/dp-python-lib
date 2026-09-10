@@ -174,6 +174,32 @@ class TestAnnotationsClientBuildRequests(unittest.TestCase):
         self.assertEqual(assigned, [], "an empty page token must not be assigned")
 
 
+class TestSaveAnnotationRequestParamsValidation(unittest.TestCase):
+    """
+    Unit tests for the params validation.  The server requires all three, so catching them here turns a round trip
+    into an immediate error naming the field.
+    """
+
+    def test_rejects_empty_name(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveAnnotationRequestParams(name="", owner_id="cmcchesney", dataset_ids=["ds-1"])
+        self.assertIn("name", str(ctx.exception))
+
+    def test_rejects_empty_owner_id(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveAnnotationRequestParams(name="orbit drift", owner_id="", dataset_ids=["ds-1"])
+        self.assertIn("owner_id", str(ctx.exception))
+
+    def test_rejects_empty_dataset_ids(self):
+        with self.assertRaises(ValueError) as ctx:
+            SaveAnnotationRequestParams(name="orbit drift", owner_id="cmcchesney", dataset_ids=[])
+        self.assertIn("dataset_ids", str(ctx.exception))
+
+    def test_accepts_required_fields(self):
+        params = SaveAnnotationRequestParams(name="orbit drift", owner_id="cmcchesney", dataset_ids=["ds-1"])
+        self.assertEqual(params.dataset_ids, ["ds-1"])
+
+
 class TestAnnotationQueryHelpers(unittest.TestCase):
     """Unit tests for the AnnotationQuery criterion builders."""
 

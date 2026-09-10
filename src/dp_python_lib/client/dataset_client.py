@@ -4,9 +4,16 @@ from collections.abc import Iterator
 import grpc
 
 from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
+from dp_python_lib.client.query_support import check_at_most_one_text_criterion
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
+
+ID_QUERY_CHUNK_SIZE = 100
+"""
+Default number of ids per query in get_datasets().  Keeps a single request's $in clause and message size bounded
+when the caller passes an arbitrarily long id list; the value is a conservative round number, not a server limit.
+"""
 
 
 def data_block(
@@ -18,19 +25,31 @@ def data_block(
     Builds a DataBlock: one time range plus the PV names covered over it.  A DataSet is a list of these, and the
     exportData() API accepts them inline for a one-off export that does not warrant saving a DataSet.
 
-    The proto does not state whether the interval is half-open; the dp-grpc cookbook flags the same ambiguity.  Treat
-    a block as covering [begin_time, end_time] inclusively unless the server documents otherwise.
+    The range is HALF-OPEN, [begin_time, end_time), matching the v2 query API's QueryParams.  annotation.proto does
+    not say so, but the server's sample-level retention test does: TabularDataUtility.isRetained() excludes a sample
+    landing exactly on end_time ("a sample exactly at an interval's end belongs to the next interval, not this one"),
+    and the export job reaches that same function that querySamples() does.  So back-to-back blocks -- one ending at
+    T, the next beginning at T -- cover the sample at T exactly once.
+
+    That holds for CSV and XLSX exports.  HDF5 export is bucket-granular: ExportDataJobAbstractBucketed writes every
+    bucket that OVERLAPS the block, whole and untrimmed, so an HDF5 file can contain samples outside the requested
+    range, and back-to-back blocks sharing a straddling bucket write it twice.  Nothing client-side can change that;
+    it is a property of the export format.
 
     Note that begin < end is checked HERE and nowhere else: the server validates only that each bound is non-zero and
-    that pvNames is non-empty (AnnotationValidationUtility.validateDataBlock), so a reversed block would otherwise be
-    accepted and stored.
+    that pvNames is non-empty (AnnotationValidationUtility.validateDataBlock), and never compares the two bounds, so
+    a reversed block would otherwise be accepted and stored.
 
-    :param begin_time: Start of the block's time range (tz-aware datetime, epoch seconds, or common.Timestamp).
-    :param end_time: End of the block's time range (same accepted forms).
-    :param pv_names: Names of the PVs the block covers.
+    :param begin_time: Start of the block's time range, inclusive (tz-aware datetime, epoch seconds,
+        or common.Timestamp).
+    :param end_time: End of the block's time range, exclusive (same accepted forms).
+    :param pv_names: Names of the PVs the block covers.  A list -- passing a bare string is rejected rather than
+        silently iterated into one PV name per character.
     :return: An annotation.DataBlock for the specified range and PVs.
-    :raises ValueError: if pv_names is empty or begin_time is not strictly before end_time.
+    :raises ValueError: if pv_names is empty or a bare string, or begin_time is not strictly before end_time.
     """
+    if isinstance(pv_names, str):
+        raise ValueError(f"data_block() requires a list of PV names, not a bare string; got {pv_names!r}")
     if not pv_names:
         raise ValueError("data_block() requires a non-empty pv_names list")
 
@@ -195,26 +214,6 @@ class DataSetQuery:
         return criterion
 
 
-def _check_at_most_one_text_criterion(criteria: list, op_name: str) -> None:
-    """
-    Rejects a criteria list carrying more than one text criterion.
-
-    Two $text clauses cannot be ANDed -- Mongo rejects the query with "Too many text expressions" -- so the server
-    rejects the second one during validation.  Catching it here fails with a message naming the rule instead of
-    surfacing a server rejection.
-
-    :param criteria: The criteria list to check.
-    :param op_name: The calling operation, used in the error message.
-    :raises ValueError: if more than one criterion carries a textCriterion.
-    """
-    text_count = sum(1 for criterion in criteria if criterion.WhichOneof("criterion") == "textCriterion")
-    if text_count > 1:
-        raise ValueError(
-            f"{op_name} accepts at most one text criterion, got {text_count}; two full-text clauses cannot be "
-            f"combined with AND.  Combine the terms into a single text() criterion instead."
-        )
-
-
 class SaveDataSetRequestParams:
     """
     Encapsulates client parameters for a call to the saveDataSet() API method.
@@ -244,7 +243,15 @@ class SaveDataSetRequestParams:
         :param attributes: Map of key/value attributes describing the DataSet.
         :param modified_by: Identifier of the user or process making the change.
         :param dataset_id: Id of an existing DataSet to replace in full.  Omit to create a new one.
+        :raises ValueError: if name, owner_id, or data_blocks is empty.
         """
+        if not name:
+            raise ValueError("SaveDataSetRequestParams requires a non-empty name")
+        if not owner_id:
+            raise ValueError("SaveDataSetRequestParams requires a non-empty owner_id")
+        if not data_blocks:
+            raise ValueError("SaveDataSetRequestParams requires a non-empty data_blocks list")
+
         self.name = name
         self.owner_id = owner_id
         self.data_blocks = data_blocks
@@ -598,7 +605,7 @@ class DataSetClient(ServiceApiClientBase):
         :raises ValueError: if criteria contains more than one text criterion.
         """
         criteria = criteria or []
-        _check_at_most_one_text_criterion(criteria, "query_datasets()")
+        check_at_most_one_text_criterion(criteria, "query_datasets()")
 
         self.logger.info("Starting queryDataSets operation with %d criteria", len(criteria))
 
@@ -641,21 +648,35 @@ class DataSetClient(ServiceApiClientBase):
             if not page_token:
                 break
 
-    def get_datasets(self, ids: list[str]) -> dict[str, annotation_pb2.DataSet]:
+    def get_datasets(self, ids: list[str], chunk_size: int = ID_QUERY_CHUNK_SIZE) -> dict[str, annotation_pb2.DataSet]:
         """
-        Batch-fetches DataSets by id in a single paged query, rather than one getDataSet() call apiece.
+        Batch-fetches DataSets by id in a small number of paged queries, rather than one getDataSet() call apiece.
 
         This exists for the common "a page of annotations needs its datasets" case: annotation records carry
         dataSetIds rather than the DataSets themselves, so resolving them one at a time is an N+1.
 
         Ids are deduplicated with their order preserved.  An empty ids list returns {} without issuing an RPC,
-        because callers feed this from annotation dataSetIds lists that may legitimately be empty.  Ids that resolve
-        to nothing are simply absent from the returned dict: a dangling dataSetIds entry is not an error.
+        because callers feed this from annotation dataSetIds lists that may legitimately be empty.
+
+        Ids are fetched in chunks of chunk_size, because the id list is caller-supplied and effectively unbounded --
+        it comes from the dataSetIds of a whole page of annotations -- and one criterion carrying every id becomes a
+        single large $in and a correspondingly large request message, which at some size exceeds the gRPC maximum.
+        Chunking keeps each request bounded regardless of how many ids are asked for.
+
+        Ids that resolve to nothing are simply absent from the returned dict, because a dangling dataSetIds entry is
+        a normal consequence of deleting a DataSet's annotations out from under it, not an error.  Note that an id
+        withheld for any other reason is indistinguishable from a dangling one here, so a short result is logged at
+        WARNING rather than passed over silently; compare len() against the ids you asked for if it matters.
 
         :param ids: DataSet ids to fetch.
+        :param chunk_size: Maximum number of ids to request per query.  Rarely worth overriding.
         :return: A dict mapping DataSet id to DataSet, for those ids that resolved.
+        :raises ValueError: if chunk_size is not positive.
         :raises RuntimeError: if any page returns an error.
         """
+        if chunk_size < 1:
+            raise ValueError(f"get_datasets() requires a positive chunk_size, got {chunk_size}")
+
         if not ids:
             self.logger.debug("get_datasets() called with no ids; returning empty result without an RPC")
             return {}
@@ -663,9 +684,21 @@ class DataSetClient(ServiceApiClientBase):
         unique_ids = list(dict.fromkeys(ids))
         self.logger.info("Starting get_datasets batch fetch for %d unique id(s)", len(unique_ids))
 
-        found = {dataset.id: dataset for dataset in self.iter_datasets([DataSetQuery.ids(unique_ids)])}
+        found: dict[str, annotation_pb2.DataSet] = {}
+        for offset in range(0, len(unique_ids), chunk_size):
+            chunk = unique_ids[offset : offset + chunk_size]
+            for dataset in self.iter_datasets([DataSetQuery.ids(chunk)]):
+                found[dataset.id] = dataset
 
-        self.logger.info("get_datasets resolved %d of %d requested id(s)", len(found), len(unique_ids))
+        if len(found) < len(unique_ids):
+            self.logger.warning(
+                "get_datasets resolved only %d of %d requested id(s); the rest named DataSets that do not exist "
+                "or were not returned",
+                len(found),
+                len(unique_ids),
+            )
+        else:
+            self.logger.info("get_datasets resolved %d of %d requested id(s)", len(found), len(unique_ids))
         return found
 
     # ------------------------------------------------------------------
