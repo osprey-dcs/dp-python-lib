@@ -317,6 +317,9 @@ _NARROW_DTYPE_BY_COLUMN_TYPE = {
     common_pb2.DoubleColumn: "float64",
     common_pb2.Int64Column: "int64",
     common_pb2.BoolColumn: "bool",
+    # EnumColumn's values field is int32 too; without this its codes widen to int64 and it rebuilds as an
+    # Int64Column.  The enumId that gives those codes meaning travels separately -- see _enum_ids().
+    common_pb2.EnumColumn: "int32",
 }
 
 
@@ -335,6 +338,20 @@ def _narrow_column_dtypes(frame: common_pb2.DataFrame) -> dict[str, str]:
         for column in iter_frame_columns(frame)
         if type(column) in _NARROW_DTYPE_BY_COLUMN_TYPE
     }
+
+
+def _enum_ids(frame: common_pb2.DataFrame) -> dict[str, str]:
+    """
+    Maps each EnumColumn's name to its enumId.
+
+    An enum column's values are bare integer codes; the enumId is what says which enumeration names them, so
+    dropping it would leave the codes meaningless.  It has nowhere to live in a pandas Series, so it rides in
+    df.attrs["enum_ids"] and is consulted when rebuilding the column.
+
+    :param frame: The frame whose enum columns to inspect.
+    :return: A dict of column name -> enumId; empty when the frame has no enum columns.
+    """
+    return {column.name: column.enumId for column in frame.enumColumns}
 
 
 def data_frame_to_pandas(frame: common_pb2.DataFrame, exclude_column_metadata: bool = False) -> Any:
@@ -379,6 +396,12 @@ def data_frame_to_pandas(frame: common_pb2.DataFrame, exclude_column_metadata: b
         },
         index=index,
     )
+
+    # enum_ids is structural, not metadata: without it an enum column cannot be rebuilt as one at all, so it is
+    # carried even when exclude_column_metadata drops the descriptive attrs.
+    enum_ids = _enum_ids(frame)
+    if enum_ids:
+        df.attrs["enum_ids"] = enum_ids
 
     if not exclude_column_metadata:
         df.attrs["column_metadata"] = {
@@ -513,12 +536,17 @@ def column_metadata_from_dict(summary: dict[str, Any] | None) -> common_pb2.Colu
     return metadata
 
 
-def _column_from_series(name: str, series: Any, metadata: common_pb2.ColumnMetadata | None = None) -> Any:
+def _column_from_series(
+    name: str, series: Any, metadata: common_pb2.ColumnMetadata | None = None, enum_id: str | None = None
+) -> Any:
     """
     Builds the typed column matching a pandas Series' dtype.
 
     Mapping: float64 -> DoubleColumn, float32 -> FloatColumn, int64 -> Int64Column, int32 -> Int32Column,
     bool -> BoolColumn, and object/string -> StringColumn.  Anything else raises rather than guessing.
+
+    An enum_id routes an integer column to EnumColumn instead, since an enum's values are indistinguishable from
+    plain int32 codes by dtype alone -- the id is what makes it an enumeration.
 
     A missing value anywhere is a fail-loud error: the typed columns are dense repeated fields with no way to mark
     an absent entry, so a NaN would have to be either invented as a real value or silently dropped.
@@ -526,6 +554,7 @@ def _column_from_series(name: str, series: Any, metadata: common_pb2.ColumnMetad
     :param name: The column's name.
     :param series: The pandas Series holding its values.
     :param metadata: Optional ColumnMetadata to attach (see column_metadata_from_dict()).
+    :param enum_id: When set, build an EnumColumn carrying this enumeration id rather than an integer column.
     :return: The matching typed column message.
     :raises ValueError: if the dtype has no mapping, or the series contains a missing value.
     """
@@ -542,6 +571,17 @@ def _column_from_series(name: str, series: Any, metadata: common_pb2.ColumnMetad
 
     dtype = series.dtype
     dtype_name = str(dtype)
+
+    if enum_id is not None:
+        # Checked before EVERY dtype branch, not just the integer ones: an EnumColumn's values are int32 codes, so
+        # dtype alone cannot distinguish it from a plain Int32Column, and a non-integer dtype paired with an enum
+        # id is a caller error worth naming rather than quietly building the wrong column kind.
+        if dtype_name not in ("int64", "Int64", "int32", "Int32"):
+            raise ValueError(
+                f"column '{name}' carries an enum id ({enum_id!r}) but has dtype {dtype_name}; an EnumColumn's "
+                f"values must be integer codes"
+            )
+        return builders.enum_column(name, [int(v) for v in series], enum_id, metadata=metadata)
 
     if dtype_name == "float64":
         return builders.double_column(name, [float(v) for v in series], metadata=metadata)
@@ -584,7 +624,8 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
     inferred.  Missing values are rejected fail-loud, since a dense typed column cannot express a gap.
 
     Per-column metadata is read back from df.attrs["column_metadata"] when present, so a frame that went out
-    through data_frame_to_pandas() returns with its tags, attributes, and provenance intact.
+    through data_frame_to_pandas() returns with its tags, attributes, and provenance intact.  Enum columns are
+    rebuilt as enum columns via df.attrs["enum_ids"]; without that id an integer column is just an integer column.
 
     Converting back with data_frame_to_pandas() preserves every value, dtype, and timestamp, but can return the
     columns grouped by type rather than in their original order -- see that function's docstring.
@@ -617,10 +658,16 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
     # data_frame_to_pandas() parks each column's ColumnMetadata here; carrying it back is what keeps provenance
     # alive across a round trip.  A frame built by hand simply has no attrs, and every column gets None.
     metadata_by_column = df.attrs.get("column_metadata") or {}
+    enum_ids = df.attrs.get("enum_ids") or {}
 
     data_timestamps = _timestamps_from_index(df.index)
     columns = [
-        _column_from_series(str(name), df[name], metadata=column_metadata_from_dict(metadata_by_column.get(str(name))))
+        _column_from_series(
+            str(name),
+            df[name],
+            metadata=column_metadata_from_dict(metadata_by_column.get(str(name))),
+            enum_id=enum_ids.get(str(name)),
+        )
         for name in df.columns
     ]
     return builders.data_frame(data_timestamps, columns)

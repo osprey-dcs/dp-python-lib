@@ -99,7 +99,7 @@ _SCALAR_ARMS = frozenset(
 )
 
 
-# The Timestamp -> epoch-nanoseconds conversion is shared (see machine_config_client.to_epoch_nanos); this private
+# The Timestamp -> epoch-nanoseconds conversion is shared (see time_conversions.to_epoch_nanos); this private
 # alias is the name this module has always used internally.
 _timestamp_to_epoch_nanos = to_epoch_nanos
 

@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from dp_python_lib.client.time_conversions import NANOS_PER_SECOND, to_epoch_nanos
 from dp_python_lib.grpc import common_pb2
 
-# The Timestamp -> epoch-nanoseconds conversion is shared (see machine_config_client.to_epoch_nanos); this private
+# The Timestamp -> epoch-nanoseconds conversion is shared (see time_conversions.to_epoch_nanos); this private
 # alias is the name this module has always used internally.
 _timestamp_to_nanos = to_epoch_nanos
 

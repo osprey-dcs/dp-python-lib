@@ -139,6 +139,19 @@
     same overclaim and is left alone here: it is not this PR's file, and correcting it belongs with whoever
     reconciles the cookbook's version banners at release time.
 
+- **Copilot fourth-pass review, 2026-09-10.**  Three findings against `a29064d`, all real:
+  - **Enum columns lost their kind and their `enumId` through the pandas round trip.**  `EnumColumn.values` is
+    int32, so leaving it out of the narrow-dtype mapping widened the codes to int64 and rebuilt the column as an
+    `Int64Column` -- and the `enumId`, which is the only thing saying what those codes mean, was dropped
+    entirely.  The dtype mapping now covers it, and the id rides in `df.attrs["enum_ids"]`, carried even under
+    `exclude_column_metadata=True` because it is structural rather than descriptive.  An enum id on a
+    non-integer column is now a named error instead of a silently wrong column kind.
+  - Two comments in `query_conversions` and `sample_status_conversions` still pointed at
+    `machine_config_client.to_epoch_nanos` after the move to `time_conversions.py` -- my own stale references
+    from `9e07226`, left behind by `4c6a8e1`.  A sweep for the same mistake found two more: a stale module
+    attribution in this plan's own reference list, and a sentence in `CLAUDE.md` that an earlier edit had
+    mangled mid-clause.  All four corrected.
+
 ## Overview
 
 Wrap the modernized DataSet / Annotation / Calculations / Export area of `DpAnnotationService` in the house
@@ -285,7 +298,7 @@ attributes a reader of this table might reach for do not exist.
 
 ### 4. What already exists in this repo to reuse
 
-- `to_timestamp()` / `TimestampInput` (`machine_config_client.py`) — every `DataBlock` and `TimeRange` bound.
+- `to_timestamp()` / `TimestampInput` (`time_conversions.py`) — every `DataBlock` and `TimeRange` bound.
 - `sampling_clock()` / `timestamp_list()` / `_timestamp_count()` (`sample_status_client.py`) — the
   `DataTimestamps` axis builders a calculations frame needs.  They belong in a shared module now that a second
   caller exists; re-export from `sample_status_client` so nothing breaks.

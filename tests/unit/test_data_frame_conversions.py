@@ -720,5 +720,62 @@ class TestColumnMetadataFromDict(unittest.TestCase):
         self.assertEqual(dfc.column_metadata_from_dict(dfc.column_metadata_dict(column)), original)
 
 
+@unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas)")
+class TestEnumColumnRoundTrip(unittest.TestCase):
+    """
+    An EnumColumn's values are int32 codes, so dtype alone cannot tell it from an Int32Column.  The enumId that
+    gives those codes meaning has nowhere to live in a Series, so it rides in df.attrs["enum_ids"].
+    """
+
+    def _frame(self):
+        return dfb.data_frame(
+            dfb.timestamp_list([T0, T1]),
+            [
+                dfb.enum_column("state", [0, 1], enum_id="beam-state", metadata=dfb.column_metadata(tags=["t"])),
+                dfb.int32_column("plain", [7, 8]),
+            ],
+        )
+
+    def test_enum_codes_are_not_widened(self):
+        df = dfc.data_frame_to_pandas(self._frame())
+        self.assertEqual(str(df["state"].dtype), "int32")
+
+    def test_enum_id_travels_in_attrs(self):
+        df = dfc.data_frame_to_pandas(self._frame())
+        self.assertEqual(df.attrs["enum_ids"], {"state": "beam-state"})
+
+    def test_enum_column_round_trips_whole(self):
+        original = self._frame()
+        restored = dfc.data_frame_from_pandas(dfc.data_frame_to_pandas(original))
+
+        self.assertEqual([c.name for c in restored.enumColumns], ["state"])
+        self.assertEqual(restored.enumColumns[0].enumId, "beam-state")
+        # The plain int32 column beside it must NOT become an enum.
+        self.assertEqual([c.name for c in restored.int32Columns], ["plain"])
+        self.assertEqual(restored, original)
+
+    def test_enum_id_survives_excluded_metadata(self):
+        # enum_ids is structural: without it the column cannot be rebuilt as an enum at all, so it is carried even
+        # when the descriptive metadata is dropped.
+        original = self._frame()
+        df = dfc.data_frame_to_pandas(original, exclude_column_metadata=True)
+        restored = dfc.data_frame_from_pandas(df)
+
+        self.assertEqual(restored.enumColumns[0].enumId, "beam-state")
+        self.assertFalse(restored.enumColumns[0].HasField("metadata"))
+
+    def test_enum_id_on_a_non_integer_column_is_rejected(self):
+        import pandas as pd
+
+        index = pd.DatetimeIndex(pd.to_datetime([T0_NANOS, T0_NANOS + 1], unit="ns", utc=True))
+        for dtype, values in (("float64", [1.5, 2.5]), ("bool", [True, False]), ("object", ["a", "b"])):
+            with self.subTest(dtype=dtype):
+                df = pd.DataFrame({"x": pd.Series(values, index=index)}, index=index)
+                df.attrs["enum_ids"] = {"x": "beam-state"}
+                with self.assertRaises(ValueError) as ctx:
+                    dfc.data_frame_from_pandas(df)
+                self.assertIn("enum id", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
