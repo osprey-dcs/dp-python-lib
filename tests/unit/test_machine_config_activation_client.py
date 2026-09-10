@@ -84,9 +84,15 @@ class TestConfigurationActivationQuery(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConfigurationActivationQuery.attributes("", ["v"])
 
-    def test_attributes_empty_values_raises(self):
-        with self.assertRaises(ValueError):
-            ConfigurationActivationQuery.attributes("owner", [])
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (
+            ConfigurationActivationQuery.attributes("owner"),
+            ConfigurationActivationQuery.attributes("owner", []),
+        ):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "owner")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
 
 class TestBuildSaveActivationRequest(unittest.TestCase):
@@ -412,6 +418,14 @@ class TestQueryConfigurationActivations(unittest.TestCase):
         ]
         response.queryConfigurationActivationsResult.nextPageToken = next_token
         return response
+
+    def test_build_request_criteria_omitted_matches_all(self):
+        # An omitted or empty criteria list is match-all on the server (#41), not a rejection.
+        for request in (
+            self.client._build_query_configuration_activations_request(),
+            self.client._build_query_configuration_activations_request([]),
+        ):
+            self.assertEqual(len(request.criteria), 0)
 
     def test_build_request(self):
         criteria = [ConfigurationActivationQuery.configuration_name(["cfg-1"])]

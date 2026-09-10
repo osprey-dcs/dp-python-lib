@@ -140,21 +140,29 @@ class PvQuery:
         return criterion
 
     @staticmethod
-    def attr(key: str, values: list[str]) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
+    def attr(key: str, values: list[str] | None = None) -> "query_pb2.PvSelector.MetadataQuery.Criterion":
         """
-        Builds a metadata criterion matching PVs whose attribute with the given key has any of the specified values.
+        Builds a metadata criterion matching PVs by attribute key and optional value(s).
+
+        Omitting values (or passing an empty list) performs a key-only existence search: any PV possessing the
+        key matches, whatever its value.  That is a narrowing filter, not a match-all, which is why it is
+        allowed here while the other helpers still reject empty input.
+
+        The non-empty key check matters more here than on the annotation-service helpers: the server does not
+        validate the key on this selector, so a blank one would reach Mongo as an existence test on
+        "attributes." and silently match nothing.
+
         :param key: Attribute key to match.
-        :param values: Attribute values to match for that key.
+        :param values: Attribute values to match for that key, or None for a key-only existence search.
         :return: A metadata Criterion with an attributesCriterion.
-        :raises ValueError: if key is empty or values is empty.
+        :raises ValueError: if key is empty.
         """
         if not key:
             raise ValueError("attr() requires a non-empty key")
-        if not values:
-            raise ValueError("attr() requires a non-empty values list")
         criterion = PvQuery._MetaCriterion()
         criterion.attributesCriterion.key = key
-        criterion.attributesCriterion.values[:] = values
+        if values:
+            criterion.attributesCriterion.values[:] = values
         return criterion
 
 
@@ -231,21 +239,28 @@ class ConfigQuery:
         return criterion
 
     @staticmethod
-    def attr(key: str, values: list[str]) -> "query_pb2.ConfigurationSelector.Criterion":
+    def attr(key: str, values: list[str] | None = None) -> "query_pb2.ConfigurationSelector.Criterion":
         """
-        Builds a criterion matching activations whose attribute with the given key has any of the specified values.
+        Builds a criterion matching activations by attribute key and optional value(s).
+
+        Omitting values (or passing an empty list) performs a key-only existence search: any activation
+        possessing the key matches, whatever its value.  That is a narrowing filter, not a match-all, which is
+        why it is allowed here while the other helpers still reject empty input.
+
+        As with PvQuery.attr(), the server does not validate the key on this selector, so the non-empty key
+        check here is the only one there is.
+
         :param key: Attribute key to match.
-        :param values: Attribute values to match for that key.
+        :param values: Attribute values to match for that key, or None for a key-only existence search.
         :return: A ConfigurationSelector.Criterion with an attributesCriterion.
-        :raises ValueError: if key is empty or values is empty.
+        :raises ValueError: if key is empty.
         """
         if not key:
             raise ValueError("attr() requires a non-empty key")
-        if not values:
-            raise ValueError("attr() requires a non-empty values list")
         criterion = ConfigQuery._Criterion()
         criterion.attributesCriterion.key = key
-        criterion.attributesCriterion.values[:] = values
+        if values:
+            criterion.attributesCriterion.values[:] = values
         return criterion
 
 

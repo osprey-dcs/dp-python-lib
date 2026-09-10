@@ -137,6 +137,21 @@ Some things to keep in mind:
 - **Omitting `limit` does not mean "no limit".**  The server applies its own default page size
   (currently 100) when `limit` is absent or zero, so a `query_*` call without one still returns a
   page, not the whole result set.  Check `next_page_token`.
+- **Omitting the criteria browses everything.**  On the annotation-service queries — PV metadata,
+  configurations, activations, datasets, annotations — an omitted or empty criteria list matches
+  *all* records rather than being rejected, so `iter_pv_metadata()` with no arguments walks the
+  whole catalogue:
+
+  ```python
+  # cookbook:partial
+  for record in client.annotation.pv_metadata.iter_pv_metadata():
+      print(record.pvName)
+  ```
+
+  The default page size still applies unconditionally — it does not change just because you
+  dropped the last criterion — so the bare `query_*` form returns one page and a token, not the
+  collection.  `iter_*` is the right call here.  Mind how large the collection is before iterating
+  it.
 - **There is no total count.**  The API deliberately omits it — computing one requires a separate
   expensive query — so you cannot know the result size in advance.
 - **Results come back in a stable order.**  The server sorts each collection by its natural key —
@@ -175,8 +190,8 @@ Name and alias criteria accept `exact`, `prefix`, and `contains` lists, which ma
 criteria = [Q.pv_name(prefix=["BPMS:"], contains=["GUNB"])]
 ```
 
-**The helpers reject empty input.**  Every one of them raises `ValueError` rather than building a
-criterion that would silently match everything:
+**The helpers reject empty input.**  They raise `ValueError` rather than building a criterion that
+would silently match everything:
 
 ```python
 # cookbook:partial
@@ -186,6 +201,21 @@ Q.pv_name()                 # ValueError: requires at least one non-empty of exa
 
 That is a deliberate guard — an empty criterion is nearly always a bug in the caller's filter
 construction, and failing loudly beats returning the whole collection.
+
+**The one exception is `attributes()` / `attr()`, where an empty `values` list is meaningful.**  It
+is the protocol's key-only *existence* search: match every record possessing the attribute key,
+whatever its value.  That narrows the result set rather than matching everything, so the reasoning
+above does not apply and the helpers allow it:
+
+```python
+# cookbook:partial
+Q.attributes("S")           # every PV that has an S attribute at all
+Q.attributes("S", [])       # the same thing
+Q.attributes("", ["0.49"])  # ValueError: the *key* is still required
+```
+
+This holds for all seven attribute helpers — `Q`, `C`, `CA`, `DS`, `AQ`, and the `PV.attr()` /
+`CFG.attr()` query selectors.
 
 ## Save semantics: full replace
 

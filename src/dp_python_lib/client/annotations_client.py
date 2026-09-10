@@ -193,8 +193,8 @@ class AnnotationQuery:
         Builds a criterion matching annotations by attribute key and optional value(s).
 
         Omitting values (or passing an empty list) performs a key-only existence search: any annotation possessing
-        the key matches, whatever its value.  This differs from the older PvMetadataQuery/ConfigurationQuery
-        helpers, which require values; relaxing those is issue #40.
+        the key matches, whatever its value.  Every attribute helper in the library behaves this way (issue #40
+        back-ported it to the older PvMetadataQuery/ConfigurationQuery helpers, which originally required values).
 
         :param key: Attribute key to match (maps to Attribute.name).
         :param values: Attribute values to match for that key, or None for a key-only existence search.

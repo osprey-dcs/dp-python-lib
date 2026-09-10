@@ -89,21 +89,27 @@ class PvMetadataQuery:
         return criterion
 
     @staticmethod
-    def attributes(key: str, values: list[str]) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
+    def attributes(
+        key: str, values: list[str] | None = None
+    ) -> "annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion":
         """
-        Builds a criterion matching PVs whose attribute with the given key has any of the specified values.
+        Builds a criterion matching PVs by attribute key and optional value(s).
+
+        Omitting values (or passing an empty list) performs a key-only existence search: any PV possessing the
+        key matches, whatever its value.  That is a narrowing filter, not a match-all, which is why it is
+        allowed here while the other helpers still reject empty input.
+
         :param key: Attribute key to match.
-        :param values: Attribute values to match for that key.
+        :param values: Attribute values to match for that key, or None for a key-only existence search.
         :return: A QueryPvMetadataCriterion with an attributesCriterion.
-        :raises ValueError: if key is empty or values is empty.
+        :raises ValueError: if key is empty.
         """
         if not key:
             raise ValueError("attributes() requires a non-empty key")
-        if not values:
-            raise ValueError("attributes() requires a non-empty values list")
         criterion = PvMetadataQuery._Criterion()
         criterion.attributesCriterion.key = key
-        criterion.attributesCriterion.values[:] = values
+        if values:
+            criterion.attributesCriterion.values[:] = values
         return criterion
 
 
@@ -398,20 +404,22 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def _build_query_pv_metadata_request(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> annotation_pb2.QueryPvMetadataRequest:
         """
         Builds a QueryPvMetadataRequest from the supplied criteria and paging parameters.
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryPvMetadataRequest for the specified params.
         """
-        self.logger.debug("Building QueryPvMetadataRequest with %d criteria", len(criteria))
+        self.logger.debug("Building QueryPvMetadataRequest with %d criteria", len(criteria) if criteria else 0)
         request = annotation_pb2.QueryPvMetadataRequest()
-        request.criteria.extend(criteria)
+        if criteria:
+            request.criteria.extend(criteria)
         if limit is not None:
             request.limit = limit
         if page_token:
@@ -438,18 +446,25 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def query_pv_metadata(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
     ) -> QueryPvMetadataApiResult:
         """
         User-facing method for invoking the queryPvMetadata() API method.  Returns a single page of results; use
         iter_pv_metadata() to page through all results transparently.
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+
+        An omitted or empty criteria list matches all records.  The server's default page size still applies, so
+        this returns one page and a next-page token rather than the whole catalogue -- use iter_pv_metadata() to
+        browse everything.
+
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
         :return: A QueryPvMetadataApiResult with a single page of results and status information.
         """
+        criteria = criteria or []
         self.logger.info("Starting queryPvMetadata operation with %d criteria", len(criteria))
 
         request = self._build_query_pv_metadata_request(criteria, limit=limit, page_token=page_token)
@@ -464,7 +479,7 @@ class PvMetadataClient(ServiceApiClientBase):
 
     def iter_pv_metadata(
         self,
-        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion],
+        criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
     ) -> Iterator[common_pb2.PvMetadata]:
         """
@@ -473,7 +488,11 @@ class PvMetadataClient(ServiceApiClientBase):
 
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
-        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers).
+        Omit criteria (or pass an empty list) to browse the whole catalogue: an empty list matches all records,
+        and this generator pages through them all.  Mind the size of the collection before doing so.
+
+        :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
+            match all records.
         :param limit: Maximum number of records to return per page (optional).
         :return: An iterator over all matching PvMetadata records across all pages.
         """

@@ -216,6 +216,10 @@ params = QueryParams(
 `CFG` offers `configuration_name`, `client_activation_id`, `category`, `tags`, and
 `attr(key, values)`.
 
+On both `PV.attr()` and `CFG.attr()` the values list is optional: omit it for a **key-only
+existence search** matching everything that has the key, whatever its value — `PV.attr("AREA")`
+selects every PV with an area recorded.
+
 ### The result covers several disjoint intervals
 
 If a configuration was active more than once inside the time range — two shifts in a day, say —

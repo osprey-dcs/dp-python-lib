@@ -88,6 +88,14 @@ class TestPvMetadataClientBuildRequests(unittest.TestCase):
             self.client._build_query_pv_metadata_request([PvMetadataQuery.tags(["x"])])
         self.assertEqual(assigned, [], "an omitted limit must not be assigned")
 
+    def test_build_query_request_criteria_omitted_matches_all(self):
+        # An omitted or empty criteria list is match-all on the server (#41), not a rejection.
+        for request in (
+            self.client._build_query_pv_metadata_request(),
+            self.client._build_query_pv_metadata_request([]),
+        ):
+            self.assertEqual(len(request.criteria), 0)
+
     def test_build_query_request(self):
         criteria = [
             PvMetadataQuery.pv_name(prefix=["ABC:"]),
@@ -144,11 +152,16 @@ class TestPvMetadataQueryHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             PvMetadataQuery.tags([])
 
-    def test_attributes_empty_raises(self):
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (PvMetadataQuery.attributes("unit"), PvMetadataQuery.attributes("unit", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "unit")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
+
+    def test_attributes_empty_key_raises(self):
         with self.assertRaises(ValueError):
             PvMetadataQuery.attributes("", ["V"])
-        with self.assertRaises(ValueError):
-            PvMetadataQuery.attributes("unit", [])
 
 
 class TestSendSavePvMetadata(unittest.TestCase):
@@ -452,6 +465,18 @@ class TestIterPvMetadata(unittest.TestCase):
         result.nextPageToken = next_token
         response.pvMetadataResult = result
         return response
+
+    def test_browse_all_with_no_criteria(self):
+        # The browse-all form: iter_pv_metadata() with no criteria pages through the whole catalogue (#41).
+        mock_stub = Mock()
+        mock_stub.queryPvMetadata.side_effect = [self._page(["ABC:1"], "tok1"), self._page(["ABC:2"], "")]
+        self.client._stub = mock_stub
+
+        names = [pv.pvName for pv in self.client.iter_pv_metadata()]
+
+        self.assertEqual(names, ["ABC:1", "ABC:2"])
+        sent = mock_stub.queryPvMetadata.call_args_list[0].args[0]
+        self.assertEqual(len(sent.criteria), 0)
 
     def test_pages_through_all_results(self):
         page1 = self._page(["ABC:1", "ABC:2"], "tok1")

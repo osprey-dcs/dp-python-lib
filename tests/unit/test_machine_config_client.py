@@ -70,9 +70,12 @@ class TestConfigurationQuery(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConfigurationQuery.attributes("", ["v"])
 
-    def test_attributes_empty_values_raises(self):
-        with self.assertRaises(ValueError):
-            ConfigurationQuery.attributes("owner", [])
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (ConfigurationQuery.attributes("owner"), ConfigurationQuery.attributes("owner", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "owner")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
     def test_parent(self):
         c = ConfigurationQuery.parent(["root-cfg"])
@@ -129,6 +132,14 @@ class TestMachineConfigClientBuildRequests(unittest.TestCase):
     def test_build_delete_request(self):
         request = self.client._build_delete_configuration_request("cfg-1")
         self.assertEqual(request.configurationName, "cfg-1")
+
+    def test_build_query_request_criteria_omitted_matches_all(self):
+        # An omitted or empty criteria list is match-all on the server (#41), not a rejection.
+        for request in (
+            self.client._build_query_configurations_request(),
+            self.client._build_query_configurations_request([]),
+        ):
+            self.assertEqual(len(request.criteria), 0)
 
     def test_build_query_request_with_criteria_limit_token(self):
         criteria = [
