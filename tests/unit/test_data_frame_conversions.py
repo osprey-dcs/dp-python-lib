@@ -23,6 +23,8 @@ except ImportError:
 
 T0 = datetime(2026, 7, 14, 18, 0, 0, tzinfo=timezone.utc)
 T0_NANOS = int(T0.timestamp()) * 1_000_000_000
+T1 = datetime(2026, 7, 14, 19, 0, 0, tzinfo=timezone.utc)
+T1_NANOS = int(T1.timestamp()) * 1_000_000_000
 
 
 def _axis(count=3, period_nanos=1_000_000_000):
@@ -186,7 +188,11 @@ class TestColumnMetadataDict(unittest.TestCase):
                 provenance=dfb.provenance(
                     source="rig",
                     process="RMS",
-                    derived_from=[dfb.pv_source("A:1"), dfb.calculations_source("c", "f", "x")],
+                    derived_from=[
+                        dfb.pv_source("A:1"),
+                        dfb.calculations_source("c", "f", "x"),
+                        dfb.pv_source("A:2", (T0, T1)),
+                    ],
                 ),
             ),
         )
@@ -196,12 +202,34 @@ class TestColumnMetadataDict(unittest.TestCase):
         self.assertEqual(result["attributes"], {"unit": "mm"})
         self.assertEqual(result["provenance"]["source"], "rig")
         self.assertEqual(result["provenance"]["process"], "RMS")
-        self.assertEqual(result["provenance"]["derived_from"][0]["pv_name"], "A:1")
-        self.assertIsNone(result["provenance"]["derived_from"][0]["calculations_column"])
+        # Only the origin arm actually set is present -- the unset arm is absent, not an empty placeholder.
+        self.assertEqual(result["provenance"]["derived_from"][0], {"pv_name": "A:1"})
         self.assertEqual(
-            result["provenance"]["derived_from"][1]["calculations_column"],
-            {"calculations_id": "c", "frame_name": "f", "column_name": "x"},
+            result["provenance"]["derived_from"][1],
+            {"calculations_column": {"calculations_id": "c", "frame_name": "f", "column_name": "x"}},
         )
+
+    def test_provenance_preserves_source_time_range(self):
+        """A source's timeRange -- which part of it was used -- survives read-back, as epoch nanoseconds."""
+        column = dfb.double_column(
+            "d",
+            [1.0],
+            metadata=dfb.column_metadata(
+                provenance=dfb.provenance(
+                    derived_from=[
+                        dfb.pv_source("A:1", (T0, T1)),
+                        dfb.calculations_source("c", "f", "x", (T0, T1)),
+                        dfb.pv_source("A:2"),
+                    ]
+                )
+            ),
+        )
+
+        sources = dfc.column_metadata_dict(column)["provenance"]["derived_from"]
+        self.assertEqual(sources[0]["time_range"], (T0_NANOS, T1_NANOS))
+        self.assertEqual(sources[1]["time_range"], (T0_NANOS, T1_NANOS))
+        # An absent range is absent, not a fabricated (0, 0) pair.
+        self.assertNotIn("time_range", sources[2])
 
     def test_absent_metadata(self):
         result = dfc.column_metadata_dict(dfb.double_column("d", [1.0]))
@@ -423,6 +451,87 @@ class TestCalculationsBridges(unittest.TestCase):
         )
         back = dfc.calculations_to_dataframes(calculations({"f1": frame}))
         self.assertEqual(back["f1"].attrs["column_metadata"]["d"]["tags"], ["derived"])
+
+
+class TestWriteAndReadPathsAgree(unittest.TestCase):
+    """Anything data_frame() accepts must be readable by this module -- the two paths share one shape contract."""
+
+    def test_ragged_array_rejected_by_both_paths(self):
+        # Regression: the write path used floor division, so it accepted a value count that was not a whole
+        # multiple of prod(dims) and produced a frame data_frame_columns() then refused to read.
+        column = common_pb2.DoubleArrayColumn()
+        column.name = "waveform"
+        column.dimensions.dims.extend([2])
+        column.values[:] = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+        with self.assertRaises(ValueError) as write_error:
+            dfb.data_frame(_axis(2), [column])
+
+        frame = common_pb2.DataFrame()
+        frame.dataTimestamps.CopyFrom(_axis(2))
+        frame.doubleArrayColumns.append(column)
+        with self.assertRaises(ValueError) as read_error:
+            dfc.data_frame_columns(frame)
+
+        for message in (str(write_error.exception), str(read_error.exception)):
+            self.assertIn("whole multiple", message)
+            self.assertIn("waveform", message)
+
+    def test_well_formed_array_survives_the_round_trip(self):
+        column = common_pb2.DoubleArrayColumn()
+        column.name = "waveform"
+        column.dimensions.dims.extend([2])
+        column.values[:] = [1.0, 2.0, 3.0, 4.0]
+        frame = dfb.data_frame(_axis(2), [column])
+        self.assertEqual(dfc.data_frame_columns(frame), {"waveform": [[1.0, 2.0], [3.0, 4.0]]})
+
+
+@unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas)")
+class TestPandasDuplicateColumnNames(unittest.TestCase):
+    def test_duplicate_column_names_are_rejected_by_name(self):
+        # df[name] on a duplicated label returns a DataFrame, not a Series, which would otherwise surface deep
+        # inside the converter as pandas' "truth value of a Series is ambiguous".
+        import pandas as pd
+
+        index = pd.DatetimeIndex(pd.to_datetime([T0_NANOS, T0_NANOS + 1], unit="ns", utc=True))
+        df = pd.DataFrame([[1.0, 2.0], [3.0, 4.0]], columns=["a", "a"], index=index)
+
+        with self.assertRaises(ValueError) as ctx:
+            dfc.data_frame_from_pandas(df)
+        message = str(ctx.exception)
+        self.assertIn("'a'", message)
+        self.assertIn("unique", message)
+
+
+@unittest.skipUnless(_HAVE_ANALYSIS, "requires the [analysis] extra (pandas)")
+class TestPandasRoundTripColumnOrder(unittest.TestCase):
+    """A DataFrame stores each column kind in its own repeated field, so ordering across kinds is not preserved."""
+
+    def _round_trip(self):
+        import pandas as pd
+
+        index = pd.DatetimeIndex(
+            pd.to_datetime([T0_NANOS, T0_NANOS + 1_000_000_000, T0_NANOS + 2_000_000_000], unit="ns", utc=True)
+        )
+        df = pd.DataFrame(
+            {"a": [1.0, 2.0, 3.0], "b": ["x", "y", "z"], "c": [True, False, True]},
+            index=index,
+        )
+        return df, dfc.data_frame_to_pandas(dfc.data_frame_from_pandas(df))
+
+    def test_columns_come_back_grouped_by_type(self):
+        # Pinned rather than merely documented: the order is a consequence of the proto's field order, and a
+        # caller who reindexes by name needs it to be stable.
+        _, restored = self._round_trip()
+        self.assertEqual(list(restored.columns), ["a", "c", "b"])
+
+    def test_values_index_and_dtypes_survive_the_reordering(self):
+        original, restored = self._round_trip()
+        realigned = restored[list(original.columns)]
+        self.assertTrue(original.index.equals(realigned.index))
+        self.assertEqual(list(original.dtypes), list(realigned.dtypes))
+        for name in original.columns:
+            self.assertEqual(list(original[name]), list(realigned[name]))
 
 
 if __name__ == "__main__":

@@ -53,6 +53,22 @@
   export cases — for 25 tests, 12 subtests, all passing against dp-service `fddf692`.  The checker preamble gained
   the new names plus the recipe's shared worked-example handles.  The `CLAUDE.md` snippet was extracted and **run
   against the live server**, not just type-checked: every documented call succeeds end to end.
+- **PR #45 review fixes, 2026-09-10.**  Five findings, two of them defects:
+  - `data_frame()` accepted an array column whose value count was not a whole multiple of `prod(dims)`, floor-
+    dividing it into a passing sample count — building a frame that `data_frame_conversions` then refused to read
+    back.  The write path now applies the same whole-multiple rule the read path already did, so the two agree by
+    construction; a regression test asserts both reject the identical input.
+  - `column_metadata_dict()` dropped a provenance source's `timeRange` entirely, losing "which part of the source
+    was used" — the substantive half of provenance for a derived column.  It is now reported as epoch nanoseconds,
+    and each source carries only the origin arm actually set rather than the unset arm as an empty string.  The
+    integration test asserts the range survives a real server round trip.
+  - `data_frame_from_pandas()` on duplicate column labels failed deep inside as pandas' "truth value of a Series is
+    ambiguous"; it now rejects them up front by name.
+  - A pandas round trip reorders columns (grouped by proto field), which was true but undocumented and easy to read
+    as a bug.  Documented in both docstrings and the cookbook, and pinned by a test.
+  - `data_column()` accepted `np.float64` (a `float` subclass) but rejected `np.int64` and `np.bool_` (subclasses of
+    nothing it matched).  It now maps by `numbers.Integral` / `numbers.Real`, with NumPy's bool matched by type
+    module and name so this module keeps its no-NumPy dependency.
 
 ## Overview
 

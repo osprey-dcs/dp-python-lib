@@ -317,6 +317,25 @@ chained = dfb.provenance(
 
 Both accept an optional `(begin, end)` pair narrowing which part of the source was used.
 
+Reading it back, `column_metadata_dict()` gives you the plain-Python view — no extras needed. Each
+entry carries **only the origin arm actually set**, plus the time range when there is one, reported
+as epoch nanoseconds like every other instant in this library:
+
+```python
+# cookbook:partial
+provenance = dfb.provenance(derived_from=[dfb.pv_source("BPMS:GUNB:314:X", (t0, t1))])
+column = dfb.double_column("x_rms", [0.31, 0.29, 0.33], metadata=dfb.column_metadata(provenance=provenance))
+
+summary = dfc.column_metadata_dict(column)
+print(summary["provenance"]["derived_from"])
+# [{'pv_name': 'BPMS:GUNB:314:X', 'time_range': (1770055200000000000, 1770058800000000000)}]
+```
+
+A PV source has no `calculations_column` key and a calculations source has no `pv_name` key, rather
+than the unset one showing up as an empty string — absence means "not this arm", the same
+[absent-vs-empty](conventions.md) discipline the rest of the library follows. A source with no time
+range simply has no `time_range` key, never a fabricated `(0, 0)`.
+
 These are **soft references**. Deleting the annotation that owns the referenced calculations leaves
 the link dangling; nothing resolves or cleans it up, and readers are expected to tolerate that.
 
@@ -418,7 +437,23 @@ really is a regular clock, say so with `sampling_clock()` and build the frame di
 
 The dtype mapping is `float64`→Double, `float32`→Float, `int64`→Int64, `int32`→Int32, `bool`→Bool,
 and object/string→String. Anything else — complex, datetime columns, categoricals — raises rather
-than guessing.
+than guessing. Duplicate column names are rejected up front: a frame stores one column per name, and
+a `concat` or a `merge` with overlapping names produces duplicates easily.
+
+**A round trip preserves values, but not column order.** A `DataFrame` keeps each column kind in its
+own repeated field, so the wire format has no single ordering across kinds. Converting out and back
+returns every value, dtype, and timestamp intact, with the columns grouped by type:
+
+```python
+# cookbook:partial
+calcs = client.annotation.annotations.get_annotation(annotation_id).calculations
+df = dfc.calculations_to_dataframes(calcs)["orbit-rms"]
+
+restored = dfc.data_frame_to_pandas(dfc.data_frame_from_pandas(df))
+restored = restored[list(df.columns)]     # reindex by name to get your order back
+```
+
+Select by name rather than by position, and reindex when the order matters.
 
 ## Updating without losing the calculations
 

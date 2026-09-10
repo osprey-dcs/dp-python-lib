@@ -50,6 +50,21 @@ _ARRAY_COLUMN_FIELDS = (
 # ImageColumn stores its per-sample payloads in `images` rather than `values`.
 _IMAGE_COLUMN_FIELD = "imageColumns"
 
+_NANOS_PER_SECOND = 1_000_000_000
+
+
+def _timestamp_to_nanos(timestamp: common_pb2.Timestamp) -> int:
+    """
+    Converts a common.Timestamp into a single integer of epoch nanoseconds.
+
+    Defined here rather than imported from sample_status_conversions: that module's copy is private, and reaching
+    across for it would make this module's dependencies read as though it needed the sample status API.
+
+    :param timestamp: The timestamp to convert.
+    :return: Epoch nanoseconds as a Python int (arbitrary precision, so no overflow).
+    """
+    return timestamp.epochSeconds * _NANOS_PER_SECOND + timestamp.nanoseconds
+
 
 def _require_pandas():
     """Imports and returns pandas, or raises an actionable error if the optional [analysis] extra is missing."""
@@ -181,6 +196,41 @@ def data_frame_columns(frame: common_pb2.DataFrame) -> dict[str, list]:
     return columns
 
 
+def _column_source_dict(entry: common_pb2.ColumnProvenance.ColumnSource) -> dict[str, Any]:
+    """
+    Summarizes one ColumnProvenance.ColumnSource -- where a column's values came from -- as a plain dict.
+
+    Only the origin arm actually set is present: a pvName source has no 'calculations_column' key and vice versa,
+    rather than the unset arm standing in as an empty string.  Absence means "not this arm", the same absent-vs-
+    empty discipline the sample status conversions apply to confidence and reason.
+
+    The optional timeRange -- which part of the source was used -- is reported as epoch nanoseconds, matching this
+    module's integer-nanosecond convention.  It is the substantive half of provenance for a derived column: the
+    source PV without its window says much less than the pair does.
+
+    :param entry: The ColumnSource to summarize.
+    :return: A dict carrying the set origin arm and, when present, 'time_range' as (begin_nanos, end_nanos).
+    """
+    result: dict[str, Any] = {}
+
+    origin = entry.WhichOneof("origin")
+    if origin == "pvName":
+        result["pv_name"] = entry.pvName
+    elif origin == "calculationsColumn":
+        result["calculations_column"] = {
+            "calculations_id": entry.calculationsColumn.calculationsId,
+            "frame_name": entry.calculationsColumn.frameName,
+            "column_name": entry.calculationsColumn.columnName,
+        }
+
+    if entry.HasField("timeRange"):
+        result["time_range"] = (
+            _timestamp_to_nanos(entry.timeRange.beginTime),
+            _timestamp_to_nanos(entry.timeRange.endTime),
+        )
+    return result
+
+
 def column_metadata_dict(column: Any) -> dict[str, Any]:
     """
     Summarizes a column's ColumnMetadata as a plain dict, for carrying alongside converted values.
@@ -198,21 +248,7 @@ def column_metadata_dict(column: Any) -> dict[str, Any]:
         provenance = {
             "source": source.source,
             "process": source.process,
-            "derived_from": [
-                {
-                    "pv_name": entry.pvName,
-                    "calculations_column": (
-                        {
-                            "calculations_id": entry.calculationsColumn.calculationsId,
-                            "frame_name": entry.calculationsColumn.frameName,
-                            "column_name": entry.calculationsColumn.columnName,
-                        }
-                        if entry.WhichOneof("origin") == "calculationsColumn"
-                        else None
-                    ),
-                }
-                for entry in source.derivedFrom
-            ],
+            "derived_from": [_column_source_dict(entry) for entry in source.derivedFrom],
         }
 
     return {
@@ -251,6 +287,12 @@ def data_frame_to_pandas(frame: common_pb2.DataFrame, exclude_column_metadata: b
     The index is built from int64 epoch nanoseconds directly, so a SamplingClock axis stays exact -- routing
     through float seconds would move present-day timestamps by hundreds of nanoseconds.  Per-column ColumnMetadata
     lands in df.attrs["column_metadata"] (a dict keyed by column name), matching query_conversions' convention.
+
+    Note columns come back GROUPED BY TYPE, not in their original order: a DataFrame stores each column kind in its
+    own repeated field, so the wire format does not preserve a single ordering across kinds.  A round trip through
+    data_frame_from_pandas() therefore preserves every value, dtype, and timestamp, but can reorder the columns
+    (float64, then int, then bool, then string, matching the proto's field order).  Select by name, or reindex to
+    the order you want.
 
     :param frame: The DataFrame to convert.
     :param exclude_column_metadata: When True, skip populating df.attrs["column_metadata"].
@@ -390,6 +432,9 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
     The index becomes an explicit TimestampList; see _timestamps_from_index() for why a SamplingClock is never
     inferred.  Missing values are rejected fail-loud, since a dense typed column cannot express a gap.
 
+    Converting back with data_frame_to_pandas() preserves every value, dtype, and timestamp, but can return the
+    columns grouped by type rather than in their original order -- see that function's docstring.
+
     :param df: The pandas DataFrame to convert.  Must have a tz-aware, strictly increasing DatetimeIndex.
     :return: A common.DataFrame.
     :raises ImportError: if the [analysis] extra is not installed.
@@ -402,6 +447,18 @@ def data_frame_from_pandas(df: Any) -> common_pb2.DataFrame:
 
     if len(df.columns) == 0:
         raise ValueError("DataFrame must have at least one column")
+
+    # Duplicate labels make df[name] a DataFrame rather than a Series, which would otherwise surface far downstream
+    # as pandas' "truth value of a Series is ambiguous".  Column names must be unique within a frame anyway, so
+    # reject it here with a message naming the offender -- concat() and merge() produce this easily by accident.
+    names = [str(name) for name in df.columns]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            f"DataFrame has more than one column named {', '.join(repr(name) for name in duplicates)}; column "
+            f"names must be unique within a frame.  Rename or drop the duplicates first (e.g. after a concat or "
+            f"a merge with overlapping names)."
+        )
 
     data_timestamps = _timestamps_from_index(df.index)
     columns = [_column_from_series(str(name), df[name]) for name in df.columns]

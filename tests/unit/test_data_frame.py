@@ -9,6 +9,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.grpc import common_pb2
 
+try:
+    import numpy as np
+
+    _HAVE_NUMPY = True
+except ImportError:
+    _HAVE_NUMPY = False
+
 T0 = datetime(2026, 7, 14, 18, 0, 0, tzinfo=timezone.utc)
 T1 = datetime(2026, 7, 14, 19, 0, 0, tzinfo=timezone.utc)
 
@@ -161,6 +168,24 @@ class TestDataColumnEscapeHatch(unittest.TestCase):
         column = dfb.data_column("u", [prebuilt])
         self.assertEqual(column.dataValues[0].WhichOneof("value"), "uintValue")
         self.assertEqual(column.dataValues[0].uintValue, 42)
+
+    @unittest.skipUnless(_HAVE_NUMPY, "requires the [analysis] extra (numpy)")
+    def test_maps_numpy_scalars_like_their_python_counterparts(self):
+        # np.float64 subclasses float, but np.int64 does not subclass int and np.bool_ does not subclass bool.
+        # Mapping by exact Python type would accept the first and reject the other two -- an arbitrary split for a
+        # caller coming from pandas or NumPy.
+        column = dfb.data_column("np", [np.float64(1.5), np.int64(2), np.int32(3), np.bool_(True), np.float32(0.5)])
+        arms = [v.WhichOneof("value") for v in column.dataValues]
+        self.assertEqual(arms, ["doubleValue", "longValue", "longValue", "booleanValue", "doubleValue"])
+        self.assertEqual(column.dataValues[1].longValue, 2)
+        self.assertIs(column.dataValues[3].booleanValue, True)
+
+    @unittest.skipUnless(_HAVE_NUMPY, "requires the [analysis] extra (numpy)")
+    def test_numpy_bool_is_checked_before_the_integer_branch(self):
+        # np.bool_ is not Integral, but this pins the ordering the way test_bool_is_checked_before_int does.
+        column = dfb.data_column("flags", [np.bool_(True), np.bool_(False)])
+        self.assertEqual([v.WhichOneof("value") for v in column.dataValues], ["booleanValue", "booleanValue"])
+        self.assertEqual([v.booleanValue for v in column.dataValues], [True, False])
 
     def test_rejects_unmappable_type(self):
         with self.assertRaises(ValueError) as ctx:
@@ -327,6 +352,27 @@ class TestDataFrameAssembly(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             dfb.data_frame(_axis(3), [column])
         self.assertIn("2 values", str(ctx.exception))
+
+    def test_array_column_with_ragged_values_is_rejected(self):
+        # 5 values with a per-sample size of 2 is not a whole number of samples.  Floor division would round it to
+        # a passing count of 2 and build a frame that data_frame_conversions then refuses to read back.
+        column = common_pb2.DoubleArrayColumn()
+        column.name = "waveform"
+        column.dimensions.dims.extend([2])
+        column.values[:] = [1.0, 2.0, 3.0, 4.0, 5.0]
+        with self.assertRaises(ValueError) as ctx:
+            dfb.data_frame(_axis(2), [column])
+        message = str(ctx.exception)
+        self.assertIn("whole multiple", message)
+        self.assertIn("waveform", message)
+
+    def test_array_column_accepts_multidimensional_dims(self):
+        column = common_pb2.DoubleArrayColumn()
+        column.name = "image"
+        column.dimensions.dims.extend([2, 3])
+        column.values[:] = [float(i) for i in range(12)]  # 2 samples x (2 x 3)
+        frame = dfb.data_frame(_axis(2), [column])
+        self.assertEqual([c.name for c in frame.doubleArrayColumns], ["image"])
 
     def test_array_column_without_dims_is_rejected(self):
         column = common_pb2.DoubleArrayColumn()

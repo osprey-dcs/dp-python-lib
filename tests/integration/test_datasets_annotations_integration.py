@@ -27,6 +27,11 @@ from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
 
 
+def _epoch_nanos(when: datetime) -> int:
+    """Epoch nanoseconds for a tz-aware datetime, for comparing against the conversions' integer-nanos output."""
+    return int(when.timestamp()) * 1_000_000_000 + when.microsecond * 1_000
+
+
 class TestDataSetsAnnotationsIntegration(unittest.TestCase):
     """
     Integration tests for DataSetClient and AnnotationsClient that require a running MLDP ecosystem.
@@ -599,7 +604,16 @@ class TestDataSetsAnnotationsIntegration(unittest.TestCase):
         self.assertEqual(metadata["attributes"], {"unit": "mm"})
         self.assertEqual(metadata["provenance"]["source"], "itest-rig")
         self.assertEqual(metadata["provenance"]["process"], "1 Hz RMS")
-        self.assertEqual(metadata["provenance"]["derived_from"][0]["pv_name"], self.pv_name)
+        source = metadata["provenance"]["derived_from"][0]
+        self.assertEqual(source["pv_name"], self.pv_name)
+        # The source's time range is the substantive half of provenance: which part of the PV's history was used.
+        # It must survive the server round trip, exact to the nanosecond, like every other instant in this library.
+        self.assertEqual(
+            source["time_range"],
+            (_epoch_nanos(self.begin_time), _epoch_nanos(self.end_time)),
+        )
+        # A pvName source carries no calculations_column key at all, rather than an empty placeholder.
+        self.assertNotIn("calculations_column", source)
 
     # ------------------------------------------------------------------
     # Export (Phase 4)

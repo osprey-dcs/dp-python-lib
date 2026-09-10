@@ -22,6 +22,7 @@ Design decisions (see plan/tickets/6/plan.md, D6):
     the ones its builders return.
 """
 
+from numbers import Integral, Real
 from typing import Any
 
 from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
@@ -450,6 +451,25 @@ def enum_column(
     return column
 
 
+def _is_numpy_bool(value: Any) -> bool:
+    """
+    True if a value is a NumPy boolean scalar.
+
+    NumPy's boolean scalar is a subclass of neither bool nor numbers.Integral, so nothing else in data_column()'s
+    type mapping catches it -- while np.float64 IS a subclass of float and np.int64 IS numbers.Integral.  Left
+    unhandled it would be the one NumPy scalar the mapping rejected.
+
+    Identified by its type's module and name rather than by importing NumPy, which keeps this module free of the
+    optional [analysis] dependency.  Both spellings are matched: the type is named `bool_` under NumPy 1.x and
+    `bool` under 2.x, and the module check is what keeps the latter from matching an unrelated class.
+
+    :param value: The value to test.
+    :return: True if the value is a numpy.bool_ / numpy.bool scalar.
+    """
+    value_type = type(value)
+    return value_type.__module__ == "numpy" and value_type.__name__ in ("bool_", "bool")
+
+
 def data_column(
     name: str, values: list[Any], metadata: common_pb2.ColumnMetadata | None = None
 ) -> common_pb2.DataColumn:
@@ -465,6 +485,11 @@ def data_column(
     subclass of int), int -> longValue, float -> doubleValue, str -> stringValue, bytes -> byteArrayValue, and
     None -> an unset oneof.  Anything else raises: silently coercing an unexpected type would store something the
     caller did not mean.  Pass a pre-built DataValue to use an arm this mapping does not cover.
+
+    The integer and float arms are matched by numbers.Integral / numbers.Real, and np.bool_ by name, so NumPy
+    scalars work too.  np.int64 is not a subclass of int and np.bool_ is not a subclass of bool (while np.float64
+    IS a subclass of float), so mapping by exact Python type would accept some NumPy scalars and reject others --
+    an arbitrary distinction for a caller coming from pandas or NumPy.
 
     :param name: The column's name, unique within its frame.
     :param values: One value per sample, where None means "no value for this sample".
@@ -485,13 +510,15 @@ def data_column(
             continue
         if isinstance(value, common_pb2.DataValue):
             data_value.CopyFrom(value)
-        elif isinstance(value, bool):
-            # Checked before int: bool is a subclass of int, so the int branch would swallow it.
-            data_value.booleanValue = value
-        elif isinstance(value, int):
-            data_value.longValue = value
-        elif isinstance(value, float):
-            data_value.doubleValue = value
+        elif isinstance(value, bool) or _is_numpy_bool(value):
+            # Checked before the integer branch: bool is a subclass of int, so that branch would swallow it.
+            data_value.booleanValue = bool(value)
+        elif isinstance(value, Integral):
+            # Integral rather than int, so a NumPy integer scalar maps like a Python one.
+            data_value.longValue = int(value)
+        elif isinstance(value, Real):
+            # Real rather than float, for symmetry with the integer branch above.
+            data_value.doubleValue = float(value)
         elif isinstance(value, str):
             data_value.stringValue = value
         elif isinstance(value, bytes):
@@ -512,28 +539,50 @@ def data_column(
 # ----------------------------------------------------------------------
 
 
+def _array_sample_size(column: Any) -> int | None:
+    """
+    Returns an array column's per-sample size, prod(dims), or None when it cannot be derived.
+
+    Absent dims are underivable rather than a product of 1 -- an empty product would silently treat every element
+    as its own sample.  A zero or negative dim is equally unusable, so both report as None for the caller to
+    reject with a message naming the column.
+
+    :param column: An array column (DoubleArrayColumn, Int32ArrayColumn, ...).
+    :return: The number of values each sample occupies, or None if dims are missing or non-positive.
+    """
+    dims = list(column.dimensions.dims)
+    if not dims:
+        return None
+    product = 1
+    for dim in dims:
+        product *= dim
+    if product <= 0:
+        return None
+    return product
+
+
 def _column_sample_count(column: Any) -> int | None:
     """
     Returns the number of samples a column carries, or None when the column has no countable per-sample values.
 
+    For an array column the count is len(values) / prod(dims); a value count that is not a whole multiple of
+    prod(dims) has no sample count at all and reports as None, so _check_column() rejects it rather than letting
+    floor division round it into a passing count.  The read path (data_frame_conversions._reshape_array_values)
+    applies the same rule, and a frame this accepted but that could not be read back would be the worst outcome.
+
     :param column: A typed column, a legacy DataColumn, or a SerializedDataColumn.
-    :return: The sample count, or None for a SerializedDataColumn (whose payload is opaque).
+    :return: The sample count, or None for a SerializedDataColumn (whose payload is opaque) and for an array
+        column whose dims are missing, non-positive, or do not evenly divide its values.
     """
     if isinstance(column, common_pb2.SerializedDataColumn):
         return None
     if isinstance(column, common_pb2.DataColumn):
         return len(column.dataValues)
     if isinstance(column, _ARRAY_COLUMN_TYPES):
-        # Array values are flat: samples x prod(dims).  Absent dims are underivable rather than a product of 1 --
-        # an empty product would silently treat each element as its own sample.  _check_column() reports that
-        # instead of dividing by zero or accepting a wrong count.
-        dims = list(column.dimensions.dims)
-        if not dims:
+        product = _array_sample_size(column)
+        if product is None:
             return None
-        product = 1
-        for dim in dims:
-            product *= dim
-        if product <= 0:
+        if len(column.values) % product != 0:
             return None
         return len(column.values) // product
     return len(column.values)
@@ -570,11 +619,19 @@ def _check_column(column: Any, index: int, expected_count: int, seen_names: set[
         # Serialized payloads are opaque; the server checks their names only.
         return
 
-    if isinstance(column, _ARRAY_COLUMN_TYPES) and _column_sample_count(column) is None:
-        raise ValueError(
-            f"data_frame() cannot determine the sample count of array column '{name}': its dimensions are "
-            f"missing or zero.  Set ArrayDimensions.dims so that values is samples x prod(dims)."
-        )
+    if isinstance(column, _ARRAY_COLUMN_TYPES):
+        product = _array_sample_size(column)
+        if product is None:
+            raise ValueError(
+                f"data_frame() cannot determine the sample count of array column '{name}': its dimensions are "
+                f"missing or zero.  Set ArrayDimensions.dims so that values is samples x prod(dims)."
+            )
+        if len(column.values) % product != 0:
+            raise ValueError(
+                f"data_frame() array column '{name}' has {len(column.values)} values, which is not a whole "
+                f"multiple of its per-sample size {product} (from dims {list(column.dimensions.dims)}); "
+                f"values must be samples x prod(dims)"
+            )
 
     count = _column_sample_count(column)
     if count == 0:
