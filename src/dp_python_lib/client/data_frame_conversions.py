@@ -21,9 +21,9 @@ Design decisions (see plan/tickets/6/plan.md, D7):
 
 from typing import Any
 
-from dp_python_lib.client.machine_config_client import to_epoch_nanos
 from dp_python_lib.client.query_conversions import data_value_to_python
 from dp_python_lib.client.sample_status_conversions import expand_data_timestamps
+from dp_python_lib.client.time_conversions import to_epoch_nanos
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 # The DataFrame fields holding typed scalar columns, in the proto's declaration order.  Each carries `values`

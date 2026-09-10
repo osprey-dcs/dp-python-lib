@@ -25,7 +25,7 @@ Design decisions (see plan/tickets/6/plan.md, D6):
 from numbers import Integral, Real
 from typing import Any
 
-from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
+from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import common_pb2
 
 # Each typed column message, paired with the DataFrame field it belongs in.  data_frame() routes by exact type, so

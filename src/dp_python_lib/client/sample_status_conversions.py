@@ -21,7 +21,7 @@ optional [analysis] extra.  A pandas view is deferred to a follow-up.
 
 from collections.abc import Iterator
 
-from dp_python_lib.client.machine_config_client import NANOS_PER_SECOND, to_epoch_nanos
+from dp_python_lib.client.time_conversions import NANOS_PER_SECOND, to_epoch_nanos
 from dp_python_lib.grpc import common_pb2
 
 # The Timestamp -> epoch-nanoseconds conversion is shared (see machine_config_client.to_epoch_nanos); this private

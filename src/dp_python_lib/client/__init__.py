@@ -67,8 +67,6 @@ from dp_python_lib.client.machine_config_client import (
     SaveConfigurationActivationRequestParams,
     SaveConfigurationApiResult,
     SaveConfigurationRequestParams,
-    to_epoch_nanos,
-    to_timestamp,
 )
 from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.pv_metadata_client import (
@@ -101,6 +99,7 @@ from dp_python_lib.client.sample_status_client import (
     timestamp_list,
 )
 from dp_python_lib.client.sample_status_conversions import SampleStatusRow
+from dp_python_lib.client.time_conversions import TimestampInput, to_epoch_nanos, to_timestamp
 
 __all__ = [
     "AnnotationClient",
@@ -163,6 +162,7 @@ __all__ = [
     "SavePvMetadataRequestParams",
     "SaveSampleStatusesApiResult",
     "SaveSampleStatusesRequestParams",
+    "TimestampInput",
     "bool_column",
     "calculations",
     "calculations_source",

@@ -1,5 +1,4 @@
 import logging
-import math
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
@@ -7,81 +6,12 @@ import grpc
 
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+
+# The shared time converters moved to time_conversions.py in issue #6.  They were defined here, as the first
+# module to need them, and six others grew imports of them from here -- which read as though datasets, queries,
+# and DataFrames depended on the machine configuration API.  This module is now just another caller.
+from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
-
-# Accepted input types for API parameters that map to a common.Timestamp:
-# a timezone-aware datetime, epoch seconds (int or float), or an already-built Timestamp.
-TimestampInput = datetime | int | float | common_pb2.Timestamp
-
-
-NANOS_PER_SECOND = 1_000_000_000
-
-
-def to_epoch_nanos(timestamp: common_pb2.Timestamp) -> int:
-    """
-    Converts a common.Timestamp into a single integer of epoch nanoseconds -- the inverse of to_timestamp().
-
-    Lives here beside to_timestamp() because it is the same conversion in the other direction, and the modules
-    that need it (query, sample status, and DataFrame conversions) already import to_timestamp() from here.  It
-    was previously spelled out privately in each of them, which meant three copies of one arithmetic identity.
-
-    Integer arithmetic throughout, on a Python int, so there is no overflow and no precision loss: present-day
-    epoch nanoseconds need about 61 bits, and a float64 carries 53.
-
-    :param timestamp: The timestamp to convert.
-    :return: Epoch nanoseconds as a Python int.
-    """
-    return timestamp.epochSeconds * NANOS_PER_SECOND + timestamp.nanoseconds
-
-
-def to_timestamp(value: TimestampInput) -> common_pb2.Timestamp:
-    """
-    Converts a user-supplied time value into a common.Timestamp{epochSeconds, nanoseconds}.
-
-    Accepts:
-      - a timezone-aware datetime (naive datetimes are rejected to avoid silent local-timezone bugs),
-      - epoch seconds as an int or float (float fractional part becomes nanoseconds),
-      - an already-built common.Timestamp (returned as-is).
-
-    :param value: The time value to convert.
-    :return: An equivalent common.Timestamp.
-    :raises ValueError: if a datetime is naive (has no tzinfo), or if the resulting epoch seconds are negative
-        (pre-1970) -- common.Timestamp.epochSeconds is an unsigned (uint64) field and cannot represent them.
-    :raises TypeError: if value is not one of the supported types.
-    """
-    if isinstance(value, common_pb2.Timestamp):
-        return value
-
-    if isinstance(value, datetime):
-        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
-            raise ValueError(
-                "to_timestamp() requires a timezone-aware datetime; naive datetimes are rejected "
-                "to avoid silent local-timezone bugs. Use datetime.now(timezone.utc) or attach tzinfo."
-            )
-        epoch = value.timestamp()
-        return to_timestamp(epoch)
-
-    if isinstance(value, bool):
-        # bool is a subclass of int; reject it explicitly as it is virtually always a mistake.
-        raise TypeError("to_timestamp() does not accept bool")
-
-    if isinstance(value, (int, float)):
-        # Floor the seconds (not truncate toward zero) so the fractional remainder, and therefore
-        # nanoseconds, is always in [0, 1_000_000_000) even for negative epoch inputs.
-        epoch_seconds = math.floor(value)
-        nanoseconds = int(round((float(value) - epoch_seconds) * 1_000_000_000))
-        # Guard against float rounding pushing nanoseconds up to a full second.
-        if nanoseconds >= 1_000_000_000:
-            epoch_seconds += 1
-            nanoseconds -= 1_000_000_000
-        timestamp = common_pb2.Timestamp()
-        timestamp.epochSeconds = epoch_seconds
-        timestamp.nanoseconds = nanoseconds
-        return timestamp
-
-    raise TypeError(
-        f"to_timestamp() expects datetime, int/float epoch seconds, or common.Timestamp, got {type(value).__name__}"
-    )
 
 
 class ConfigurationQuery:

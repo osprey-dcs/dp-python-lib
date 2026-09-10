@@ -72,10 +72,13 @@
 
   Fixing the provenance finding needed a Timestamp -> epoch-nanoseconds conversion, which turned out to exist
   privately in three modules already (`query_conversions`, `sample_status_conversions`, and, briefly, a fourth copy
-  added here).  Rather than add to that, it is now one public `to_epoch_nanos()` beside `to_timestamp()` in
-  `machine_config_client` -- the same conversion in the other direction, in the module four others already import
-  `to_timestamp()` from.  The two private aliases stay as one-line bindings so each module keeps the internal name
-  it has always used.
+  added here).  That prompted a second look at where the time converters live at all.  They were defined in
+  `machine_config_client`, the first module to need them, and six others had grown imports of `to_timestamp()` from
+  there -- so datasets, queries, and DataFrames all read as though they depended on the machine configuration API.
+  Both directions now live in a new leaf module, `client/time_conversions.py`, which imports only stdlib and the
+  generated protos: `to_timestamp()`, `to_epoch_nanos()`, `TimestampInput`, and `NANOS_PER_SECOND`.  Every internal
+  caller was repointed at it, and `machine_config_client` is now just another caller.  Done inside this ticket
+  rather than deferred, since the feature is unreleased and a follow-up would ship the wart in the release.
 
 ## Overview
 

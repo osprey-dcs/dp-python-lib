@@ -22,7 +22,7 @@ Design decisions (see .dev/plan/issue-7/plan.md, Q6 and section 2):
 from collections.abc import Iterator
 from typing import Any
 
-from dp_python_lib.client.machine_config_client import to_epoch_nanos
+from dp_python_lib.client.time_conversions import to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, query_pb2
 
 # Excel's hard row ceiling (1,048,576 rows including a header row).

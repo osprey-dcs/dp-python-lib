@@ -5,9 +5,9 @@ import grpc
 
 from dp_python_lib.client.data_frame import sampling_clock, timestamp_list
 from dp_python_lib.client.data_frame import timestamp_count as _timestamp_count
-from dp_python_lib.client.machine_config_client import TimestampInput, to_timestamp
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
 # sampling_clock(), timestamp_list(), and timestamp_count() moved to data_frame.py in issue #6 Phase 2, once
