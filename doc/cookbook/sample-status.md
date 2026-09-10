@@ -3,8 +3,12 @@
 Recording that *this particular sample, at this particular instant, was bad* — and then querying
 data with the flagged samples left out.
 
-> **Verified against:** dp-grpc `rel-1.16.0`.
-> The sample status API is **new in 1.16.0** and will not work against a `rel-1.15.0` server.
+> **Target API version:** dp-grpc 1.16.0, which is **not yet released** — the newest tag is
+> `rel-1.15.0`.  The sample status API is new in 1.16.0 and will not work against a `rel-1.15.0`
+> server, which answers these calls with `UNIMPLEMENTED`.
+>
+> **Verified against:** a pre-release Annotation Service built from dp-service `main` carrying the
+> 1.16.0 API.
 
 See [API conventions](conventions.md) for result checking, paging, and time handling.
 
@@ -366,7 +370,8 @@ delete would remove, run the same range and `(domain, layer)` through
 
 ### How far these examples have been verified
 
-The save/query/delete loop **has** been exercised against a live 1.16.0 Annotation Service, by
+The save/query/delete loop **has** been exercised against a live Annotation Service built from
+dp-service `main` (the 1.16.0 API, pre-release), by
 `tests/integration/test_sample_status_client_integration.py`.  That covers the parts most likely
 to break silently:
 
