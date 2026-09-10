@@ -123,9 +123,12 @@ class TestPvQuery(unittest.TestCase):
         with self.assertRaises(ValueError):
             PvQuery.attr("", ["V"])
 
-    def test_attr_empty_values_raises(self):
-        with self.assertRaises(ValueError):
-            PvQuery.attr("unit", [])
+    def test_attr_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (PvQuery.attr("unit"), PvQuery.attr("unit", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "unit")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
 
 # ----------------------------------------------------------------------
@@ -164,11 +167,17 @@ class TestConfigQuery(unittest.TestCase):
             lambda: ConfigQuery.client_activation_id([]),
             lambda: ConfigQuery.category([]),
             lambda: ConfigQuery.tags([]),
-            lambda: ConfigQuery.attr("k", []),
             lambda: ConfigQuery.attr("", ["v"]),
         ):
             with self.assertRaises(ValueError):
                 call()
+
+    def test_attr_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (ConfigQuery.attr("owner"), ConfigQuery.attr("owner", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "owner")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
 
 # ----------------------------------------------------------------------

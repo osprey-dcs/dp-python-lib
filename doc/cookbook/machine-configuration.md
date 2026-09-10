@@ -377,6 +377,10 @@ for configuration in client.annotation.machine_config.iter_configurations([
 `C` offers `name`, `category`, `tags`, `attributes`, and `parent`; `CA` offers `timestamp`,
 `time_range`, `configuration_name`, `client_activation_id`, `category`, `tags`, and `attributes`.
 
+Both `attributes(key, values)` helpers take the values list as optional: omit it for a **key-only
+existence search** matching every record that has the key, whatever its value — say
+`C.attributes("owner")` for "every configuration with an owner recorded".
+
 ## Addressing a specific activation
 
 `get_configuration_activation()` and `delete_configuration_activation()` take **either** a client

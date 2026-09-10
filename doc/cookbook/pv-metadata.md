@@ -350,30 +350,24 @@ This reads every matching record to filter client-side, so keep the server-side 
 as you can.  Note also that string equality is exact: `"0.489650"` and `"0.48965"` are different
 attribute values even though the numbers are equal.
 
-### Key-only (existence) search is not exposed
+### Which PVs have this attribute at all?
 
-The protocol supports matching on an attribute *key* regardless of value, by sending an
-`AttributesCriterion` with an empty `values` list.  The `Q.attributes()` helper does not allow
-this — it raises `ValueError` on empty values, since an accidentally-empty list is far more often
-a bug than a deliberate existence search.
-
-If you genuinely need it, build the criterion directly:
+Omit the values list — or pass an empty one — for a **key-only existence search**: every PV
+possessing the key matches, whatever its value.
 
 ```python
 # cookbook:partial
-# cookbook:no-mypy   (generated protobuf classes are built at import time; not statically visible)
-from dp_python_lib.grpc import annotation_pb2
-
-criterion = annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion()
-criterion.attributesCriterion.key = "S"      # no values -> match any PV having an S attribute
-
-for record in client.annotation.pv_metadata.iter_pv_metadata([criterion]):
+# every PV that has been surveyed, whatever its position
+for record in client.annotation.pv_metadata.iter_pv_metadata([Q.attributes("S")]):
     print(record.pvName)
 ```
 
-Dropping to the generated stubs like this is the general escape hatch whenever a helper is
-stricter than the protocol.  The message classes are built dynamically at import time, so static
-type checkers cannot see them — the code is correct, but your editor may flag it.
+This is useful for finding gaps in the catalogue.  Combine it with a positive criterion to ask
+"which PVs in this area are *missing* a survey?" — the existence search finds the ones that have
+it, and the difference is what you need to fill in.
+
+The *key* is still required: `Q.attributes("", ["0.49"])` raises `ValueError`.  The same holds for
+`C.attributes()`, `CA.attributes()`, and the `PV.attr()` / `CFG.attr()` query selectors.
 
 ### Other details
 

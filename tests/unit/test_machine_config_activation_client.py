@@ -84,9 +84,15 @@ class TestConfigurationActivationQuery(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConfigurationActivationQuery.attributes("", ["v"])
 
-    def test_attributes_empty_values_raises(self):
-        with self.assertRaises(ValueError):
-            ConfigurationActivationQuery.attributes("owner", [])
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (
+            ConfigurationActivationQuery.attributes("owner"),
+            ConfigurationActivationQuery.attributes("owner", []),
+        ):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "owner")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
 
 class TestBuildSaveActivationRequest(unittest.TestCase):

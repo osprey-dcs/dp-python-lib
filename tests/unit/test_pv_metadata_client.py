@@ -144,11 +144,16 @@ class TestPvMetadataQueryHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             PvMetadataQuery.tags([])
 
-    def test_attributes_empty_raises(self):
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (PvMetadataQuery.attributes("unit"), PvMetadataQuery.attributes("unit", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "unit")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
+
+    def test_attributes_empty_key_raises(self):
         with self.assertRaises(ValueError):
             PvMetadataQuery.attributes("", ["V"])
-        with self.assertRaises(ValueError):
-            PvMetadataQuery.attributes("unit", [])
 
 
 class TestSendSavePvMetadata(unittest.TestCase):

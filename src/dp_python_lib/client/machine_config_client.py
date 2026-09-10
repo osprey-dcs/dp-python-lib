@@ -88,22 +88,26 @@ class ConfigurationQuery:
 
     @staticmethod
     def attributes(
-        key: str, values: list[str]
+        key: str, values: list[str] | None = None
     ) -> "annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion":
         """
-        Builds a criterion matching configurations whose attribute with the given key has any of the specified values.
+        Builds a criterion matching configurations by attribute key and optional value(s).
+
+        Omitting values (or passing an empty list) performs a key-only existence search: any configuration
+        possessing the key matches, whatever its value.  That is a narrowing filter, not a match-all, which is
+        why it is allowed here while the other helpers still reject empty input.
+
         :param key: Attribute key to match.
-        :param values: Attribute values to match for that key.
+        :param values: Attribute values to match for that key, or None for a key-only existence search.
         :return: A QueryConfigurationsCriterion with an attributesCriterion.
-        :raises ValueError: if key is empty or values is empty.
+        :raises ValueError: if key is empty.
         """
         if not key:
             raise ValueError("attributes() requires a non-empty key")
-        if not values:
-            raise ValueError("attributes() requires a non-empty values list")
         criterion = ConfigurationQuery._Criterion()
         criterion.attributesCriterion.key = key
-        criterion.attributesCriterion.values[:] = values
+        if values:
+            criterion.attributesCriterion.values[:] = values
         return criterion
 
     @staticmethod
@@ -233,22 +237,26 @@ class ConfigurationActivationQuery:
 
     @staticmethod
     def attributes(
-        key: str, values: list[str]
+        key: str, values: list[str] | None = None
     ) -> "annotation_pb2.QueryConfigurationActivationsRequest.QueryConfigurationActivationsCriterion":
         """
-        Builds a criterion matching activations whose attribute with the given key has any of the specified values.
+        Builds a criterion matching activations by attribute key and optional value(s).
+
+        Omitting values (or passing an empty list) performs a key-only existence search: any activation
+        possessing the key matches, whatever its value.  That is a narrowing filter, not a match-all, which is
+        why it is allowed here while the other helpers still reject empty input.
+
         :param key: Attribute key to match.
-        :param values: Attribute values to match for that key.
+        :param values: Attribute values to match for that key, or None for a key-only existence search.
         :return: A QueryConfigurationActivationsCriterion with an attributesCriterion.
-        :raises ValueError: if key is empty or values is empty.
+        :raises ValueError: if key is empty.
         """
         if not key:
             raise ValueError("attributes() requires a non-empty key")
-        if not values:
-            raise ValueError("attributes() requires a non-empty values list")
         criterion = ConfigurationActivationQuery._Criterion()
         criterion.attributesCriterion.key = key
-        criterion.attributesCriterion.values[:] = values
+        if values:
+            criterion.attributesCriterion.values[:] = values
         return criterion
 
 

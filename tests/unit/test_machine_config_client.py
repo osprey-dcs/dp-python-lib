@@ -70,9 +70,12 @@ class TestConfigurationQuery(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConfigurationQuery.attributes("", ["v"])
 
-    def test_attributes_empty_values_raises(self):
-        with self.assertRaises(ValueError):
-            ConfigurationQuery.attributes("owner", [])
+    def test_attributes_key_only(self):
+        # An absent/empty values list is a key-only existence search (issue #40), not a rejection.
+        for criterion in (ConfigurationQuery.attributes("owner"), ConfigurationQuery.attributes("owner", [])):
+            self.assertTrue(criterion.HasField("attributesCriterion"))
+            self.assertEqual(criterion.attributesCriterion.key, "owner")
+            self.assertEqual(list(criterion.attributesCriterion.values), [])
 
     def test_parent(self):
         c = ConfigurationQuery.parent(["root-cfg"])
