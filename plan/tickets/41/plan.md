@@ -8,6 +8,12 @@
 - **Status**: written 2026-09-10 against dp-python-lib `e7a77db` (the #40 commit), dp-grpc `6dfff3f`,
   dp-service `fddf692`.  Every premise verified against the protos and the server source; two attribution
   errors in the ticket body are corrected below.
+- **Integration coverage added 2026-09-10**, after PR #47 merged: this plan verified server behavior by
+  *reading* dp-service, and `tests/integration/test_query_helper_relaxations_integration.py` now asserts it
+  against a live ecosystem.  For this ticket that is the browse-all form on all three families — an omitted
+  criteria list is accepted rather than rejected (T2), and `iter_*` with no arguments reaches a record the
+  test just saved.  A unit test can only assert the request carries an empty `criteria` list; whether the
+  server treats that as match-all or as a business error is exactly what needed a live server.
 
 ## Overview
 
