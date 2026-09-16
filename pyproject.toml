@@ -34,7 +34,7 @@ dependencies = [
   # NOTE: grpcio-tools is deliberately NOT here.  It is the protoc toolchain used to *generate*
   # the stubs, not to run them -- nothing under src/ imports grpc_tools.  Requiring it at runtime
   # would force every consumer to install the compiler.  It lives in the [codegen] extra instead.
-  "grpcio>=1.83.1",
+  "grpcio>=1.84.0",
   "protobuf>=7.35.1",
   "pydantic-settings",
   "PyYAML",
@@ -69,7 +69,7 @@ dev = [
 # Toolchain for regenerating the gRPC stubs in src/dp_python_lib/grpc from the upstream
 # dp-grpc protos.  Not needed to use or develop against the library.
 codegen = [
-  "grpcio-tools>=1.83.1",
+  "grpcio-tools>=1.84.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -98,7 +98,7 @@ markers = [
 # rewrap; at 120 there are 3.  Reflowing that much prose by hand would be a large diff with no
 # readability gain.
 line-length = 120
-target-version = "1.16.0"
+target-version = "py310"
 # The gRPC stubs are generated from the upstream dp-grpc protos and regenerated wholesale;
 # linting or formatting them would be overwritten on the next regeneration.
 #
