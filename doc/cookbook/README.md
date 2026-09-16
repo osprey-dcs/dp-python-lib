@@ -53,9 +53,11 @@ Attribute names and values are the facility's; tag values are illustrative place
 
 ## Conventions used in recipes
 
-- Each recipe states the release it was **verified against**.  Most of the API is stable since
-  dp-grpc `rel-1.14.0`, the current release.  The [v2 query API](query.md) is the exception: it
-  comes from unreleased dp-grpc work and **will not work against a `rel-1.14.0` server**.
+- **Recipes note the release an API arrived in, where it matters.**  This package's version tracks
+  the dp-grpc version its stubs were generated from, so a server older than your `dp_python_lib`
+  will not implement everything documented here.  Where a recipe uses something added in a
+  particular release, it says so in the body — the [v2 query API](query.md) needs a `rel-1.15.0` or
+  later server, and [sample status](sample-status.md) needs `rel-1.16.0` or later.
 - Snippets omit imports and client construction except where a recipe is specifically about those
   things.  Each recipe lists the imports its examples assume.
 - Examples check `result_status.is_error` before reading a payload.  This is not ceremony: the
