@@ -61,8 +61,8 @@ int32 status code to **one PV sample at one instant** — an ML model labeling s
 rule engine flagging out-of-range values, an operator marking a handful of suspect points.  It is the
 designated replacement for `DataValue.ValueStatus`, removed in this same release.
 
-Reference: [CLAUDE.md, Sample Status API](../../CLAUDE.md#sample-status-api-annotation-service).
-Worked examples: [Sample status cookbook](../cookbook/sample-status.md).
+Reference: [CLAUDE.md, Sample Status API][claude-sample-status].
+Worked examples: [Sample status cookbook][cookbook-sample-status].
 
 ### Methods
 
@@ -131,9 +131,9 @@ Three feature clients on the `annotation` facade: `client.annotation.datasets` (
 A DataSet names a region of the archive; an Annotation describes one or more DataSets and may own a
 Calculations payload of derived values; export writes any of it to a file on the server.
 
-Reference: [CLAUDE.md](../../CLAUDE.md#datasets-annotations-and-export-api-annotation-service).
-Worked example: [Data sets and annotations cookbook](../cookbook/datasets-and-annotations.md).
-Design record: [`plan/tickets/6/plan.md`](../../plan/tickets/6/plan.md).
+Reference: [CLAUDE.md][claude-datasets].
+Worked example: [Data sets and annotations cookbook][cookbook-datasets].
+Design record: [`plan/tickets/6/plan.md`][plan-6].
 
 With this, `AnnotationClient` covers **every implemented `DpAnnotationService` feature area** —
 `.pv_metadata`, `.machine_config`, `.sample_status`, `.datasets`, `.annotations`, `.export` — all
@@ -295,7 +295,7 @@ the #6 helpers; this back-ports it to all seven — `PvMetadataQuery`, `Configur
 The **key** check is load-bearing on the two v2 query selectors, where the server does not validate it:
 a blank key would reach Mongo as an existence test on `"attributes."` and silently match nothing.
 
-Design record: [`plan/tickets/40/plan.md`](../../plan/tickets/40/plan.md).
+Design record: [`plan/tickets/40/plan.md`][plan-40].
 
 ## Browse-all queries (Issue #41)
 
@@ -312,7 +312,7 @@ and a token.  That is why `iter_*` is the right call for browsing.
 The v2 query methods are deliberately **not** included: `QueryParams` still requires a PV selector or
 config criteria, since a time-series query with no selection is unbounded rather than a browse-all.
 
-Design record: [`plan/tickets/41/plan.md`](../../plan/tickets/41/plan.md).
+Design record: [`plan/tickets/41/plan.md`][plan-41].
 
 Both #40 and #41 are covered by
 `tests/integration/test_query_helper_relaxations_integration.py`, which is live-server work a unit test
@@ -337,7 +337,7 @@ streamed message — error results included, for the public `iter_*` wrapper to 
 `RuntimeError` — which is a different contract from returning a single result.
 
 `_dispatch` is itself unit-tested (`tests/unit/test_service_api_client_base.py`), which the duplicated
-blocks never were.  Design record: [`plan/tickets/14/plan.md`](../../plan/tickets/14/plan.md).
+blocks never were.  Design record: [`plan/tickets/14/plan.md`][plan-14].
 
 ## Dependency floors
 
@@ -354,11 +354,10 @@ is easy to miss until it reaches a pinned environment.
 
 ## Documentation and process
 
-Two new cookbook recipes: **[Sample status](../cookbook/sample-status.md)** and
-**[Data sets, annotations, export](../cookbook/datasets-and-annotations.md)**.
-**[API conventions](../cookbook/conventions.md)** documents the browse-all form and the key-only
-attribute exception.  The PV metadata, machine configuration, and query recipes are updated for the
-relaxed helpers.
+Two new cookbook recipes: **[Sample status][cookbook-sample-status]** and **[Data sets,
+annotations, export][cookbook-datasets]**.  **[API conventions][cookbook-conventions]** documents
+the browse-all form and the key-only attribute exception.  The PV metadata, machine configuration,
+and query recipes are updated for the relaxed helpers.
 
 Every cookbook snippet is now checked by `.dev/tools/check-cookbook-snippets.py`, which type-checks
 each example against the installed package with mypy and runs in CI.  It catches wrong attribute and
@@ -367,7 +366,8 @@ their interpreter.
 
 **Plan documents are now version-controlled** under `plan/tickets/<issue>/`, the convention dp-grpc and
 dp-service already use, replacing the gitignored `.dev/plan/issue-<n>/`.  Plans there were invisible to
-reviewers, to CI, and to anyone working from a fresh clone.  See [`plan/README.md`](../../plan/README.md).
+reviewers, to CI, and to anyone working from a fresh clone.  See
+[`plan/README.md`][plan-readme].
 
 Per-recipe "Verified against" headers are gone, matching dp-grpc #141: the convention asserts when
 someone last checked a recipe, so it decays at every version bump — five of the seven recipes were
@@ -396,3 +396,14 @@ could not parse its own config and failed CI on every sync PR.  The step was rem
 (dp-grpc #153): this repo derives its version from its own git tag via setuptools-scm, so there was never
 a literal version for it to bump, and ruff's key was the only line the pattern could reach.  The step had
 in fact been a no-op since before `rel-1.15.0`.
+
+[claude-sample-status]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/CLAUDE.md#sample-status-api-annotation-service
+[claude-datasets]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/CLAUDE.md#datasets-annotations-and-export-api-annotation-service
+[cookbook-sample-status]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/doc/cookbook/sample-status.md
+[cookbook-datasets]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/doc/cookbook/datasets-and-annotations.md
+[cookbook-conventions]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/doc/cookbook/conventions.md
+[plan-6]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/6/plan.md
+[plan-14]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/14/plan.md
+[plan-40]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/40/plan.md
+[plan-41]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/41/plan.md
+[plan-readme]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/README.md
