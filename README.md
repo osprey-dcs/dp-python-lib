@@ -34,7 +34,7 @@ consistent pattern (parameter class → request → result object), across all f
 |---|---|
 | Ingestion | Registering providers, ingesting data (unary, streaming, bidirectional), checking request status, subscribing to live data |
 | Query | Retrieving time-series data as samples, buckets, or tables; retrieving PV, provider, and ingestion statistics |
-| Annotation | User-defined PV metadata, machine configuration, datasets, annotations, and export |
+| Annotation | User-defined PV metadata, machine configuration, per-sample status, datasets, annotations, and export |
 | Ingestion Stream | Event subscriptions that fire when a data condition is triggered |
 
 **Higher-level application features.**  An `MldpApplication` layer built on top of the API
@@ -63,6 +63,13 @@ for their service.
   active at a given instant.  Covers save/get/query/iterate/delete for both configurations and
   activations, plus `get_active_configurations()`, with the `ConfigurationQuery` and
   `ConfigurationActivationQuery` helpers.
+- **Sample status API** — `client.annotation.sample_status`.  Assign a status code to individual PV
+  samples at exact instants — a quality flag, a model's anomaly score, an operator override — and
+  query time-series data with flagged samples filtered out.  Covers `save_sample_statuses()`,
+  `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, and
+  `delete_sample_statuses()`, with the `SampleStatusFrame` / `SampleStatusColumn` builders and the
+  `SampleStatusFilter` query selector.  This is the replacement for `DataValue.ValueStatus`, which
+  was removed in 1.16.0.
 - **v2 query API (samples)** — `client.query`.  Sample-oriented time-series retrieval over a
   half-open time range, selecting PVs by name list, name pattern, or metadata query, and
   optionally restricting to intervals where a machine configuration was active.  Unary with
@@ -89,8 +96,9 @@ pydantic-settings), TLS-capable channel creation, hierarchical logging, three-ti
 (gRPC errors, business-logic errors, unexpected exceptions), comprehensive type hints, and a unit
 and integration test suite.
 
-Note the v2 query API comes from unreleased dp-grpc work and will not work against a
-`rel-1.14.0` server.
+Note this package's version tracks the dp-grpc version its stubs were generated from, so a server
+older than your `dp_python_lib` will not implement everything listed here.  The v2 query API needs a
+`rel-1.15.0` or later server; the sample status API needs `rel-1.16.0` or later.
 
 ## TODO
 
@@ -120,7 +128,9 @@ Note the v2 query API comes from unreleased dp-grpc work and will not work again
 
 **Project infrastructure**
 
-- CI workflow(s) for running regression tests and publishing release artifacts
+- Publishing to PyPI.  The release workflow has the job wired up but disabled; everything else —
+  unit tests across Python 3.10-3.13, lint and format checks, the cookbook snippet checker, and
+  signed release artifacts — runs in CI today.
 
 ## Installation
 
@@ -136,6 +146,11 @@ pip install -e .[analysis]
 # development tooling (pytest, mypy for the cookbook snippet checker)
 pip install -e .[dev]
 ```
+
+**Upgrading from 1.15.0 or earlier:** 1.16.0 raises the `grpcio` floor to 1.84.0, because the
+regenerated stubs require it.  `pip install` picks that up, but an existing editable install will
+not upgrade it on its own — the stubs then fail at import with a version mismatch naming the
+required release.  `pip install -e . --upgrade` resolves it.
 
 Point the client at your MLDP services with an `mldp-config.yaml` file or `MLDP_*` environment
 variables — see [Creating and connecting a client](doc/cookbook/connecting.md).
@@ -182,6 +197,8 @@ the recipes share one continuous worked example drawn from an accelerator facili
 | [Cataloguing PVs](doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
 | [Recording machine configuration](doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
 | [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel |
+| [Labeling samples](doc/cookbook/sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
+| [DataSets and annotations](doc/cookbook/datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, and exporting |
 
 Every Python snippet in the cookbook is mechanically syntax- and type-checked against the
 installed package.
