@@ -85,6 +85,23 @@ The tag must be exactly `rel-X.Y.Z` with no suffix — prerelease shapes like
 `rel-1.15.0-rc1` are rejected up front, because setuptools-scm would normalize them
 (`1.15.0rc1`) and fail the tag-vs-built version assertion with a confusing error.
 
+**Release notes** are version-controlled under `doc/release-notes/`, one document per
+release (`rel-X.Y.Z.md`), starting with 1.16.0; the same convention as dp-grpc.  Organize
+a note by issue ticket rather than by PR, since a ticket often spans several PRs, and lead
+a breaking release with an "Upgrading from <previous>" checklist that separates silent
+behavior changes from outright errors.
+
+`release.yml` publishes the document as the GitHub release body: the build job concatenates
+it with the artifact verification and install instructions into `dist/RELEASE_BODY.md`,
+which the publish job passes as `body_path` (that job never checks out the repo, so the
+notes travel with the `dist/` upload).  Note `body_path` *overrides* `body` rather than
+complementing it, so those instructions belong in the assembled file, not in a `body:` input.
+GitHub's own generated commit list is appended after all of it.
+
+The build job fails early — before building — if `doc/release-notes/<tag>.md` is missing on
+the tagged commit, so **write the notes and merge them before pushing the `rel-*` tag**.  A
+`workflow_dispatch` rehearsal skips the check, having no tag to derive a filename from.
+
 ### Dependencies
 Core dependencies are managed in `pyproject.toml`:
 - `grpcio` - gRPC runtime
