@@ -3,7 +3,7 @@
 Changes since rel-1.15.0.  This repo publishes the Python client library for the MLDP gRPC API: the
 generated stubs synced from [dp-grpc](https://github.com/osprey-dcs/dp-grpc) `rel-1.16.0`, and the
 hand-written client wrappers over them.  The protocol changes themselves are described in
-[dp-grpc's 1.16.0 notes](https://github.com/osprey-dcs/dp-grpc/blob/main/doc/release-notes/rel-1.16.0.md);
+[dp-grpc's 1.16.0 notes](https://github.com/osprey-dcs/dp-grpc/blob/rel-1.16.0/doc/release-notes/rel-1.16.0.md);
 this document covers what they mean for Python callers, and the client API built on top of them.
 
 **This is the largest release the library has had.**  It adds three new API areas — sample status,
