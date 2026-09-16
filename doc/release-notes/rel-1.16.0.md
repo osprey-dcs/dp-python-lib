@@ -101,7 +101,8 @@ means "no assertion", an *unlabeled* sample never matches: `exclude()` keeps it,
 
 `QueryParams` also validates a hand-built selector passed in directly (non-empty domain, mode not
 `MODE_UNSPECIFIED`), so it fails with a message naming the problem rather than as a server rejection.
-Note the selector is supported by `query_samples()` / `iter_query_samples_stream()` **only** — the
+Note the selector is supported by the `querySamples()` / `querySamplesStream()` RPCs — so by all
+three of `query_samples()`, `iter_query_samples()`, and `iter_query_samples_stream()` — but the
 server rejects it on a bucket query.
 
 ### Other client-side rules
@@ -322,7 +323,7 @@ Every unary `_send_*` method now delegates to a single `ServiceApiClientBase._di
 writing the three-tier error-handling block out by hand.  The refactor converted the 18 senders that
 existed at the time; the new clients in this release were written against it from the start, so there
 are 28 call sites and one copy of the logic.  **No public API change and no change to any returned
-error message** — the message text is contract, pinned by some 80 assertions across the unit suite.
+error message** — the message text is contract, pinned by some 46 assertions across the unit suite.
 
 One deliberate behavior change, in log text only: `_dispatch` names the operation with the raw
 camelCase op name in all three error-log tiers.  The hand-written senders capitalized it in the
@@ -367,8 +368,11 @@ dp-service already use, replacing the gitignored `.dev/plan/issue-<n>/`.  Plans 
 reviewers, to CI, and to anyone working from a fresh clone.  See [`plan/README.md`](../../plan/README.md).
 
 Per-recipe "Verified against" headers are gone, matching dp-grpc #141: the convention asserts when
-someone last checked a recipe, so it decays at every version bump — one recipe claimed a `rel-1.16.0`
-that did not yet exist as a tag anywhere.
+someone last checked a recipe, so it decays at every version bump — five of the seven recipes were
+still stamped "dp-python-lib 1.15.0" while this release was being prepared.  Where a recipe uses
+something added in a particular release, that is now a short note in the body ("added in 1.16.0 and
+not available in earlier releases") — a durable fact about the API rather than a claim about when
+someone last looked.
 
 ## Build and release infrastructure
 

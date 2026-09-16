@@ -3,8 +3,6 @@
 Constructing an `MldpClient`, pointing it at your services, and knowing which sub-clients you
 actually got.
 
-> **Verified against:** dp-python-lib 1.15.0.
-
 See [API conventions](conventions.md) for the patterns every call shares once you have a client.
 
 ## Contents

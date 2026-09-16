@@ -3,9 +3,6 @@
 Describing how the machine was set up, when each setup was in effect, and answering *"what was
 the machine doing at 18:04 last Tuesday?"*
 
-> **Verified against:** dp-python-lib 1.15.0.
-> The machine configuration API is unchanged since 1.14.0; these recipes apply to both.
-
 See [API conventions](conventions.md) for result checking, paging, and criteria rules.
 
 All examples use `client.annotation.machine_config`.  Note that `client.annotation` itself is `None`

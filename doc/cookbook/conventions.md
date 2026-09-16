@@ -3,11 +3,9 @@
 Patterns that recur throughout `dp_python_lib`.  Recipes in this cookbook link here rather than
 repeating them.
 
-> **Verified against:** dp-python-lib 1.15.0.
-> This package's version tracks the dp-grpc version its stubs were generated from.  Note that
-> **1.15.0 is ahead of the latest dp-grpc release** (`rel-1.14.0`): the 1.15.0 stubs come from
-> unreleased dp-grpc work, so a server running the current release will not implement everything
-> documented here.  See each recipe's own verified-against note.
+> This package's version tracks the dp-grpc version its stubs were generated from, so a server
+> older than your `dp_python_lib` will not implement everything documented here.  Where a recipe
+> uses something added in a particular release, it says so.
 
 For the wire-level view of these same conventions — the protobuf messages and the `oneof result`
 pattern this library wraps — see the
