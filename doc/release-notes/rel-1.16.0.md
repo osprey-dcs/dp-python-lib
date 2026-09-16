@@ -46,11 +46,11 @@ The two things that can break you are both inherited from the protocol:
 
 Two more worth checking, neither of which raises:
 
-3. **`query_*` results may be shorter than they were.**  An unset `limit` now means a
-   server-configured default page size, not an unbounded result, on every paged annotation-service
-   query.  `query_pv_metadata()` in particular was previously unbounded.  If you called a `query_*`
-   method and treated the result as complete, switch to the matching `iter_*` method, which follows
-   `next_page_token` for you.
+3. **`query_*` results may be shorter than they were.**  An unset `limit` now means the server's
+   default page size (100, hardcoded and not configurable), not an unbounded result, on every paged
+   annotation-service query.  `query_pv_metadata()` in particular was previously unbounded.  If you
+   called a `query_*` method and treated the result as complete, switch to the matching `iter_*`
+   method, which follows `next_page_token` for you.
 4. **Raise your `grpcio` floor if you pin it.**  See [Dependency floors](#dependency-floors) — the
    regenerated stubs raise at import on grpcio older than 1.84.0.
 
@@ -300,8 +300,10 @@ Design record: [`plan/tickets/40/plan.md`](../../plan/tickets/40/plan.md).
 ## Browse-all queries (Issue #41)
 
 `criteria` is now **optional** on every paged annotation-service query and iter method, because the
-server treats an empty list as match-all (dp-service #245).  `iter_pv_metadata()` with no arguments is
-the browse-all form.
+server treats an empty list as match-all.  `iter_pv_metadata()` with no arguments is the browse-all
+form.  The upstream provenance differs by RPC: the three metadata queries (PV metadata,
+configurations, activations) got match-all from dp-service #245, while datasets and annotations got
+it earlier from dp-grpc #132, implemented by dp-service #248.
 
 The server's default page size (100, hardcoded, **not** configurable) applies **unconditionally**:
 dropping the last criterion does not change the page size, so a bare `query_*()` still returns one page
