@@ -3,9 +3,6 @@
 Recording what a PV *is* — the device it belongs to, where it sits in the machine, what kind of
 element it measures — and then finding PVs by those properties instead of by name.
 
-> **Verified against:** dp-python-lib 1.15.0.
-> The PV metadata API is unchanged since 1.14.0; these recipes apply to both.
-
 See [API conventions](conventions.md) for result checking, paging, and criteria rules, and
 [Creating and connecting a client](connecting.md) for getting a client in the first place.
 

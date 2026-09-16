@@ -3,18 +3,14 @@
 Retrieving archived PV samples over a time range — by name, by what the PVs *are*, or by what the
 machine was *doing* — and getting the results into pandas or NumPy.
 
-> **Verified against:** dp-python-lib 1.15.0.
-> ⚠️ **This API requires a server newer than the latest dp-grpc release.**  `querySamples`,
-> `PvSelector`, and `common.TimeRange` do not exist in `rel-1.14.0`, which is currently the newest
-> published dp-grpc release — they come from unreleased work that dp-python-lib 1.15.0 was
-> generated from.  Against a `rel-1.14.0` server these calls fail; the rest of this cookbook works
-> on both.  Check what your deployment actually runs before relying on this recipe.
-
 See [API conventions](conventions.md) for result checking and paging.  The metadata- and
 configuration-driven queries below read the catalogue built in
 [Cataloguing PVs](pv-metadata.md) and [Recording machine configuration](machine-configuration.md).
 
 All examples use `client.query`, which is `None` unless a query channel is configured.
+
+> The v2 query API (`querySamples`, `PvSelector`, `common.TimeRange`) was added in 1.15.0 and
+> is not available in earlier releases.
 
 ### Imports used by the examples
 

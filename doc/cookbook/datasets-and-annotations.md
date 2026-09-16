@@ -3,13 +3,10 @@
 Naming a region of the archive so you can find it again, attaching derived values to it with a
 record of what they were computed from, and exporting the result.
 
-> **Target API version:** dp-grpc 1.16.0, which is **not yet released** — the newest tag is
-> `rel-1.15.0`.  The modernized DataSet / Annotation / Export API is new in 1.16.0 and will not work
-> against a `rel-1.15.0` server, which answers these calls with `UNIMPLEMENTED`.
->
-> **Verified against:** a dp-service build from `main` at commit `fddf692`, carrying the 1.16.0 API.
-
 See [API conventions](conventions.md) for result checking, paging, and time handling.
+
+> The modernized DataSet / Annotation / Export API was added in 1.16.0 and is not available in
+> earlier releases.
 
 Examples use `client.annotation.datasets`, `client.annotation.annotations`, and
 `client.annotation.export`.  Note that `client.annotation` itself is `None` unless an annotation

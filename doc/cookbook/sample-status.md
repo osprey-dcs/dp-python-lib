@@ -3,14 +3,9 @@
 Recording that *this particular sample, at this particular instant, was bad* — and then querying
 data with the flagged samples left out.
 
-> **Target API version:** dp-grpc 1.16.0, which is **not yet released** — the newest tag is
-> `rel-1.15.0`.  The sample status API is new in 1.16.0 and will not work against a `rel-1.15.0`
-> server, which answers these calls with `UNIMPLEMENTED`.
->
-> **Verified against:** a pre-release Annotation Service built from dp-service `main` carrying the
-> 1.16.0 API.
-
 See [API conventions](conventions.md) for result checking, paging, and time handling.
+
+> The sample status API was added in 1.16.0 and is not available in earlier releases.
 
 All examples use `client.annotation.sample_status`.  Note that `client.annotation` itself is `None`
 unless an annotation channel is configured, so guard on `client.annotation` before reaching through it.
