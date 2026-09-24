@@ -15,7 +15,9 @@ stranded and a failed release-notes check on the tag that does ship.  Past versi
 freely where they are the point — "since 1.16.0" is a durable fact about what shipped, not a guess
 about what is about to.  `.dev/tools/check-release-notes.py` enforces the parts that would carry the
 new tag: this file may not contain a verification section, a `sigstore verify identity` command, a
-signing identity, or a Full Changelog line.  Those are written at the cut.
+signing identity, or a Full Changelog line.  Those are written at the cut.  Naming them in prose
+is fine, as the checklist below does, but put the name in backticks: the checker treats an unquoted
+`--cert-identity` followed by a word, or a line beginning with the verify command, as the real thing.
 
 Nothing here should assert what *else* the release contains, either: that is knowable only once
 the release is cut, and a stale claim in a file that already looks finished is not something the
@@ -67,6 +69,12 @@ Two annotations became more accurate along the way:
   `assert client.annotation is not None` if yours does.
 - **`timestamp_list()` accepts any sequence** of timestamps (a tuple, say), not only a `list`.
 
+## Installing
+
+```bash
+pip install dp_python_lib-*.whl
+```
+
 ---
 
 ## Cutting the release
@@ -85,11 +93,11 @@ When the version is known and the release is being cut:
    outright errors, per CLAUDE.md: a change that alters results without raising is the one a reader
    most needs up front.  Python has no compile step, so "outright errors" here means ones raised at
    import or call time.
-4. **Add the `## Verifying these artifacts` section**, copied from the previous release's notes with
+4. **Add the `## Verifying these artifacts` section** immediately above `## Installing`, copied from the previous release's notes with
    the tag changed: `sha256sum -c SHA256SUMS`, then `sigstore verify identity` over the wheel,
    sdist, and `SHA256SUMS` with `--cert-identity` ending `release.yml@refs/tags/rel-<version>`, and
-   the pointer to `README.env`.  Keep the `## Installing` section after it.
-5. **End with the Full Changelog line**:
+   the pointer to `README.env`.
+5. **End with the Full Changelog line**, after `## Installing`:
    `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<previous>...rel-<version>`.
 6. **Repoint `blob/main/...` links to `blob/rel-<version>/...`.**  This file is published as the
    release body via `body_path`, and relative links do not survive that lift — they resolve against
@@ -101,6 +109,9 @@ When the version is known and the release is being cut:
 8. **Run `python .dev/tools/check-release-notes.py`**, which CI also runs on the PR.  It fails on a
    missing verification section, a stale tag in the identity or the changelog link, or a verify
    command that skips a file.
-9. **Start a fresh `NEXT.md`** for the following cycle: this preamble, an empty Contents, and this
-   checklist.
+9. **Start a fresh `NEXT.md`** for the following cycle.  Steps 1, 2, and 7 have moved, rewritten, and
+   deleted the text it needs, so recover it from `main`:
+   `git show main:doc/release-notes/NEXT.md > doc/release-notes/NEXT.md`, then delete every ticket
+   section and empty Contents down to the "Cutting the release" entry.  Keep the preamble,
+   `## Installing`, and this checklist.
 10. **Merge, then push the `rel-<version>` tag.**  The notes must be on the tagged commit.
