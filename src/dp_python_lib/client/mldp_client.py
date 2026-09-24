@@ -114,7 +114,7 @@ class MldpClient:
         # Annotation service facade (exposes .pv_metadata, etc.); only created if a channel is available
         if self._annotation_channel is not None:
             self.logger.info("Initializing annotation client")
-            self.annotation = AnnotationClient(self._annotation_channel)
+            self.annotation: AnnotationClient | None = AnnotationClient(self._annotation_channel)
         else:
             self.logger.debug("No annotation channel provided - annotation client will be None")
             self.annotation = None
@@ -124,7 +124,7 @@ class MldpClient:
         # the .annotation facade.
         if self._query_channel is not None:
             self.logger.info("Initializing query client")
-            self.query = QueryClient(self._query_channel)
+            self.query: QueryClient | None = QueryClient(self._query_channel)
         else:
             self.logger.debug("No query channel provided - query client will be None")
             self.query = None

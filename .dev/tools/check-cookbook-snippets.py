@@ -126,6 +126,12 @@ from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client import data_frame_conversions as dfc
 
 client: MldpClient = MldpClient()
+# client.annotation and client.query are typed `X | None`, which is honest: they are None when MldpClient is given
+# only an ingestion channel (connecting.md, "Sub-clients can be None").  A client built from configuration, as every
+# recipe's is, always has both, so narrow once here rather than in every recipe.  Do NOT instead disable union-attr:
+# on an `X | None` receiver that code also carries the "no such attribute on X" error, so the self-test canary stops
+# firing and every misspelled name under client.annotation passes.
+assert client.annotation is not None and client.query is not None
 begin: datetime = datetime(2024, 1, 1, tzinfo=timezone.utc)
 end: datetime = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
@@ -266,9 +272,9 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
             *MYPY_CMD,
             # The generated gRPC stubs are untyped; without this every `import ..._pb2` is an error.
             "--ignore-missing-imports",
-            # Type-check the snippets but NOT the library itself.  dp_python_lib currently has
-            # ~145 of its own mypy errors (mostly untyped protobuf stubs); those are not this
-            # tool's business and would bury real snippet errors.
+            # Type-check the snippets but NOT the library itself.  The library is checked by
+            # `mypy src/` in CI's quality job; re-reporting its errors here would bury real
+            # snippet errors.  (The [tool.mypy] config in pyproject.toml applies here too.)
             "--follow-imports=silent",
             # Snippets are illustrative; unreachable/redundant warnings are noise here.
             "--no-warn-unused-ignores",
