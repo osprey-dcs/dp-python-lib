@@ -122,9 +122,14 @@ diffs the live body against the file.  So each notes file must carry, by hand:
 - a `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<prev>...rel-<this>` line,
   standing in for GitHub's generated commit list.
 
-`.dev/tools/check-release-notes.py` enforces the section and, above all, the tag in the identity:
-the section is usually copied from the previous release, and a stale tag makes `sigstore verify`
-reject every genuine artifact.  It runs in CI's quality job and again at tag time.
+`.dev/tools/check-release-notes.py` enforces both, and above all the tag in the identity: the
+section is usually copied from the previous release, and a stale tag makes `sigstore verify`
+reject every genuine artifact.  It also requires each verify command to name all three files (the
+backported rel-1.16.0 section first verified the wheel only), and the changelog link to end at
+this file's tag and start at an earlier one; which release came before is not knowable from one
+file, so `<prev>` is checked only for being earlier.  Each run starts with a self-test that feeds
+the rules known-bad notes, so a rule that stops matching fails loudly instead of passing everything.
+It runs in CI's quality job and again at tag time.
 
 **Never edit a release page by hand.**  Fix the notes file by PR, then republish with
 `gh release edit rel-X.Y.Z --notes-file doc/release-notes/rel-X.Y.Z.md`.  With the file as the

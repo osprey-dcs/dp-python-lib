@@ -255,3 +255,11 @@ Found while implementing, 2026-09-24:
   `sigstore verify` *rejects* every genuine artifact ("Certificate's SANs do not match"), which
   readers would take as a forged release.  Confirmed against the rel-1.16.0 assets, which verify
   with the correct identity (wheel, sdist, and `SHA256SUMS` in one call, as `README.env` shows).
+- **Review follow-up (PR #57): the checker covers the whole contract, not just the identity.**
+  The review found `rel-1.16.0.md` still lacked the Full Changelog line that Q2 promised, and its
+  backported verify command named the wheel only, although CLAUDE.md and `README.env` both say
+  wheel, sdist, and `SHA256SUMS`.  The checker had accepted both.  Fixed in the file (it also
+  gained the `README.env` pointer CLAUDE.md asks for), and the checker now requires every verify
+  command to name all three files and a Full Changelog compare link ending at the file's own tag
+  and starting at an earlier one.  Following the cookbook checker's canary, it self-tests on each
+  run against known-bad samples.  The rel-1.16.0 page is republished from the file after merge.

@@ -407,6 +407,7 @@ in fact been a no-op since before `rel-1.15.0`.
 [plan-40]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/40/plan.md
 [plan-41]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/41/plan.md
 [plan-readme]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/README.md
+[readme-env]: https://github.com/osprey-dcs/dp-python-lib/blob/main/README.env
 
 ## Verifying these artifacts
 
@@ -422,11 +423,16 @@ Signatures (keyless Sigstore; `pip install sigstore`):
 sigstore verify identity \
   --cert-identity "https://github.com/osprey-dcs/dp-python-lib/.github/workflows/release.yml@refs/tags/rel-1.16.0" \
   --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-  dp_python_lib-*.whl
+  dp_python_lib-*.whl dp_python_lib-*.tar.gz SHA256SUMS
 ```
+
+Each file's bundle (`<file>.sigstore.json`) is found automatically.  [`README.env`][readme-env] is the full
+verification reference.
 
 ## Installing
 
 ```bash
 pip install dp_python_lib-*.whl
 ```
+
+**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-1.15.0...rel-1.16.0
