@@ -266,9 +266,9 @@ Time inputs accept any of three forms, converted by the shared `to_timestamp()` 
 # cookbook:partial
 from datetime import datetime, timezone
 
-t1 = to_timestamp(datetime(2026, 2, 2, 18, 4, 1, tzinfo=timezone.utc))
-t2 = to_timestamp(1770055441)
-t3 = to_timestamp(1770055441.5)      # .5 -> 500_000_000 nanoseconds
+ts1 = to_timestamp(datetime(2026, 2, 2, 18, 4, 1, tzinfo=timezone.utc))
+ts2 = to_timestamp(1770055441)
+ts3 = to_timestamp(1770055441.5)      # .5 -> 500_000_000 nanoseconds
 ```
 
 **Naive datetimes raise `ValueError`.**  This is the most likely first-run error, and it is

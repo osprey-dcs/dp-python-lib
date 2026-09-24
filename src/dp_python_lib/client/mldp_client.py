@@ -75,6 +75,11 @@ class MldpClient:
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
+        # The query and annotation channels are optional, so declare them as such up front; the
+        # ingestion channel is always set (or the constructor raises).
+        self._query_channel: grpc.Channel | None
+        self._annotation_channel: grpc.Channel | None
+
         if query_channel is not None:
             self.logger.debug("Using explicit query channel")
             self._query_channel = query_channel

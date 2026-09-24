@@ -25,7 +25,7 @@ class ExportFormat(str, Enum):
     CSV = "csv"
     XLSX = "xlsx"
 
-    def to_proto(self) -> "annotation_pb2.ExportDataRequest.ExportOutputFormat":
+    def to_proto(self) -> "annotation_pb2.ExportDataRequest.ExportOutputFormat.ValueType":
         """
         Converts this format into its protobuf enum value.
         :return: The corresponding ExportDataRequest.ExportOutputFormat value.

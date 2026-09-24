@@ -28,10 +28,8 @@ from dp_python_lib.grpc import common_pb2, query_pb2
 # Excel's hard row ceiling (1,048,576 rows including a header row).
 _EXCEL_MAX_ROWS = 1_048_576 - 1
 
-# Mapping from the Image.FileType enum number to its name, resolved once from the descriptor.
-_IMAGE_FILE_TYPE_NAMES = {
-    v.number: v.name for v in common_pb2.Image.DESCRIPTOR.fields_by_name["fileType"].enum_type.values
-}
+# Mapping from the Image.FileType enum number to its name, resolved once from the enum wrapper.
+_IMAGE_FILE_TYPE_NAMES = {number: name for name, number in common_pb2.Image.FileType.items()}
 
 
 class Image:

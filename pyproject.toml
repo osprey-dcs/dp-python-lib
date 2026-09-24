@@ -65,6 +65,7 @@ dev = [
   "mypy",
   "types-PyYAML",
   "types-protobuf",
+  "types-grpcio",
   "pandas-stubs",
   "pytest",
   "ruff",
@@ -73,9 +74,14 @@ dev = [
 ]
 
 # Toolchain for regenerating the gRPC stubs in src/dp_python_lib/grpc from the upstream
-# dp-grpc protos.  Not needed to use or develop against the library.
+# dp-grpc protos.  Not needed to use or develop against the library.  mypy-protobuf is the
+# protoc plugin behind --mypy_out / --mypy_grpc_out, which write the .pyi type stubs beside the
+# generated .py files (osprey-dcs/dp-grpc#158); without it a regeneration produces untyped stubs.
+# dp-grpc's generate-python-stubs.yml workflow is the authority on the generator versions and
+# flags -- keep these minimums in step with the versions it pins.
 codegen = [
   "grpcio-tools>=1.84.0",
+  "mypy-protobuf>=5.1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -112,12 +118,6 @@ exclude = ["^src/dp_python_lib/grpc/"]
 [[tool.mypy.overrides]]
 module = ["dp_python_lib.grpc.*"]
 follow_imports = "skip"
-
-# grpcio ships no type information and there is no maintained stub package for it.  Scoped
-# to grpc rather than set globally, which would also hide a genuinely missing dependency.
-[[tool.mypy.overrides]]
-module = ["grpc", "grpc.*"]
-ignore_missing_imports = true
 
 [tool.ruff]
 # 120 matches the margin this codebase was already written to: at line-length 100 there were
