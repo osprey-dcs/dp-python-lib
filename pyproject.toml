@@ -77,8 +77,9 @@ dev = [
 # dp-grpc protos.  Not needed to use or develop against the library.  mypy-protobuf is the
 # protoc plugin behind --mypy_out / --mypy_grpc_out, which write the .pyi type stubs beside the
 # generated .py files (osprey-dcs/dp-grpc#158); without it a regeneration produces untyped stubs.
-# dp-grpc's generate-python-stubs.yml workflow is the authority on the generator versions and
-# flags -- keep these minimums in step with the versions it pins.
+# dp-grpc is the authority on the generator: its tools/python-stubs-requirements.in pins the
+# versions and its generate-python-stubs.yml workflow sets the flags.  Keep these minimums in step
+# with those pins (#61).
 codegen = [
   "grpcio-tools>=1.84.0",
   "mypy-protobuf>=5.1.0",
@@ -112,7 +113,11 @@ markers = [
 # The generated gRPC package is untyped (no .pyi stubs; osprey-dcs/dp-grpc#158), so it is
 # excluded from checking and its imports are resolved to Any.  Both are needed: `exclude`
 # alone still follows imports into it, and `follow_imports = "skip"` alone does nothing for
-# files `mypy src/` names on the command line.  Remove both once typed stubs are synced.
+# files `mypy src/` names on the command line.  Remove both once typed stubs are synced (#61).
+#
+# Neither holds against .pyi files: mypy reads a stub whenever one is present, whatever
+# follow_imports says.  So once a sync brings dp-grpc's .pyi stubs, the hand-written code is
+# checked against real protobuf types even with this suppression in place.
 exclude = ["^src/dp_python_lib/grpc/"]
 
 [[tool.mypy.overrides]]

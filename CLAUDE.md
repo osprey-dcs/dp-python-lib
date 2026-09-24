@@ -62,9 +62,13 @@ stub whenever one is present, whatever `follow_imports` says.  So the first stub
 `.pyi` files type-checks the hand-written code against real protobuf types even with the
 suppression still in place, and that code has to be clean against them *before* the sync arrives.
 It was made so ahead of time; keep it so by checking a change against locally generated stubs
-(`[codegen]` extra, with dp-grpc's `generate-python-stubs.yml` flags) when it touches proto types
-in a way `Any` would hide.  `grpc` itself is typed through `types-grpcio`.  There is deliberately no `python_version`: numpy's stubs use 3.12
-syntax, and pinning 3.10 stops mypy checking anything.  Two consequences worth knowing:
+(`[codegen]` extra, at the versions pinned in dp-grpc's `tools/python-stubs-requirements.in`
+and with its `generate-python-stubs.yml` flags) when it touches proto types
+in a way `Any` would hide.  `grpc` itself is typed through `types-grpcio`.  The rest of the
+adoption (removing the suppression, typing `_stub`, `py.typed`) is tracked in #61.
+
+There is deliberately no `python_version`: numpy's stubs use 3.12 syntax, and pinning 3.10 stops
+mypy checking anything.  Two consequences worth knowing:
 
 - An alias whose union includes a proto type needs an explicit `TypeAlias` annotation
   (`TimestampInput: TypeAlias = ...`); with the proto resolving to `Any`, mypy no longer infers it.
