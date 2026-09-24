@@ -407,3 +407,26 @@ in fact been a no-op since before `rel-1.15.0`.
 [plan-40]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/40/plan.md
 [plan-41]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/41/plan.md
 [plan-readme]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/README.md
+
+## Verifying these artifacts
+
+Checksums:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+Signatures (keyless Sigstore; `pip install sigstore`):
+
+```bash
+sigstore verify identity \
+  --cert-identity "https://github.com/osprey-dcs/dp-python-lib/.github/workflows/release.yml@refs/tags/rel-1.16.0" \
+  --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+  dp_python_lib-*.whl
+```
+
+## Installing
+
+```bash
+pip install dp_python_lib-*.whl
+```

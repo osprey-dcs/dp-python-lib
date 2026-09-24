@@ -73,13 +73,17 @@ jobs:
             echo "Manual dispatch; version comes from setuptools-scm."
           fi
 
-      - name: Verify release notes exist
+      - name: Verify release notes
         id: notes
         # Checked here, before the build, rather than left to action-gh-release: that action
         # fails on a missing body_path only after everything has been built, signed, and
         # uploaded, which reads as a late and unrelated failure.  A rehearsal (workflow_dispatch)
         # has no rel- tag and so no notes to look for, hence the push-only guard.
         # Every release from 1.16.0 on ships notes; see CLAUDE.md "Cutting a release".
+        #
+        # The notes file is the entire release body, so it must carry its own verification
+        # section with this tag's signing identity.  CI's quality job runs the same checker
+        # on every notes file at PR time; this is the backstop for a tag pushed anyway.
         if: github.event_name == 'push'
         run: |
           set -euo pipefail
@@ -89,6 +93,7 @@ jobs:
             echo "::error::Add the notes for ${{ steps.version.outputs.version }} and retag once they are on the tagged commit."
             exit 1
           fi
+          python .dev/tools/check-release-notes.py "$NOTES"
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
 
       - name: Build wheel and sdist
@@ -144,48 +149,19 @@ jobs:
         with:
           inputs: ./dist/*.whl ./dist/*.tar.gz ./dist/SHA256SUMS
 
-      - name: Assemble the release body
-        # The publish job downloads artifacts but never checks out the repo, so the notes
-        # have to travel with the dist/ upload.  They are concatenated with the verification
-        # and install instructions here rather than passed to action-gh-release as `body`,
-        # because `body_path` takes precedence over `body` outright (it is a fallback, not a
-        # companion) -- setting both would silently drop these instructions from the release.
-        # action-gh-release appends its generated commit list after whatever body it resolves,
-        # so generate_release_notes still composes on top of this.
+      - name: Stage the release notes
+        # The notes file is the release body, verbatim -- nothing is added to it here.  That is
+        # what makes `gh release edit <tag> --notes-file doc/release-notes/<tag>.md` a lossless
+        # republish: anything a workflow appended would be exactly what such an edit drops, which
+        # is how rel-1.16.0's page lost its verification instructions (#56).  The verification
+        # section is therefore hand-written in each notes file and checked above.
+        #
+        # The publish job downloads artifacts but never checks out the repo, so the notes travel
+        # with the dist/ upload.  Staged after signing, so they are not signed as an artifact.
         if: github.event_name == 'push'
         env:
           NOTES: ${{ steps.notes.outputs.notes }}
-        run: |
-          set -euo pipefail
-          {
-            cat "$NOTES"
-            cat <<'BODY'
-
-          ## Verifying these artifacts
-
-          Checksums:
-
-          ```bash
-          sha256sum -c SHA256SUMS
-          ```
-
-          Signatures (keyless Sigstore; `pip install sigstore`):
-
-          ```bash
-          sigstore verify identity \
-            --cert-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
-            --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-            dp_python_lib-*.whl
-          ```
-
-          ## Installing
-
-          ```bash
-          pip install dp_python_lib-*.whl
-          ```
-          BODY
-          } > dist/RELEASE_BODY.md
-          cat dist/RELEASE_BODY.md
+        run: cp "$NOTES" dist/RELEASE_NOTES.md
 
       - name: Upload build outputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -222,13 +198,35 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
             dist/*.sigstore.json
-          generate_release_notes: true
           fail_on_unmatched_files: true
-          # Assembled in the build job: the hand-written doc/release-notes/rel-X.Y.Z.md
-          # followed by the verification and install instructions.  RELEASE_BODY.md is
-          # deliberately absent from `files` above -- it is the release body, not an
-          # artifact to download.
-          body_path: dist/RELEASE_BODY.md
+          # doc/release-notes/<tag>.md, verbatim.  RELEASE_NOTES.md is deliberately absent
+          # from `files` above -- it is the release body, not an artifact to download.
+          #
+          # generate_release_notes is deliberately NOT set: GitHub's commit list would be the
+          # one part of the body not in the file, and so the part a republish from the file
+          # silently drops.  The notes carry a hand-written Full Changelog link instead.
+          body_path: dist/RELEASE_NOTES.md
+
+      - name: Verify the published body matches the notes
+        # Closes the loop for the one path this workflow controls: if the action ever resolves
+        # a different body (a changed default, a pre-existing release it declines to update),
+        # the release is flagged here instead of being noticed by a reader.  Later hand edits of
+        # the page are out of reach of any workflow; CLAUDE.md forbids them instead.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body --jq .body > published.md
+          # GitHub does not preserve the file's trailing newline, so both sides go through
+          # "$(cat ...)", which strips trailing newlines; CRLF line ends are normalized too.
+          if ! diff -u --strip-trailing-cr <(printf '%s\n' "$(cat dist/RELEASE_NOTES.md)") \
+                                           <(printf '%s\n' "$(cat published.md)"); then
+            echo "::error::The published release body differs from doc/release-notes/${TAG}.md."
+            exit 1
+          fi
+          echo "Published body matches doc/release-notes/${TAG}.md."
 
   # ---------------------------------------------------------------------------------------
   # PyPI publishing -- WIRED UP BUT INTENTIONALLY DISABLED.
@@ -264,9 +262,9 @@ jobs:
           path: dist
 
       - name: Remove non-distribution files
-        # Only sdists and wheels may be uploaded; the checksums file, the assembled release
-        # body, and the Sigstore bundles would all be rejected.
-        run: rm -f dist/SHA256SUMS dist/RELEASE_BODY.md dist/*.sigstore.json
+        # Only sdists and wheels may be uploaded; the checksums file, the release notes, and
+        # the Sigstore bundles would all be rejected.
+        run: rm -f dist/SHA256SUMS dist/RELEASE_NOTES.md dist/*.sigstore.json
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

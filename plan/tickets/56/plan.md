@@ -232,3 +232,26 @@ Changelog compare link to each release's notes.
 
 **Q3 — `README.env` name (D2)?**  *Resolved:* `README.env`.  A Python-specific name would have
 been fine, but none is conventional, so consistency with the Java repos wins.
+
+## Implementation notes
+
+Found while implementing, 2026-09-24:
+
+- **The `mldp_client.py` fix moved errors into the cookbook, not out of existence.**  Typing
+  `client.annotation` / `client.query` as `X | None` is correct (they are `None` when only an
+  ingestion channel is passed; `doc/cookbook/connecting.md`), but it made 83 cookbook snippets
+  fail `union-attr`.  The trial in Background measured the config, not this change.  Fixed with a
+  single narrowing `assert` in the checker's preamble.  `--disable-error-code=union-attr` was tried
+  first and rejected: on an `X | None` receiver that code also carries "no attribute on X", so it
+  hid misspelled names too, and the checker's self-test canary failed.  End users are unaffected
+  until a `py.typed` marker ships; at that point, revisit whether an unconfigured sub-client should
+  raise on access instead of being `None`.
+- **`timestamp_list()` now takes `Sequence[TimestampInput]`**, not `list[...]`.  With the explicit
+  alias, a `list[datetime]` argument failed on list invariance (2 cookbook errors).
+- **D5 diffs with `--strip-trailing-cr`**, not `--ignore-trailing-space`, which BSD `diff` lacks,
+  so the step can be dry-run on macOS.  Trailing newlines are normalized by `"$(cat …)"`.
+  Dry-run against rel-1.16.0: matches; a one-line change fails.
+- **The D4 rationale, corrected:** a stale tag in `--cert-identity` doesn't "verify nothing".
+  `sigstore verify` *rejects* every genuine artifact ("Certificate's SANs do not match"), which
+  readers would take as a forged release.  Confirmed against the rel-1.16.0 assets, which verify
+  with the correct identity (wheel, sdist, and `SHA256SUMS` in one call, as `README.env` shows).
