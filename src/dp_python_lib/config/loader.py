@@ -82,21 +82,12 @@ def load_config(config_file: str | None = None, config_object: MldpConfig | None
         config_object is not None,
     )
 
-    # If explicit config object provided, use it (but still allow env var overrides)
-    if config_object:
-        logger.info("Using explicit config object with environment variable overrides")
-        # Create a new instance that will pick up environment variables
-        return MldpConfig(
-            ingestion_host=config_object.ingestion.host,
-            ingestion_port=config_object.ingestion.port,
-            ingestion_use_tls=config_object.ingestion.use_tls,
-            query_host=config_object.query.host,
-            query_port=config_object.query.port,
-            query_use_tls=config_object.query.use_tls,
-            annotation_host=config_object.annotation.host,
-            annotation_port=config_object.annotation.port,
-            annotation_use_tls=config_object.annotation.use_tls,
-        )
+    # An explicit config object is level 1: returned as-is, so environment variables cannot
+    # override the fields its caller set.  Fields the caller left out already took env values
+    # or defaults when the object was built.
+    if config_object is not None:
+        logger.info("Using explicit config object")
+        return config_object
 
     # Find and load from YAML file (if available)
     yaml_file = find_config_file(config_file)

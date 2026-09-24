@@ -11,7 +11,7 @@ See [API conventions](conventions.md) for the patterns every call shares once yo
 - [Model](#model) — one client, three services, three channels
 - [Configuration files](#configuration-files)
 - [Environment variables](#environment-variables)
-- [Configuration priority](#configuration-priority) — **and a bug to be aware of**
+- [Configuration priority](#configuration-priority)
 - [Sub-clients can be None](#sub-clients-can-be-none)
 - [TLS](#tls)
 - [Logging](#logging)
@@ -143,41 +143,30 @@ export MLDP_CONFIG_FILE=/etc/mldp/config.yaml
 Names are case-insensitive.  `USE_TLS` accepts the usual boolean spellings (`true`/`false`,
 `1`/`0`).
 
+A variable set to the empty string counts as unset: `MLDP_INGESTION_HOST=` falls through to the
+YAML file or the default rather than blanking the host.  This matters in docker compose, where
+`MLDP_INGESTION_HOST: ${INGESTION_HOST}` passes an empty string when `INGESTION_HOST` is not set.
+
 ## Configuration priority
 
-The intended order, highest first:
+The order, highest first:
 
 1. Explicit constructor parameters (channels, `config=`)
 2. Environment variables (`MLDP_*`)
 3. The YAML configuration file
 4. Built-in defaults
 
-> ### ⚠️ Known bug: YAML silently beats environment variables
->
-> **As of 1.15.0, levels 2 and 3 are inverted whenever the key is present in the YAML file.**
-> Tracked as [#19](https://github.com/osprey-dcs/dp-python-lib/issues/19).
->
-> A setting written in YAML **cannot be overridden** by its `MLDP_*` environment variable.  The
-> env var is ignored, silently — no warning, no error:
->
-> ```
-> # mldp-config.yaml contains:  ingestion: {host: localhost}
-> MLDP_INGESTION_HOST=prod.example.com  ->  resolves to "localhost"   (env ignored)
-> MLDP_INGESTION_PORT=443               ->  resolves to 443           (works: port absent from YAML)
-> ```
->
-> The rule is per-key: a key **absent** from the YAML file *is* overridable by its env var; a key
-> **present** in the file is not.
->
-> Cause: `MldpConfig.from_yaml()` passes YAML values as constructor keyword arguments, and in
-> pydantic-settings init kwargs outrank environment variables.
->
-> **Until this is fixed**, do not rely on env vars to override a deployed YAML file.  Either keep
-> the setting out of the YAML entirely, or point at a different file with `MLDP_CONFIG_FILE` (that
-> variable is read before the file is loaded, so it works as documented).
+The order is per key: a YAML file can set the host while `MLDP_INGESTION_PORT` sets the port, and
+any key neither one sets takes its default.
 
-This also applies to the auto-load path, since a `mldp-config.yaml` in the working directory is
-picked up automatically — which is how the surprise usually arrives.
+Level 1 applies only to the fields you actually passed.  `MldpConfig(ingestion_host="x")` pins the
+ingestion host, but the fields it leaves out were filled from `MLDP_*` variables or defaults when the
+object was built, exactly as for any other `MldpConfig()`.
+
+An auto-discovered `mldp-config.yaml` is still level 3, so environment variables override it just
+as they would an explicit `config_file=`.  Releases before the fix for
+[#19](https://github.com/osprey-dcs/dp-python-lib/issues/19) (1.16.0 and earlier) got this wrong:
+a key present in the YAML file silently ignored its `MLDP_*` variable.
 
 ## Sub-clients can be None
 

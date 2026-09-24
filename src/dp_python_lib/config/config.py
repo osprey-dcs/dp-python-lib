@@ -1,8 +1,28 @@
 import logging
+from contextvars import ContextVar
+from typing import Any
 
 import grpc
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+# The flattened values of the YAML file being loaded by MldpConfig.from_yaml(), read by
+# _YamlValuesSource.  A ContextVar rather than a class attribute so concurrent loads in other
+# threads or asyncio tasks cannot see each other's values; from_yaml() resets it in a
+# `finally`, so a failed load cannot leak file values into a later plain MldpConfig().
+_yaml_values: ContextVar[dict[str, Any] | None] = ContextVar("_yaml_values", default=None)
+
+
+class _YamlValuesSource(PydanticBaseSettingsSource):
+    """Settings source supplying the YAML file's values, ranked below environment variables (issue #19)."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        # Required by the ABC; __call__ supplies every value at once, so this is never used.
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return dict(_yaml_values.get() or {})
 
 
 class ServiceConfig(BaseModel):
@@ -47,7 +67,26 @@ class MldpConfig(BaseSettings):
     annotation_port: int = 50053
     annotation_use_tls: bool = False
 
-    model_config = SettingsConfigDict(env_prefix="MLDP_", case_sensitive=False)
+    # env_ignore_empty: an empty MLDP_* variable counts as unset, so it falls through to the YAML file or
+    # the default.  Without it, `export MLDP_INGESTION_HOST=` (or a compose `${VAR}` that expands to "")
+    # would beat the file with an empty host and connect nowhere, or fail to parse as a port.
+    model_config = SettingsConfigDict(env_prefix="MLDP_", case_sensitive=False, env_ignore_empty=True)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Priority, high to low: explicit constructor arguments, MLDP_* environment variables,
+        # the YAML file, field defaults.  This is pydantic-settings' default order with the YAML
+        # source added last.  YAML values must never be passed as constructor arguments: init
+        # kwargs outrank every other source, which is how the file came to silently beat
+        # MLDP_* variables before issue #19.
+        return (init_settings, env_settings, dotenv_settings, file_secret_settings, _YamlValuesSource(settings_cls))
 
     @property
     def ingestion(self) -> ServiceConfig:
@@ -66,7 +105,11 @@ class MldpConfig(BaseSettings):
 
     @classmethod
     def from_yaml(cls, yaml_file: str) -> "MldpConfig":
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file.
+
+        ``MLDP_*`` environment variables override values from the file; keys the file leaves
+        out fall back to the environment, then to the field defaults.
+        """
         import yaml
 
         logger = logging.getLogger(__name__)
@@ -86,7 +129,7 @@ class MldpConfig(BaseSettings):
                 raise ValueError(f"expected a mapping at the top level, got {type(data).__name__}")
 
             # Convert nested YAML structure to flat fields
-            flat_data = {}
+            flat_data: dict[str, Any] = {}
 
             for service in ["ingestion", "query", "annotation"]:
                 service_config = data.get(service)
@@ -104,7 +147,11 @@ class MldpConfig(BaseSettings):
                         logger.debug("Loaded %s_use_tls: %s", service, service_config["use_tls"])
 
             logger.debug("Successfully loaded configuration from YAML, creating MldpConfig instance")
-            return cls(**flat_data)
+            token = _yaml_values.set(flat_data)
+            try:
+                return cls()
+            finally:
+                _yaml_values.reset(token)
 
         except FileNotFoundError:
             logger.warning("YAML configuration file not found: %s, using defaults", yaml_file)
