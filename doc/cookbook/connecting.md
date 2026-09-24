@@ -143,6 +143,10 @@ export MLDP_CONFIG_FILE=/etc/mldp/config.yaml
 Names are case-insensitive.  `USE_TLS` accepts the usual boolean spellings (`true`/`false`,
 `1`/`0`).
 
+A variable set to the empty string counts as unset: `MLDP_INGESTION_HOST=` falls through to the
+YAML file or the default rather than blanking the host.  This matters in docker compose, where
+`MLDP_INGESTION_HOST: ${INGESTION_HOST}` passes an empty string when `INGESTION_HOST` is not set.
+
 ## Configuration priority
 
 The order, highest first:

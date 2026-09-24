@@ -871,8 +871,14 @@ field defaults.  Init kwargs are pydantic-settings' *top* priority, so passing f
 `cls(**values)` — what `from_yaml()` did through 1.16.0 — makes the file silently beat every `MLDP_*`
 variable.  Validation runs on the merged result, so an invalid YAML value that an env var overrides
 loads without error.  `load_config(config_object=)` returns the object as-is: explicit is level 1.
-`tests/unit/test_config.py::TestConfigPrecedence` pins all of this against real files, with ambient
-`MLDP_*` variables cleared.
+`env_ignore_empty=True` makes an empty `MLDP_*` variable count as unset; once env outranked the file,
+an empty variable (a compose `${VAR}` with its source unset) would otherwise have blanked a host the
+file set.  `tests/unit/test_config.py::TestConfigPrecedence` pins all of this against real files.
+
+Any test that asserts a value from a YAML file or a default must clear ambient `MLDP_*` variables,
+since they now win: use `isolate_mldp_env(self)` in `setUp` or the `mldp_env()` context manager, both
+in `tests/unit/mldp_env.py`.  Otherwise the test passes in CI and fails in a developer shell that
+exports `MLDP_*` to point integration tests elsewhere.
 
 ### Key Configuration Classes
 - **`ServiceConfig`** - Individual service configuration (host, port, use_tls) with gRPC channel creation

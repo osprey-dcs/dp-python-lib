@@ -195,8 +195,13 @@ to two small modules, and the prototype below shows it works.
   separate usability issue; file it if wanted.
 - `.env` / secrets-dir support: not configured today, and the source order leaves room for it.
 - Any change to discovery order (`find_config_file`), which already behaves as documented.
-- Isolating the existing `test_config.py` tests from ambient `MLDP_*` variables (T6).  They predate this
-  ticket and pass on a clean shell and in CI; the new tests clear the environment themselves.
+- ~~Isolating the existing `test_config.py` tests from ambient `MLDP_*` variables (T6).  They predate this
+  ticket and pass on a clean shell and in CI; the new tests clear the environment themselves.~~
+  **Brought into scope 2026-09-24, in review of PR #63.**  The premise was incomplete: the fix itself
+  exposes a test that the YAML file used to shield (`test_from_yaml_valid`), so with `MLDP_*` exported the
+  suite went from 8 failures on `main` to 9.  All three config test classes now clear ambient variables in
+  `setUp` via `tests/unit/mldp_env.py`.  The same review added `env_ignore_empty=True`: once env outranks
+  the file, an empty `MLDP_*` variable would otherwise beat a working file with a blank host.
 
 ## Dependencies and sequencing
 

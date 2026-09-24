@@ -67,7 +67,10 @@ class MldpConfig(BaseSettings):
     annotation_port: int = 50053
     annotation_use_tls: bool = False
 
-    model_config = SettingsConfigDict(env_prefix="MLDP_", case_sensitive=False)
+    # env_ignore_empty: an empty MLDP_* variable counts as unset, so it falls through to the YAML file or
+    # the default.  Without it, `export MLDP_INGESTION_HOST=` (or a compose `${VAR}` that expands to "")
+    # would beat the file with an empty host and connect nowhere, or fail to parse as a port.
+    model_config = SettingsConfigDict(env_prefix="MLDP_", case_sensitive=False, env_ignore_empty=True)
 
     @classmethod
     def settings_customise_sources(

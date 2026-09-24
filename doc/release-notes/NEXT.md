@@ -102,6 +102,11 @@ Two smaller consequences of the same fix:
 - **An invalid value in the file no longer raises if an environment variable overrides it**
   (`port: abc` with `MLDP_INGESTION_PORT=443` now loads, using 443).  An invalid value that is
   actually used still raises the same `ValueError`.
+- **An `MLDP_*` variable set to the empty string now counts as unset**, falling through to the file
+  or the default.  Previously an empty `MLDP_INGESTION_HOST=` was lost to the file when the file set
+  the key, but blanked the host when it did not, and an empty port or `use_tls` the file did not set
+  raised.  Without this, the fix above would have let an empty variable, for example a docker
+  compose `${VAR}` whose source is unset, override a working file with a blank host.
 - **`load_config(config_object=...)` returns the object you passed** rather than a copy with the
   same values.  An explicit object was already level 1, above environment variables; only its
   identity changes.

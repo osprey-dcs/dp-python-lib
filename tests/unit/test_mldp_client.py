@@ -7,6 +7,8 @@ from unittest.mock import Mock, patch
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from mldp_env import isolate_mldp_env, mldp_env
+
 from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.config import MldpConfig
 
@@ -194,6 +196,9 @@ class TestMldpClient(unittest.TestCase):
 class TestMldpClientConfigIntegration(unittest.TestCase):
     """Integration tests for MldpClient with real configuration."""
 
+    def setUp(self):
+        isolate_mldp_env(self)
+
     def test_config_from_yaml_file(self):
         """Test loading MldpClient from YAML configuration."""
         yaml_content = """
@@ -244,9 +249,10 @@ ingestion:
             with open(path, "w") as f:
                 f.write(yaml_content)
 
-            env = {k: v for k, v in os.environ.items() if not k.upper().startswith("MLDP_")}
-            env["MLDP_INGESTION_HOST"] = "env-ingestion.example.com"
-            with patch.dict(os.environ, env, clear=True), patch("grpc.insecure_channel") as mock_insecure_channel:
+            with (
+                mldp_env(MLDP_INGESTION_HOST="env-ingestion.example.com"),
+                patch("grpc.insecure_channel") as mock_insecure_channel,
+            ):
                 mock_insecure_channel.return_value = Mock()
 
                 MldpClient(config_file=path)
