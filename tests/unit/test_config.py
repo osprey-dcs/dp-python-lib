@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 # Add src directory to path for imports
@@ -301,20 +302,6 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(result.ingestion.host, "custom-host")
 
     @patch("dp_python_lib.config.loader.find_config_file")
-    @patch("dp_python_lib.config.config.MldpConfig.from_yaml")
-    def test_load_config_from_yaml(self, mock_from_yaml, mock_find_config):
-        """Test loading config from YAML file."""
-        mock_config = MldpConfig()
-        mock_find_config.return_value = "test-config.yaml"
-        mock_from_yaml.return_value = mock_config
-
-        result = load_config()
-
-        mock_find_config.assert_called_once_with(None)
-        mock_from_yaml.assert_called_once_with("test-config.yaml")
-        self.assertEqual(result, mock_config)
-
-    @patch("dp_python_lib.config.loader.find_config_file")
     def test_load_config_no_yaml_file(self, mock_find_config):
         """Test loading config when no YAML file found."""
         mock_find_config.return_value = None
@@ -332,6 +319,123 @@ class TestConfigLoader(unittest.TestCase):
         self.assertIsInstance(config, MldpConfig)
         self.assertEqual(config.ingestion.host, "localhost")
         self.assertEqual(config.ingestion.port, 50051)
+
+
+@contextmanager
+def mldp_env(**overrides: str):
+    """Run with every ambient ``MLDP_*`` variable removed, plus ``overrides``.
+
+    A developer shell may export ``MLDP_*`` (to point integration tests elsewhere, say), and
+    the precedence tests below assert exactly which source a value came from.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("MLDP_")}
+    env.update(overrides)
+    with patch.dict(os.environ, env, clear=True):
+        yield
+
+
+YAML_ALL_INGESTION = """
+ingestion:
+  host: yaml-host
+  port: 9001
+  use_tls: false
+"""
+
+
+class TestConfigPrecedence(unittest.TestCase):
+    """Explicit > MLDP_* env > YAML file > defaults, driven through real files (issue #19)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+
+    def write_yaml(self, content: str) -> str:
+        path = os.path.join(self._tmpdir.name, "mldp-config.yaml")
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def test_env_overrides_yaml_via_load_config(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env(MLDP_INGESTION_HOST="env-host"):
+            config = load_config(config_file=path)
+        self.assertEqual(config.ingestion.host, "env-host")
+        # keys with no env var keep their YAML values
+        self.assertEqual(config.ingestion.port, 9001)
+
+    def test_env_overrides_yaml_via_from_yaml(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env(MLDP_INGESTION_HOST="env-host"):
+            config = MldpConfig.from_yaml(path)
+        self.assertEqual(config.ingestion.host, "env-host")
+        self.assertEqual(config.ingestion.port, 9001)
+
+    def test_yaml_overrides_defaults(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env():
+            for config in (load_config(config_file=path), MldpConfig.from_yaml(path)):
+                self.assertEqual(config.ingestion.host, "yaml-host")
+                self.assertEqual(config.ingestion.port, 9001)
+
+    def test_key_absent_from_yaml_falls_back_to_default_or_env(self):
+        path = self.write_yaml("ingestion:\n  host: yaml-host\n")
+        with mldp_env(MLDP_QUERY_HOST="env-query"):
+            for config in (load_config(config_file=path), MldpConfig.from_yaml(path)):
+                self.assertEqual(config.ingestion.port, 50051)  # default
+                self.assertEqual(config.query.host, "env-query")  # env, key not in YAML
+
+    def test_env_coerces_int_and_bool_over_yaml(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env(MLDP_INGESTION_PORT="443", MLDP_INGESTION_USE_TLS="true"):
+            for config in (load_config(config_file=path), MldpConfig.from_yaml(path)):
+                self.assertEqual(config.ingestion.port, 443)
+                self.assertTrue(config.ingestion.use_tls)
+
+    def test_lower_case_env_var_overrides_yaml(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env(mldp_ingestion_host="env-host"):
+            self.assertEqual(MldpConfig.from_yaml(path).ingestion.host, "env-host")
+
+    def test_mldp_config_file_with_env_override(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env(MLDP_CONFIG_FILE=path, MLDP_INGESTION_HOST="env-host"):
+            config = load_config()
+        self.assertEqual(config.ingestion.host, "env-host")
+        self.assertEqual(config.ingestion.port, 9001)  # proves the file was the one selected
+
+    def test_explicit_config_object_beats_env(self):
+        with mldp_env(MLDP_INGESTION_HOST="env-host"):
+            # Built inside the patched environment, so env was a candidate when it was constructed.
+            custom_config = MldpConfig(ingestion_host="explicit")
+            result = load_config(config_object=custom_config)
+        self.assertIs(result, custom_config)
+        self.assertEqual(result.ingestion.host, "explicit")
+
+    def test_plain_config_after_failed_from_yaml_gets_defaults(self):
+        path = self.write_yaml("ingestion:\n  host: yaml-host\n  port: not-a-port\n")
+        with mldp_env():
+            with self.assertRaises(ValueError):
+                MldpConfig.from_yaml(path)
+            config = MldpConfig()
+        # the failed load's values must not leak into a later plain construction
+        self.assertEqual(config.ingestion.host, "localhost")
+        self.assertEqual(config.ingestion.port, 50051)
+
+    def test_plain_config_after_successful_from_yaml_gets_defaults(self):
+        path = self.write_yaml(YAML_ALL_INGESTION)
+        with mldp_env():
+            MldpConfig.from_yaml(path)
+            self.assertEqual(MldpConfig().ingestion.host, "localhost")
+
+    def test_invalid_yaml_value_overridden_by_env_loads(self):
+        path = self.write_yaml("ingestion:\n  port: not-a-port\n")
+        with mldp_env(MLDP_INGESTION_PORT="443"):
+            config = MldpConfig.from_yaml(path)
+        self.assertEqual(config.ingestion.port, 443)
+
+    def test_explicit_kwarg_beats_env_and_yaml_source(self):
+        with mldp_env(MLDP_INGESTION_HOST="env-host"):
+            self.assertEqual(MldpConfig(ingestion_host="explicit").ingestion.host, "explicit")
 
 
 if __name__ == "__main__":

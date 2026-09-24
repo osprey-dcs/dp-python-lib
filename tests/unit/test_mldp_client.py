@@ -232,6 +232,27 @@ annotation:
             finally:
                 os.unlink(f.name)
 
+    def test_config_from_yaml_file_env_override(self):
+        """An MLDP_* variable overrides the same key in the YAML file, end to end (issue #19)."""
+        yaml_content = """
+ingestion:
+  host: yaml-ingestion.example.com
+  port: 9001
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "mldp-config.yaml")
+            with open(path, "w") as f:
+                f.write(yaml_content)
+
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith("MLDP_")}
+            env["MLDP_INGESTION_HOST"] = "env-ingestion.example.com"
+            with patch.dict(os.environ, env, clear=True), patch("grpc.insecure_channel") as mock_insecure_channel:
+                mock_insecure_channel.return_value = Mock()
+
+                MldpClient(config_file=path)
+
+                mock_insecure_channel.assert_any_call("env-ingestion.example.com:9001")
+
 
 if __name__ == "__main__":
     unittest.main()

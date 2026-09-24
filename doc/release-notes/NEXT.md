@@ -28,6 +28,7 @@ person cutting the release has any reason to re-read.
 - [Release pages are the notes file, verbatim (#56)](#release-pages-are-the-notes-file-verbatim-issue-56)
 - [Type checking in CI (#30)](#type-checking-in-ci-issue-30)
 - [Ready for typed gRPC stubs (#61)](#ready-for-typed-grpc-stubs-issue-61)
+- [Environment variables override the config file (#19)](#environment-variables-override-the-config-file-issue-19)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -83,6 +84,30 @@ Nothing about the library's behavior changes.
   supplies the `--mypy_out` / `--mypy_grpc_out` protoc plugins; without it you get the `.py` files
   but no `.pyi`.
 - **The `[dev]` extra now includes `types-grpcio`**, so `grpc` is type-checked rather than ignored.
+
+## Environment variables override the config file (Issue #19)
+
+**Silent behavior change.**  An `MLDP_*` environment variable now overrides the same setting in the
+YAML configuration file, as the documentation has always said it would.  Through 1.16.0 the file
+won whenever it contained the key, and the environment variable was ignored without a warning.
+
+Check before upgrading: **if you set an `MLDP_*` variable and your config file sets a *different*
+value for the same key, the client will now connect using the environment variable's value.**  No
+error is raised; the connection simply goes somewhere else.  This includes the `mldp-config.yaml`
+that is discovered automatically in the working directory or project root.  To keep the old
+behavior, unset the variable.
+
+Two smaller consequences of the same fix:
+
+- **An invalid value in the file no longer raises if an environment variable overrides it**
+  (`port: abc` with `MLDP_INGESTION_PORT=443` now loads, using 443).  An invalid value that is
+  actually used still raises the same `ValueError`.
+- **`load_config(config_object=...)` returns the object you passed** rather than a copy with the
+  same values.  An explicit object was already level 1, above environment variables; only its
+  identity changes.
+
+See [#19](https://github.com/osprey-dcs/dp-python-lib/issues/19) and the configuration priority
+section of [`doc/cookbook/connecting.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/connecting.md#configuration-priority).
 
 ## Installing
 

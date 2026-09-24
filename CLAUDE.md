@@ -863,6 +863,17 @@ class MldpConfig(BaseSettings):
         )
 ```
 
+**YAML values enter through their own settings source, never as init kwargs** (#19;
+`plan/tickets/19/plan.md`).  `from_yaml()` flattens the file into a module-level `ContextVar`, calls
+`cls()`, and resets the var in `finally`; the private `_YamlValuesSource` reads it, and
+`settings_customise_sources` ranks it last (`init, env, dotenv, secrets, yaml`), so it sits just above
+field defaults.  Init kwargs are pydantic-settings' *top* priority, so passing file values as
+`cls(**values)` — what `from_yaml()` did through 1.16.0 — makes the file silently beat every `MLDP_*`
+variable.  Validation runs on the merged result, so an invalid YAML value that an env var overrides
+loads without error.  `load_config(config_object=)` returns the object as-is: explicit is level 1.
+`tests/unit/test_config.py::TestConfigPrecedence` pins all of this against real files, with ambient
+`MLDP_*` variables cleared.
+
 ### Key Configuration Classes
 - **`ServiceConfig`** - Individual service configuration (host, port, use_tls) with gRPC channel creation
 - **`MldpConfig`** - Main config container with flattened fields for environment variable support
