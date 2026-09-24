@@ -109,6 +109,17 @@ a note by issue ticket rather than by PR, since a ticket often spans several PRs
 a breaking release with an "Upgrading from <previous>" checklist that separates silent
 behavior changes from outright errors.
 
+**During a cycle, notes accumulate in `doc/release-notes/NEXT.md`** (#58; `plan/tickets/58/plan.md`),
+the convention dp-grpc adopted in osprey-dcs/dp-grpc#156.  A ticket that changes anything a user of
+the library or its release artifacts would notice adds its section to `NEXT.md` **in the same PR**,
+while the reasoning is fresh and in front of the reviewer.  `NEXT.md` names no upcoming version, in
+its filename or its prose: the next version (1.17.0 or 2.0.0, say) is decided at the cut, and a file
+committed under a guessed `rel-<version>.md` is stranded and fails the release-notes check on the
+tag that does ship.  The cut is `git mv doc/release-notes/NEXT.md doc/release-notes/rel-<version>.md`
+plus the "Cutting the release" checklist at the bottom of `NEXT.md` itself, which ends by starting a
+fresh `NEXT.md`.  `release.yml` needs no change for this: it resolves the notes path strictly from
+the tag, so `NEXT.md` can never be published.
+
 **The notes file is the release body, verbatim** (#56; `plan/tickets/56/plan.md`), the same
 arrangement as the Java repos.  `release.yml` copies it to `dist/RELEASE_NOTES.md` (the publish job
 never checks out the repo, so it travels with the `dist/` upload) and passes that as `body_path`;
@@ -130,6 +141,12 @@ this file's tag and start at an earlier one; which release came before is not kn
 file, so `<prev>` is checked only for being earlier.  Each run starts with a self-test that feeds
 the rules known-bad notes, so a rule that stops matching fails loudly instead of passing everything.
 It runs in CI's quality job and again at tag time.
+
+The same checker inverts the rules for `NEXT.md`: a verification heading, a `sigstore verify identity`
+command, a `--cert-identity`, or a Full Changelog line there is an error, since each names the tag and
+so, in the draft, guesses it.  Only real ones count -- a heading or command at the start of a line, an
+identity with a value, a changelog line at the start of a line -- because the draft's own checklist
+names all four in prose, and the self-test holds that prose to passing.
 
 **Never edit a release page by hand.**  Fix the notes file by PR, then republish with
 `gh release edit rel-X.Y.Z --notes-file doc/release-notes/rel-X.Y.Z.md`.  With the file as the

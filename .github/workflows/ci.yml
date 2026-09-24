@@ -98,7 +98,9 @@ jobs:
       - name: Check release notes
         # Each doc/release-notes/rel-X.Y.Z.md is published verbatim as its release body, so it
         # must carry a verification section whose signing identity names its own tag.  Checked
-        # here so a mistake fails the notes PR, not the tag push.
+        # here so a mistake fails the notes PR, not the tag push.  doc/release-notes/NEXT.md, the
+        # version-less draft renamed at the cut, is checked the other way round: it must carry none
+        # of those tag-bearing parts, since any it has guesses a version not yet decided.
         run: python .dev/tools/check-release-notes.py
 
   build:

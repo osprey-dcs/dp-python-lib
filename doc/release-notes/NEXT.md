@@ -1,0 +1,117 @@
+# Release Notes — next release (unreleased)
+
+**This is the working draft for the next release. It is not a release note yet.**
+
+Sections accumulate here as tickets land, so the content is written while it is fresh and gets
+reviewed in the PR that causes it.  A ticket that changes anything a user of the library, or of its
+release artifacts, would notice adds its section here in that same PR.  At release time this file is
+renamed to `doc/release-notes/rel-<version>.md` and finished — see **Cutting the release** at the
+bottom.
+
+**The version of the upcoming release is deliberately not named anywhere in this file**, in its
+filename or in its prose.  `release.yml` resolves the notes path strictly from the tag
+(`doc/release-notes/${GITHUB_REF_NAME}.md`), so a file committed under a guessed version is both
+stranded and a failed release-notes check on the tag that does ship.  Past versions are named
+freely where they are the point — "since 1.16.0" is a durable fact about what shipped, not a guess
+about what is about to.  `.dev/tools/check-release-notes.py` enforces the parts that would carry the
+new tag: this file may not contain a verification section, a `sigstore verify identity` command, a
+signing identity, or a Full Changelog line.  Those are written at the cut.  Naming them in prose
+is fine, as the checklist below does, but put the name in backticks: the checker treats an unquoted
+`--cert-identity` followed by a word, or a line beginning with the verify command, as the real thing.
+
+Nothing here should assert what *else* the release contains, either: that is knowable only once
+the release is cut, and a stale claim in a file that already looks finished is not something the
+person cutting the release has any reason to re-read.
+
+## Contents
+
+- [Release pages are the notes file, verbatim (#56)](#release-pages-are-the-notes-file-verbatim-issue-56)
+- [Type checking in CI (#30)](#type-checking-in-ci-issue-30)
+- [Cutting the release](#cutting-the-release)
+
+---
+
+## Release pages are the notes file, verbatim (Issue #56)
+
+The GitHub release page is now exactly `doc/release-notes/rel-<version>.md`, with nothing added by
+the release workflow.  Previously the workflow appended artifact verification instructions and
+GitHub's generated commit list after the notes.  That arrangement broke the first time anyone
+republished a page from its notes file: rel-1.16.0's page silently lost its verification
+instructions that way.  With the file as the whole page, republishing is lossless.
+
+What changes for someone downloading a release:
+
+- **Signature verification covers all three files.**  The instructions previously verified only the
+  wheel, although the sdist and `SHA256SUMS` have always been signed too.  They now verify all three
+  in one call, and the new [`README.env`](https://github.com/osprey-dcs/dp-python-lib/blob/main/README.env)
+  is the full reference for what each artifact is and how to check it.  rel-1.16.0's page has been
+  republished with the corrected instructions.
+- **The commit list is replaced by a Full Changelog link**, a compare view between the two release
+  tags.  The notes themselves are organized by ticket and link their PRs.
+
+The release workflow checks that the published page matches the notes file after every release,
+and CI checks every notes file's verification section for the right signing identity, since a stale
+tag copied from the previous release makes `sigstore verify` reject every genuine artifact.
+
+## Type checking in CI (Issue #30)
+
+`mypy src/` is now clean and runs in CI on every PR, so type errors in the library fail review
+rather than reaching a release.  The generated gRPC stubs are excluded until dp-grpc ships typed
+ones ([osprey-dcs/dp-grpc#158](https://github.com/osprey-dcs/dp-grpc/issues/158)).  Nothing about
+the library's behavior changes.
+
+Two annotations became more accurate along the way:
+
+- **`MldpClient.annotation` and `MldpClient.query` are annotated `X | None`**, which is what they
+  have always been: they are `None` when the client is given only an ingestion channel.  The package
+  does not yet ship a `py.typed` marker, so your own mypy runs are unaffected.  An editor that infers
+  types from library source may now point out that they can be `None`; narrow once with
+  `assert client.annotation is not None` if yours does.
+- **`timestamp_list()` accepts any sequence** of timestamps (a tuple, say), not only a `list`.
+
+## Installing
+
+```bash
+pip install dp_python_lib-*.whl
+```
+
+---
+
+## Cutting the release
+
+When the version is known and the release is being cut:
+
+1. **`git mv doc/release-notes/NEXT.md doc/release-notes/rel-<version>.md`.**  The filename must
+   match the tag exactly; `release.yml` fails the run before the build if it does not.
+2. **Retitle** the H1 to `# dp-python-lib <version> Release Notes` and replace this file's preamble
+   with a "Changes since rel-<previous>" summary — written now, when the full contents of the
+   release are actually known.  If the stubs were resynced, link dp-grpc's notes for the same
+   release, as rel-1.16.0's opening does.
+3. **Decide whether the release is breaking**, and say so in the opening if it is.  A breaking
+   release gets an **"Upgrading from <previous>"** section as the first section after Contents,
+   folding in the per-ticket upgrade items above.  Call out silent behavior changes separately from
+   outright errors, per CLAUDE.md: a change that alters results without raising is the one a reader
+   most needs up front.  Python has no compile step, so "outright errors" here means ones raised at
+   import or call time.
+4. **Add the `## Verifying these artifacts` section** immediately above `## Installing`, copied from the previous release's notes with
+   the tag changed: `sha256sum -c SHA256SUMS`, then `sigstore verify identity` over the wheel,
+   sdist, and `SHA256SUMS` with `--cert-identity` ending `release.yml@refs/tags/rel-<version>`, and
+   the pointer to `README.env`.
+5. **End with the Full Changelog line**, after `## Installing`:
+   `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<previous>...rel-<version>`.
+6. **Repoint `blob/main/...` links to `blob/rel-<version>/...`.**  This file is published as the
+   release body via `body_path`, and relative links do not survive that lift — they resolve against
+   the repo root, not `doc/release-notes/`, and 404.  Links here are already absolute for that
+   reason, but one pinned to `main` drifts as the repo moves on; pinned to the tag it keeps
+   describing the content this release actually shipped.  (`README.env` did not exist at 1.16.0,
+   so a link to it from older notes stays on `main`.)
+7. **Delete this "Cutting the release" section** and update Contents.
+8. **Run `python .dev/tools/check-release-notes.py`**, which CI also runs on the PR.  It fails on a
+   missing verification section, a stale tag in the identity or the changelog link, or a verify
+   command that skips a file.
+9. **Start a fresh `NEXT.md`** for the following cycle.  Steps 1, 2, and 7 have moved, rewritten, and
+   deleted the text it needs, so recover it from `main`:
+   `git show main:doc/release-notes/NEXT.md > doc/release-notes/NEXT.md`, then delete every ticket
+   section and empty Contents down to the "Cutting the release" entry.  Keep the preamble,
+   `## Installing`, and this checklist.
+10. **Merge, then push the `rel-<version>` tag.**  The notes must be on the tagged commit.

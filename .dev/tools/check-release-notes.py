@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Verify that every doc/release-notes/rel-X.Y.Z.md carries a correct verification section and changelog link.
+"""Verify that every doc/release-notes/rel-X.Y.Z.md carries a correct verification section and changelog link,
+and that the NEXT.md draft carries neither.
 
 The notes file is published verbatim as the GitHub release body (release.yml; plan/tickets/56/plan.md D1), so
 the artifact verification instructions and the changelog link exist only if the file contains them.  This checks,
@@ -11,6 +12,12 @@ per file:
     and every `--cert-identity` in the file is exactly this repository's release.yml at *this file's* tag, with
     the GitHub Actions OIDC issuer;
   - there is a `**Full Changelog**:` compare link ending at this file's tag and starting at an earlier one.
+
+doc/release-notes/NEXT.md is the version-less draft that accumulates during a release cycle and is renamed to
+rel-<version>.md at the cut (#58).  Every part checked above names the release's tag, so in NEXT.md each one is a
+guess at a version not yet decided; there the check is inverted, and a verification heading, a `sigstore verify
+identity` command, a `--cert-identity`, or a Full Changelog line is an error.  Only the real thing counts: a
+heading or command at the start of a line, not the draft's own checklist mentioning them in prose.
 
 The identity check is the one that earns its keep.  The section is hand-written per release, usually by copying
 the previous one, and a stale tag in the identity makes `sigstore verify` reject every genuine artifact of the
@@ -26,7 +33,8 @@ notes and fails if any is accepted, so a rule that has quietly stopped matching 
 Usage:
     python .dev/tools/check-release-notes.py [FILE ...]
 
-With no arguments, checks every doc/release-notes/rel-*.md.  Stdlib only.  Exits 0 if all pass, 1 otherwise.
+With no arguments, checks every doc/release-notes/rel-*.md, and NEXT.md if present.  Stdlib only.  Exits 0 if all
+pass, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NOTES_DIR = REPO_ROOT / "doc" / "release-notes"
+NEXT_NAME = "NEXT.md"
 
 REPOSITORY = "osprey-dcs/dp-python-lib"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
@@ -47,6 +56,8 @@ HEADING_RE = re.compile(r"^## Verifying these artifacts\s*$", re.MULTILINE)
 VERIFY_RE = re.compile(r"\bsigstore\s+verify\s+identity\b(?:[^\n]*\\\n)*[^\n]*")
 IDENTITY_RE = re.compile(r"--cert-identity[ =]\"?([^\"\s]+)\"?")
 ISSUER_RE = re.compile(r"--cert-oidc-issuer[ =]\"?([^\"\s]+)\"?")
+# A command as written in a code block, rather than named in prose.
+VERIFY_COMMAND_RE = re.compile(r"^[ \t]*sigstore\s+verify\s+identity\b", re.MULTILINE)
 CHANGELOG_RE = re.compile(r"^\*\*Full Changelog\*\*:\s*(\S+)\s*$", re.MULTILINE)
 COMPARE_RE = re.compile(
     rf"^https://github\.com/{re.escape(REPOSITORY)}/compare/(rel-\d+\.\d+\.\d+)\.\.\.(rel-\d+\.\d+\.\d+)$"
@@ -137,11 +148,31 @@ def check_text(name: str, tag: str, text: str) -> list[str]:
     return problems
 
 
+def check_next_text(name: str, text: str) -> list[str]:
+    """Returns one message per tag-bearing part found in the NEXT.md draft `text`; empty when it has none."""
+    problems: list[str] = []
+    forbidden = [
+        (HEADING_RE, "a '## Verifying these artifacts' section"),
+        (VERIFY_COMMAND_RE, "a 'sigstore verify identity' command"),
+        (IDENTITY_RE, "a --cert-identity"),
+        (CHANGELOG_RE, "a '**Full Changelog**' line"),
+    ]
+    for pattern, description in forbidden:
+        if pattern.search(text):
+            problems.append(
+                f"{name}: contains {description}, which names the release's tag; NEXT.md names no version, "
+                "so add it when the file is renamed at the cut"
+            )
+    return problems
+
+
 def check_file(path: Path) -> list[str]:
     """Returns one message per problem found in `path`; empty when it passes."""
+    if path.name == NEXT_NAME:
+        return check_next_text(str(path), path.read_text(encoding="utf-8"))
     tag = path.stem
     if path.suffix != ".md" or not STEM_RE.match(tag):
-        return [f"{path}: name must be rel-X.Y.Z.md (release.yml looks the notes up by tag)"]
+        return [f"{path}: name must be rel-X.Y.Z.md or {NEXT_NAME} (release.yml looks the notes up by tag)"]
     return check_text(str(path), tag, path.read_text(encoding="utf-8"))
 
 
@@ -189,6 +220,27 @@ def self_test() -> list[str]:
     for description, notes in bad_cases.items():
         if not check_text(f"<{description}>", "rel-2.1.0", notes):
             failures.append(f"{description} was accepted")
+
+    # The draft's own checklist names each forbidden part in prose; that must not trip the rule.
+    next_draft = """# Release Notes — next release (unreleased)
+
+4. **Add the `## Verifying these artifacts` section**: `sigstore verify identity` over all three files, with
+   `--cert-identity` ending `release.yml@refs/tags/rel-<version>`.
+5. **End with the Full Changelog line**:
+   `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<previous>...rel-<version>`.
+"""
+    good_next = check_next_text("<good NEXT.md>", next_draft)
+    if good_next:
+        failures.append("a correct NEXT.md was rejected:\n      " + "\n      ".join(good_next))
+    for description, notes in {
+        "a NEXT.md with a verification section": next_draft + "\n## Verifying these artifacts\n",
+        "a NEXT.md with a verify command": next_draft + "\n```bash\nsigstore verify identity \\\n```\n",
+        "a NEXT.md with a signing identity": next_draft + f'\n  --cert-identity "{expected_identity("rel-2.1.0")}"\n',
+        "a NEXT.md with a Full Changelog line": next_draft
+        + f"\n**Full Changelog**: https://github.com/{REPOSITORY}/compare/rel-2.0.0...rel-2.1.0\n",
+    }.items():
+        if not check_next_text(f"<{description}>", notes):
+            failures.append(f"{description} was accepted")
     return failures
 
 
@@ -200,7 +252,12 @@ def main(argv: list[str]) -> int:
             print(f"  {failure}")
         return 1
 
-    paths = [Path(arg) for arg in argv] if argv else sorted(NOTES_DIR.glob("rel-*.md"))
+    if argv:
+        paths = [Path(arg) for arg in argv]
+    else:
+        paths = sorted(NOTES_DIR.glob("rel-*.md"))
+        if (NOTES_DIR / NEXT_NAME).is_file():
+            paths.append(NOTES_DIR / NEXT_NAME)
     if not paths:
         print(f"FAIL: no release notes found under {NOTES_DIR}")
         return 1
