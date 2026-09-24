@@ -73,19 +73,29 @@ format.
   interval a configuration was in effect" does
   `print(activation.startTime.epochSeconds, activation.endTime.epochSeconds)`, which prints `0` for an
   open-ended activation.  The ticket lists only the "still open" recipe (~line 183–193) as needing
-  change.  Two more spots need it:
+  change.  Three more spots need it:
   - "Closing one activation and opening the next" step 1 reads the current activation by a known
     `client_activation_id`.  It should also show how to find the open one when you don't have the id.
   - The `get_active_configurations()` paragraph states the match rule as `startTime <= t` and
     `endTime > t`, without saying that an absent `endTime` also matches.  The section above it says so,
     but the rule as written is incomplete.
+  - The closing recipe's "Copy every field forward" advice never mentions `end_time`, because in that
+    recipe `end_time` is the field being changed.  A reader who applies the same full-replace pattern to
+    some other edit, such as retagging an open activation, will write `end_time=current.endTime`.  That
+    sends a zero `Timestamp` with presence set.  The server does not treat it as open: it rejects the
+    save with `SaveConfigurationActivationRequest.endTime must be after startTime`
+    (`SaveConfigurationActivationJob`, the `compare(endTime, startTime) <= 0` check).  It fails loudly,
+    but the message blames an end time the caller never meant to set.
 
 - **T5 — There is no precedent to match in the Java client.**  dp-service's `dp.client` result classes
   have no open-ended accessor, so there is no cross-language name to follow.
 
-- **T6 — No existing tests assert behavior this changes.**  The change is purely additive.  The only
-  existing `HasField("endTime")` assertions are on *requests*, in `TestBuildSaveActivationRequest`, and
-  they stay as they are.
+- **T6 — No existing tests assert behavior this changes.**  The change is purely additive.  In the unit
+  suite, the only `HasField("endTime")` assertions are on *requests*, in `TestBuildSaveActivationRequest`,
+  and they stay as they are.  The integration suite asserts presence on *responses*
+  (`test_machine_config_client_integration.py`, the open-ended round trip ~line 359 and the close
+  ~line 402).  Those assertions stay too, and the integration task below adds helper assertions
+  beside them rather than replacing them.
 
 ## Design decisions
 
@@ -102,8 +112,14 @@ format.
   together.
 
 - **D3 — `activation_end_time()` returns `common_pb2.Timestamp | None`, not epoch nanos or a datetime.**
-  It returns the same type as the field, so it can be passed straight back as `end_time=` in the
-  full-replace re-save the cookbook's closing recipe does.  `to_timestamp()` accepts a `Timestamp` as-is.
+  It returns the same type as the field, so it can be passed straight back as `end_time=` in a
+  full-replace re-save.  `to_timestamp()` accepts a `Timestamp` as-is.  This is the main reason for the
+  return type: `end_time=activation_end_time(current)` is the one correct way to carry an end time
+  forward, because it passes `None` through for an open record and keeps it open.  The obvious
+  alternative, `end_time=current.endTime`, turns an open record into one ending in 1970, which the
+  server rejects with a message about an end time the caller never set (T4, last bullet).  A datetime
+  return would also work there, but would round to microseconds.  A nanos return would not work at all:
+  `end_time=` reads an int as epoch *seconds*.
   A caller who wants nanos composes it with `to_epoch_nanos()`.  Converting here would have to pick one
   representation for everyone.  It returns the message's own sub-message, not a copy, the same as
   `configuration_activation` does.
@@ -150,6 +166,8 @@ format.
 - reading `a.endTime` first (e.g. `a.endTime.epochSeconds`) does not make an open record look closed
   (T3's last row);
 - the returned `Timestamp` round-trips as `end_time=` through `_build_save_configuration_activation_request`;
+- carrying an **open** record forward with `end_time=activation_end_time(open_record)` builds a request
+  whose `endTime` is still absent.  This pins the cookbook's carry-forward guidance (D3);
 - works on records taken from a `QueryConfigurationActivationsApiResult` page that mixes open and closed
   records: filtering with the helper keeps exactly the open ones.  This pins the query-path use case
   (T2).
@@ -166,8 +184,19 @@ format.
   sentence on the T3 hazard, pointing at `activation_end_time()`.
 - "Closing one activation and opening the next": add a short variant for step 1 that finds the open
   activation by configuration name with `iter_configuration_activations([CA.configuration_name([...])])`
-  and filters with `activation_is_open()`.  Say what to do when there is not exactly one open record.
-  Keep the known-id form as the main path.
+  and filters with `activation_is_open()`.  Keep the known-id form as the main path.  Handle the count
+  explicitly, because the server's rules make each case mean something specific:
+  - **zero open records** is normal.  Nothing is in effect for that configuration, so skip the close
+    and go straight to step 3;
+  - **exactly one** is the expected live-bridge case.  Close it;
+  - **more than one** should not happen.  dp-service rejects an activation that overlaps another with
+    the same `configurationName` or the same category (`MongoSyncAnnotationClient`'s overlap check), so
+    two open records for one name can exist only through the race that check's own comment accepts as a
+    v1 limitation: the check and the write are not atomic.  The recipe raises rather than choosing one.
+    Closing either would leave the other open and still overlapping.
+- "Copy every field forward" (the list after the closing recipe): add `end_time` to it.  A re-save that
+  is not closing the activation carries the end time forward with `end_time=activation_end_time(current)`,
+  never `current.endTime`.  Give the one-sentence reason (T4, last bullet).
 - "Every interval a configuration was in effect": print via `activation_end_time()`, showing
   "still in effect" for `None` (T4).
 - `get_active_configurations()` paragraph: state the match rule as `startTime <= t` and either
@@ -209,7 +238,17 @@ machine-config integration test against a live stack, if one is available.
 
 ## Open questions
 
-- **Q1 — Property, module helper, or both?**  *Resolved 2026-09-24: module helper only* (D1).
-- **Q2 — Also add an end-time accessor returning `None` for open records?**  *Resolved 2026-09-24: yes,
+- **Q1 — Property, module helper, or both?**  The ticket proposes `is_open` on
+  `GetConfigurationActivationApiResult`.  But activations also come back from query, iterate, and
+  `get_active_configurations()`, and the live-bridge case is usually a query (T2).  *Recommendation*: a
+  module helper only; a property would cover one path of four and give two ways to ask one question.
+  *Resolved 2026-09-24: module helper only* (D1).
+- **Q2 — Also add an end-time accessor returning `None` for open records?**  The ticket asks only for a
+  boolean.  But reading `.endTime` on an open record silently gives 1970 (T3), and carrying it forward
+  in a re-save makes the server reject the save (T4).  *Recommendation*: yes, returning the field's own
+  `Timestamp` type so it can go straight back as `end_time=`.  *Resolved 2026-09-24: yes,
   `activation_end_time()`* (T3, D3).
-- **Q3 — Naming.**  *Resolved 2026-09-24: `activation_is_open` / `activation_end_time`* (D2).
+- **Q3 — Naming.**  The helpers land in the crowded `dp_python_lib.client` namespace, where a bare
+  `is_open` / `end_time` could mean a channel, a file, or a params field.  *Recommendation*: an
+  `activation_` prefix, which names the subject and sorts the pair together.  *Resolved 2026-09-24:
+  `activation_is_open` / `activation_end_time`* (D2).
