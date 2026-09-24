@@ -79,10 +79,13 @@ to two small modules, and the prototype below shows it works.
   cannot override **any** setting with `MLDP_*`.  For the tests this means two things.  Any new test that goes
   through discovery will pick up this file.  And a developer shell with `MLDP_*` exported (for example, left
   over from pointing integration tests at a remote ecosystem) will leak into tests that assume defaults.
-  The new tests pass an explicit `config_file` and clear ambient `MLDP_*` variables.
+  The new tests pass an explicit `config_file` and clear ambient `MLDP_*` variables.  The existing tests
+  are left as they are: they use `patch.dict(os.environ, {...})` without `clear=True`, so an exported
+  `MLDP_*` variable can still leak into them.  Retrofitting them is out of scope here (see
+  [Out of scope](#out-of-scope)).
 
 - **T7 — The test gap goes beyond the two tests the triage comment named.**
-  `test_config.py:303` `test_load_config_from_yaml` patches `from_yaml` away entirely, as noted.
+  `test_config.py:305` `test_load_config_from_yaml` patches `from_yaml` away entirely, as noted.
   `test_mldp_client.py:197` `test_config_from_yaml_file` is the only real-file test that goes end to end, and
   it sets no env vars.  No test anywhere combines a real YAML file with `MLDP_*`.  No test pins the
   `config_object` precedence either: `test_load_config_with_explicit_object` sets no env var, so it cannot
@@ -109,6 +112,13 @@ to two small modules, and the prototype below shows it works.
     cannot tell `MLDP_INGESTION_USE_TLS` apart from `MLDP_INGESTION_USE` + `TLS`.
   - *Rejected: filter `flat_data` down to keys with no matching env var before calling `cls(**...)`.*  That
     re-implements pydantic's env lookup (prefix, case folding, dotenv) by hand, and would drift from it.
+  - *Rejected: build `cls()` once with no YAML, drop from `flat_data` every field in its `model_fields_set`,
+    then call `cls(**remaining)`.*  Unlike the previous alternative this does not re-implement the env lookup
+    (pydantic does it), and a prototype gives the right answer for every T2 case, D2 included.  It is still
+    rejected: it constructs the object twice; it relies on `model_fields_set` including fields that came from
+    settings sources, which is how pydantic-settings behaves today (sources are merged into the init data) but
+    is not documented; and it feeds YAML values back in as init kwargs, which is exactly what the task 6
+    invariant forbids, so the next change to `from_yaml()` could quietly reintroduce the bug.
   - *Rejected: a dynamic subclass carrying the path in `model_config`.*  `type(result)` would no longer be
   `MldpConfig`.
   - Why a ContextVar and not a class attribute: it is safe across threads and asyncio tasks, and `reset()` in
@@ -138,7 +148,9 @@ to two small modules, and the prototype below shows it works.
    - In `from_yaml()`, replace `return cls(**flat_data)` with the set / `cls()` / reset-in-`finally` sequence.
      Leave the `FileNotFoundError` → `cls()` fallback and the error wrapping alone.  Update the docstring:
      `MLDP_*` variables override values from the file.
-2. **`src/dp_python_lib/config/loader.py`** — Make the `config_object` branch `return config_object`
+2. **`src/dp_python_lib/config/loader.py`** — Change the guard from `if config_object:` to
+   `if config_object is not None:` (the same reasoning as the comment in `mldp_client.py`: a truthiness test
+   on a caller-supplied object is the wrong test), and make the branch `return config_object`
    (per D3; Q1 resolved).  Use the log message `"Using explicit config object"` and a comment saying explicit
    parameters are level 1.  Fix the stale comments at `:106` / `:109` if they no longer read true.
 3. **`tests/unit/test_config.py`**
@@ -149,8 +161,12 @@ to two small modules, and the prototype below shows it works.
      absent key falls back to default or env, and bool/int coercion from env over YAML (`use_tls`, `port`).
    - The same matrix through `MldpConfig.from_yaml()` directly, since it is public.
    - `MLDP_CONFIG_FILE` selecting the file **and** an `MLDP_*` override applying to it.
-   - `load_config(config_object=MldpConfig(ingestion_host="explicit"))` with `MLDP_INGESTION_HOST` set
-     resolves to `"explicit"`, which pins level 1 (T7).
+   - `load_config(config_object=custom_config)` with `MLDP_INGESTION_HOST` set resolves to `"explicit"`,
+     which pins level 1 (T7).  Two details make this test meaningful:
+     - Build `custom_config = MldpConfig(ingestion_host="explicit")` **inside** the patched environment.
+       Built beforehand, env was never a candidate and "explicit wins" holds for any implementation.
+     - Also `assertIs(result, custom_config)`.  The old nine-field rebuild produces the same values, so a
+       value check alone cannot tell D3 apart from the code it replaces.
    - After `from_yaml()` fails on a file with an invalid value, a plain `MldpConfig()` gets defaults.  This
      proves the ContextVar reset works.
    - D2: an invalid YAML value that an env var overrides loads without error.
@@ -168,7 +184,9 @@ to two small modules, and the prototype below shows it works.
    that states the silent behavior change from T5 plainly.  If the release is cut as breaking, this goes on
    the upgrade checklist under silent changes.  Add it to the Contents list.
 8. Quality gates: `pytest tests/unit/`, `ruff check .`, `ruff format --check .`, `mypy src/` (the
-   `settings_customise_sources` override must match the base signature exactly).
+   `settings_customise_sources` override must match the base signature exactly),
+   `.dev/tools/check-cookbook-snippets.py` (task 5), and `.dev/tools/check-release-notes.py` (task 7 edits
+   `NEXT.md`, which it checks).
 
 ## Out of scope
 
@@ -177,6 +195,8 @@ to two small modules, and the prototype below shows it works.
   separate usability issue; file it if wanted.
 - `.env` / secrets-dir support: not configured today, and the source order leaves room for it.
 - Any change to discovery order (`find_config_file`), which already behaves as documented.
+- Isolating the existing `test_config.py` tests from ambient `MLDP_*` variables (T6).  They predate this
+  ticket and pass on a clean shell and in CI; the new tests clear the environment themselves.
 
 ## Dependencies and sequencing
 
