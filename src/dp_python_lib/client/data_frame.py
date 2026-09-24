@@ -22,6 +22,7 @@ Design decisions (see plan/tickets/6/plan.md, D6):
     the ones its builders return.
 """
 
+from collections.abc import Sequence
 from numbers import Integral, Real
 from typing import Any
 
@@ -110,7 +111,7 @@ def sampling_clock(
     return timestamps
 
 
-def timestamp_list(values: list[TimestampInput]) -> common_pb2.DataTimestamps:
+def timestamp_list(values: Sequence[TimestampInput]) -> common_pb2.DataTimestamps:
     """
     Builds a DataTimestamps with an explicit TimestampList time axis, the form for irregularly-spaced samples --
     and, for sample status, for sparse labeling that names only the samples being labeled.

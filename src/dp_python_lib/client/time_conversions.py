@@ -20,12 +20,13 @@ Design decisions:
 
 import math
 from datetime import datetime, timezone
+from typing import TypeAlias
 
 from dp_python_lib.grpc import common_pb2
 
 # Accepted input types for API parameters that map to a common.Timestamp:
 # a timezone-aware datetime, epoch seconds (int or float), or an already-built Timestamp.
-TimestampInput = datetime | int | float | common_pb2.Timestamp
+TimestampInput: TypeAlias = datetime | int | float | common_pb2.Timestamp
 
 
 NANOS_PER_SECOND = 1_000_000_000

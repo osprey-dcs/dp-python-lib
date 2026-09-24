@@ -57,7 +57,7 @@ jobs:
         run: pytest tests/unit -v -m "not integration"
 
   quality:
-    name: Lint, format, and docs
+    name: Lint, type-check, and docs
     runs-on: ubuntu-latest
     # These checks are interpreter-independent, so they run once rather than on all four
     # matrix legs -- no added signal, 4x the runtime.
@@ -85,10 +85,21 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+      - name: Type check
+        # Config under [tool.mypy] in pyproject.toml.  The generated gRPC package is excluded
+        # until it ships typed stubs (osprey-dcs/dp-grpc#158); everything hand-written is checked.
+        run: mypy src/
+
       - name: Check cookbook snippets
         # Type-checks every Python example in doc/cookbook against this package, so a recipe
         # referencing a renamed attribute or method fails here rather than in a user's hands.
         run: python .dev/tools/check-cookbook-snippets.py
+
+      - name: Check release notes
+        # Each doc/release-notes/rel-X.Y.Z.md is published verbatim as its release body, so it
+        # must carry a verification section whose signing identity names its own tag.  Checked
+        # here so a mistake fails the notes PR, not the tag push.
+        run: python .dev/tools/check-release-notes.py
 
   build:
     name: Build distributions

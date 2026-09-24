@@ -129,8 +129,8 @@ older than your `dp_python_lib` will not implement everything listed here.  The 
 **Project infrastructure**
 
 - Publishing to PyPI.  The release workflow has the job wired up but disabled; everything else —
-  unit tests across Python 3.10-3.13, lint and format checks, the cookbook snippet checker, and
-  signed release artifacts — runs in CI today.
+  unit tests across Python 3.10-3.13, lint, format, and type checks, the cookbook snippet checker,
+  and signed release artifacts — runs in CI today.
 
 ## Installation
 
@@ -143,9 +143,12 @@ pip install -e .
 # with pandas / NumPy / Excel conversions for query results
 pip install -e .[analysis]
 
-# development tooling (pytest, mypy for the cookbook snippet checker)
+# development tooling (pytest, ruff, mypy)
 pip install -e .[dev]
 ```
+
+Released wheels are also attached to each [GitHub release](https://github.com/osprey-dcs/dp-python-lib/releases),
+with checksums and Sigstore signatures; [`README.env`](README.env) says how to verify them.
 
 **Upgrading from 1.15.0 or earlier:** 1.16.0 raises the `grpcio` floor to 1.84.0, because the
 regenerated stubs require it.  `pip install` picks that up, but an existing editable install will

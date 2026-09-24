@@ -49,12 +49,30 @@ a comment saying why, rather than reshaping correct code to satisfy the linter. 
 examples: the naive-datetime test inputs (`DTZ001`) that exist precisely to assert a
 `ValueError`, and the numpy import that doubles as the `[analysis]` availability probe (`F401`).
 
+### Type Checking
+```bash
+mypy src/                 # what CI runs; must report "Success"
+```
+Configured under `[tool.mypy]` in `pyproject.toml`.  The generated `src/dp_python_lib/grpc/`
+package has no type information, so it is excluded and its imports resolve to `Any` -- both an
+`exclude` and a `follow_imports = "skip"` override are needed, and the comment there says why.
+They go once dp-grpc ships typed stubs (osprey-dcs/dp-grpc#158), at which point a `py.typed`
+marker becomes worth adding.  There is deliberately no `python_version`: numpy's stubs use 3.12
+syntax, and pinning 3.10 stops mypy checking anything.  Two consequences worth knowing:
+
+- An alias whose union includes a proto type needs an explicit `TypeAlias` annotation
+  (`TimestampInput: TypeAlias = ...`); with the proto resolving to `Any`, mypy no longer infers it.
+- `client.annotation` / `client.query` are typed `X | None`, because they are.  The cookbook
+  checker's preamble narrows them once; do **not** switch the checker to
+  `--disable-error-code=union-attr` instead, which also hides misspelled names reached through
+  them (the checker's self-test fails if you try).
+
 ### Continuous Integration and Releases
 GitHub Actions workflows live in `.github/workflows/`:
 
 - **`ci.yml`** — runs on PRs targeting `main` and on pushes to `main`.  Three jobs:
   unit tests across Python 3.10–3.13; a single-interpreter quality job (ruff lint,
-  ruff format check, cookbook snippet checker); and a build job that produces the
+  ruff format check, `mypy src/`, cookbook snippet checker, release-notes checker); and a build job that produces the
   wheel/sdist, runs `twine check --strict`, and verifies the wheel imports in a
   clean venv.  Integration tests are deselected with `-m "not integration"`.
 - **`release.yml`** — runs on `rel-X.Y.Z` tag pushes.  Builds the wheel and sdist,
@@ -91,12 +109,32 @@ a note by issue ticket rather than by PR, since a ticket often spans several PRs
 a breaking release with an "Upgrading from <previous>" checklist that separates silent
 behavior changes from outright errors.
 
-`release.yml` publishes the document as the GitHub release body: the build job concatenates
-it with the artifact verification and install instructions into `dist/RELEASE_BODY.md`,
-which the publish job passes as `body_path` (that job never checks out the repo, so the
-notes travel with the `dist/` upload).  Note `body_path` *overrides* `body` rather than
-complementing it, so those instructions belong in the assembled file, not in a `body:` input.
-GitHub's own generated commit list is appended after all of it.
+**The notes file is the release body, verbatim** (#56; `plan/tickets/56/plan.md`), the same
+arrangement as the Java repos.  `release.yml` copies it to `dist/RELEASE_NOTES.md` (the publish job
+never checks out the repo, so it travels with the `dist/` upload) and passes that as `body_path`;
+nothing is appended, and `generate_release_notes` is deliberately off.  A step after publishing
+diffs the live body against the file.  So each notes file must carry, by hand:
+
+- a `## Verifying these artifacts` section: `sha256sum -c SHA256SUMS`, then
+  `sigstore verify identity` over the wheel, sdist, and `SHA256SUMS`, with `--cert-identity`
+  exactly `https://github.com/osprey-dcs/dp-python-lib/.github/workflows/release.yml@refs/tags/<this tag>`,
+  plus a pointer to `README.env`, the full verification reference;
+- a `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<prev>...rel-<this>` line,
+  standing in for GitHub's generated commit list.
+
+`.dev/tools/check-release-notes.py` enforces both, and above all the tag in the identity: the
+section is usually copied from the previous release, and a stale tag makes `sigstore verify`
+reject every genuine artifact.  It also requires each verify command to name all three files (the
+backported rel-1.16.0 section first verified the wheel only), and the changelog link to end at
+this file's tag and start at an earlier one; which release came before is not knowable from one
+file, so `<prev>` is checked only for being earlier.  Each run starts with a self-test that feeds
+the rules known-bad notes, so a rule that stops matching fails loudly instead of passing everything.
+It runs in CI's quality job and again at tag time.
+
+**Never edit a release page by hand.**  Fix the notes file by PR, then republish with
+`gh release edit rel-X.Y.Z --notes-file doc/release-notes/rel-X.Y.Z.md`.  With the file as the
+whole body that is lossless; when the workflow appended a verification section, exactly this
+command silently stripped it from rel-1.16.0's page (#56).
 
 The build job fails early — before building — if `doc/release-notes/<tag>.md` is missing on
 the tagged commit, so **write the notes and merge them before pushing the `rel-*` tag**.  A
@@ -112,7 +150,8 @@ Core dependencies are managed in `pyproject.toml`:
 
 Optional extras:
 - `[analysis]` - `pandas`, `numpy`, `openpyxl` for the query-result conversions
-- `[dev]` - `pytest`, `mypy`, `ruff`; install with `pip install -e ".[analysis,dev]"`
+- `[dev]` - `pytest`, `mypy` (with `types-PyYAML`, `types-protobuf`, `pandas-stubs`), `ruff`, `build`, `twine`;
+  install with `pip install -e ".[analysis,dev]"`
 
 ## Ticket Planning Workflow
 

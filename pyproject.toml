@@ -55,11 +55,17 @@ analysis = [
   "openpyxl",
 ]
 
-# Development tooling.  Not required to use the library.  mypy backs the cookbook snippet
-# checker (.dev/tools/check-cookbook-snippets.py), which type-checks every example in
-# doc/cookbook against this package to catch wrong attribute/method names in the docs.
+# Development tooling.  Not required to use the library.  mypy runs in CI as `mypy src/`
+# (config under [tool.mypy]) and also backs the cookbook snippet checker
+# (.dev/tools/check-cookbook-snippets.py), which type-checks every example in doc/cookbook
+# against this package to catch wrong attribute/method names in the docs.  The types-* and
+# pandas-stubs packages are the third-party stubs mypy needs to check against real
+# signatures rather than treating those imports as untyped.
 dev = [
   "mypy",
+  "types-PyYAML",
+  "types-protobuf",
+  "pandas-stubs",
   "pytest",
   "ruff",
   "build",
@@ -91,6 +97,27 @@ testpaths = ["tests"]
 markers = [
   "integration: requires a live MLDP ecosystem on localhost:50051-50053 (deselect with '-m \"not integration\"')",
 ]
+
+[tool.mypy]
+# No python_version: numpy's bundled stubs use the 3.12 `type` statement, and pinning 3.10
+# makes mypy refuse to check anything.  mypy checks against the running interpreter (3.12 in
+# CI's quality job); the 3.10 unit-test leg and ruff's target-version guard 3.10 syntax.
+#
+# The generated gRPC package is untyped (no .pyi stubs; osprey-dcs/dp-grpc#158), so it is
+# excluded from checking and its imports are resolved to Any.  Both are needed: `exclude`
+# alone still follows imports into it, and `follow_imports = "skip"` alone does nothing for
+# files `mypy src/` names on the command line.  Remove both once typed stubs are synced.
+exclude = ["^src/dp_python_lib/grpc/"]
+
+[[tool.mypy.overrides]]
+module = ["dp_python_lib.grpc.*"]
+follow_imports = "skip"
+
+# grpcio ships no type information and there is no maintained stub package for it.  Scoped
+# to grpc rather than set globally, which would also hide a genuinely missing dependency.
+[[tool.mypy.overrides]]
+module = ["grpc", "grpc.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 # 120 matches the margin this codebase was already written to: at line-length 100 there were

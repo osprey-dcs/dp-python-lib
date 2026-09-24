@@ -173,6 +173,16 @@ def image_descriptor_dict(column: Any) -> dict[str, Any] | None:
     """
     if not isinstance(column, common_pb2.ImageColumn):
         return None
+    return _image_descriptor(column)
+
+
+def _image_descriptor(column: common_pb2.ImageColumn) -> dict[str, Any]:
+    """
+    The descriptor dict for a column already known to be an ImageColumn.
+
+    Split out so data_frame_image_descriptors(), which iterates imageColumns and so never sees another kind, gets a
+    non-optional dict by construction rather than by a cast over image_descriptor_dict()'s None arm.
+    """
     descriptor = column.imageDescriptor
     return {
         "width": descriptor.width,
@@ -206,7 +216,7 @@ def data_frame_image_descriptors(frame: common_pb2.DataFrame) -> dict[str, dict[
     :param frame: The frame to inspect.
     :return: A dict of column name -> descriptor dict; empty when the frame has no image columns.
     """
-    return {column.name: image_descriptor_dict(column) for column in frame.imageColumns}
+    return {column.name: _image_descriptor(column) for column in frame.imageColumns}
 
 
 def data_frame_schema_ids(frame: common_pb2.DataFrame) -> dict[str, str]:
