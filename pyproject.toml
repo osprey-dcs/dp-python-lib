@@ -65,6 +65,7 @@ dev = [
   "mypy",
   "types-PyYAML",
   "types-protobuf",
+  "types-grpcio",
   "pandas-stubs",
   "pytest",
   "ruff",
@@ -73,9 +74,15 @@ dev = [
 ]
 
 # Toolchain for regenerating the gRPC stubs in src/dp_python_lib/grpc from the upstream
-# dp-grpc protos.  Not needed to use or develop against the library.
+# dp-grpc protos.  Not needed to use or develop against the library.  mypy-protobuf is the
+# protoc plugin behind --mypy_out / --mypy_grpc_out, which write the .pyi type stubs beside the
+# generated .py files (osprey-dcs/dp-grpc#158); without it a regeneration produces untyped stubs.
+# dp-grpc is the authority on the generator: its tools/python-stubs-requirements.in pins the
+# versions and its generate-python-stubs.yml workflow sets the flags.  Keep these minimums in step
+# with those pins (#61).
 codegen = [
   "grpcio-tools>=1.84.0",
+  "mypy-protobuf>=5.1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -106,18 +113,16 @@ markers = [
 # The generated gRPC package is untyped (no .pyi stubs; osprey-dcs/dp-grpc#158), so it is
 # excluded from checking and its imports are resolved to Any.  Both are needed: `exclude`
 # alone still follows imports into it, and `follow_imports = "skip"` alone does nothing for
-# files `mypy src/` names on the command line.  Remove both once typed stubs are synced.
+# files `mypy src/` names on the command line.  Remove both once typed stubs are synced (#61).
+#
+# Neither holds against .pyi files: mypy reads a stub whenever one is present, whatever
+# follow_imports says.  So once a sync brings dp-grpc's .pyi stubs, the hand-written code is
+# checked against real protobuf types even with this suppression in place.
 exclude = ["^src/dp_python_lib/grpc/"]
 
 [[tool.mypy.overrides]]
 module = ["dp_python_lib.grpc.*"]
 follow_imports = "skip"
-
-# grpcio ships no type information and there is no maintained stub package for it.  Scoped
-# to grpc rather than set globally, which would also hide a genuinely missing dependency.
-[[tool.mypy.overrides]]
-module = ["grpc", "grpc.*"]
-ignore_missing_imports = true
 
 [tool.ruff]
 # 120 matches the margin this codebase was already written to: at line-length 100 there were

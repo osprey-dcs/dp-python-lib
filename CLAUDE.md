@@ -57,8 +57,18 @@ Configured under `[tool.mypy]` in `pyproject.toml`.  The generated `src/dp_pytho
 package has no type information, so it is excluded and its imports resolve to `Any` -- both an
 `exclude` and a `follow_imports = "skip"` override are needed, and the comment there says why.
 They go once dp-grpc ships typed stubs (osprey-dcs/dp-grpc#158), at which point a `py.typed`
-marker becomes worth adding.  There is deliberately no `python_version`: numpy's stubs use 3.12
-syntax, and pinning 3.10 stops mypy checking anything.  Two consequences worth knowing:
+marker becomes worth adding.  The suppression does **not** hold against `.pyi` files: mypy reads a
+stub whenever one is present, whatever `follow_imports` says.  So the first stub sync that carries
+`.pyi` files type-checks the hand-written code against real protobuf types even with the
+suppression still in place, and that code has to be clean against them *before* the sync arrives.
+It was made so ahead of time; keep it so by checking a change against locally generated stubs
+(`[codegen]` extra, at the versions pinned in dp-grpc's `tools/python-stubs-requirements.in` and
+with its `generate-python-stubs.yml` flags) when it touches proto types in a way `Any` would hide.
+`grpc` itself is typed through `types-grpcio`.  The rest of the adoption (removing the
+suppression, typing `_stub`, `py.typed`) is tracked in #61.
+
+There is deliberately no `python_version`: numpy's stubs use 3.12 syntax, and pinning 3.10 stops
+mypy checking anything.  Two consequences worth knowing:
 
 - An alias whose union includes a proto type needs an explicit `TypeAlias` annotation
   (`TimestampInput: TypeAlias = ...`); with the proto resolving to `Any`, mypy no longer infers it.
@@ -167,8 +177,9 @@ Core dependencies are managed in `pyproject.toml`:
 
 Optional extras:
 - `[analysis]` - `pandas`, `numpy`, `openpyxl` for the query-result conversions
-- `[dev]` - `pytest`, `mypy` (with `types-PyYAML`, `types-protobuf`, `pandas-stubs`), `ruff`, `build`, `twine`;
+- `[dev]` - `pytest`, `mypy` (with `types-PyYAML`, `types-protobuf`, `types-grpcio`, `pandas-stubs`), `ruff`, `build`, `twine`;
   install with `pip install -e ".[analysis,dev]"`
+- `[codegen]` - `grpcio-tools`, `mypy-protobuf`; only for regenerating `src/dp_python_lib/grpc/`
 
 ## Ticket Planning Workflow
 

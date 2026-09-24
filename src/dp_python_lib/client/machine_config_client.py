@@ -1078,6 +1078,8 @@ class MachineConfigClient(ServiceApiClientBase):
                 "Building GetConfigurationActivationRequest by composite key: %s",
                 configuration_name,
             )
+            # Guaranteed by _validate_activation_key above; the assert only narrows the Optionals for mypy.
+            assert configuration_name is not None and start_time is not None
             request.compositeKey.configurationName = configuration_name
             request.compositeKey.startTime.CopyFrom(to_timestamp(start_time))
         return request
@@ -1278,6 +1280,8 @@ class MachineConfigClient(ServiceApiClientBase):
                 "Building DeleteConfigurationActivationRequest by composite key: %s",
                 configuration_name,
             )
+            # Guaranteed by _validate_activation_key above; the assert only narrows the Optionals for mypy.
+            assert configuration_name is not None and start_time is not None
             request.compositeKey.configurationName = configuration_name
             request.compositeKey.startTime.CopyFrom(to_timestamp(start_time))
         return request
