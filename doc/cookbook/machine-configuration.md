@@ -257,28 +257,45 @@ Two things to get right:
 
 ### When you do not have the activation's id
 
-A live bridge often knows only which configuration is in effect, not the id of its open
-activation.  There is no server-side criterion for "open", so query by configuration name and
-filter:
+A live bridge often knows only the configuration it is switching *to*, not the id of the
+activation it must close, or even which configuration that activation belongs to.  Look it up
+by what the server checks.  Step 3 is rejected if the new interval overlaps any activation in
+the same category, whatever that activation's configuration name.  So ask for the activation in
+that category that is in effect at the changeover:
 
 ```python
 # cookbook:partial
 machine_config = client.annotation.machine_config
+changeover = datetime(2026, 2, 2, 23, 0, tzinfo=timezone.utc)
 
-open_activations = [
-    a for a in machine_config.iter_configuration_activations([CA.configuration_name(["cxi-production"])])
-    if activation_is_open(a)
-]
-if len(open_activations) > 1:
-    raise RuntimeError(f"{len(open_activations)} open activations for cxi-production; expected at most one")
-current = open_activations[0] if open_activations else None   # None: nothing to close, go to step 3
+incoming = machine_config.get_configuration("mfx-production")
+if incoming.result_status.is_error:
+    raise RuntimeError(incoming.result_status.message)
+assert incoming.configuration is not None
+category = incoming.configuration.category
+
+in_effect = list(machine_config.iter_configuration_activations([
+    CA.category([category]),
+    CA.timestamp(changeover),       # in effect at the changeover, open-ended ones included
+]))
+if len(in_effect) > 1:
+    raise RuntimeError(f"{len(in_effect)} activations in effect for category {category!r}; expected at most one")
+current = in_effect[0] if in_effect else None   # None: nothing to close, go to step 3
 ```
 
-Zero open records is normal: nothing is in effect, so skip the close and go straight to step 3.
-More than one should not happen, since the server rejects an activation overlapping another with
-the same configuration name or category.  It can arise only if two saves race past that check,
-which is not atomic.  Raise rather than pick one: closing either leaves the other open and still
+Do not narrow this to open activations with `activation_is_open()`.  An activation with a
+scheduled end after the changeover blocks step 3 just as an open one does, and step 2 closes
+either kind the same way, by setting `end_time` to the changeover.
+
+Zero results is normal: nothing in that category is in effect, so skip the close and go straight
+to step 3.  More than one should not happen, since the server rejects an activation overlapping
+another in the same category.  It can arise only if two saves race past that check, which is not
+atomic.  Raise rather than pick one: closing either leaves the other in effect and still
 overlapping.
+
+An activation in the category that *starts* after the changeover is not returned, and step 3
+is still rejected if it overlaps one.  That is a scheduled activation, and a real conflict for
+a person to resolve, not something for the bridge to close.
 
 ### Late reports
 
@@ -308,8 +325,8 @@ for activation in result.configuration_activations:
 ```
 
 `get_active_configurations()` returns every activation whose interval covers that instant —
-`startTime <= t`, and either `endTime > t` or no `endTime` at all (an open-ended activation).  Several may be active at once when they belong to different
-categories.
+`startTime <= t`, and either `endTime > t` or no `endTime` at all (an open-ended activation).
+Several may be active at once when they belong to different categories.
 
 Called with no argument, it answers **"what is active right now"**:
 

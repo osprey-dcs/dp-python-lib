@@ -529,10 +529,12 @@ mc.get_configuration_activation(configuration_name="beamline-optics", start_time
 
 # query/iterate activations (raises RuntimeError on a page error)
 for a in mc.iter_configuration_activations([CA.configuration_name(["beamline-optics"])]):
-    print(a.clientActivationId, "open" if activation_is_open(a) else activation_end_time(a).epochSeconds)
+    ends_at = activation_end_time(a)   # None while open; never read a.endTime directly
+    print(a.clientActivationId, ends_at.epochSeconds if ends_at is not None else "open")
 
 # what is active right now? (pass a timestamp for a historical instant)
 active = mc.get_active_configurations().configuration_activations
+open_ended = [a for a in active if activation_is_open(a)]
 
 mc.delete_configuration_activation(client_activation_id="act-001")
 mc.delete_configuration("beamline-optics")

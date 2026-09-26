@@ -127,15 +127,16 @@ back (one saved without `end_time`, meaning "still in effect"):
 Both work on an activation from any read path: get, query, iterate, or
 `get_active_configurations()`.  They exist because reading `activation.endTime` directly on an open
 record does not fail.  It returns a zero `Timestamp`, 1970-01-01, which is truthy and not `None`,
-so no ordinary check notices.  Passing that value back as `end_time=` in a re-save turns the open
-activation into one the server rejects for ending before it starts; `end_time=activation_end_time(current)`
-carries it forward correctly.
+so no ordinary check notices.  Passing that value back as `end_time=` in a re-save gets the save
+rejected for an end time before the start; `end_time=activation_end_time(current)` carries it
+forward correctly.
 
 This is additive; nothing needs to change on upgrade.  **If you copied the "Every interval a
 configuration was in effect" recipe** from
 [`doc/cookbook/machine-configuration.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/machine-configuration.md),
 it printed `0` as the end of an open interval; the recipe now uses `activation_end_time()`.  The
-cookbook also gains a recipe for finding the open activation when you do not have its id.
+cookbook also gains a recipe for finding the activation to close at a changeover when you do
+not have its id.
 
 See [#26](https://github.com/osprey-dcs/dp-python-lib/issues/26).
 

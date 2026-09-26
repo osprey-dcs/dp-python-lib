@@ -260,7 +260,7 @@ class TestActivationOpenEndedHelpers(unittest.TestCase):
         self.assertFalse(request.HasField("endTime"))
 
     def test_filters_a_query_page_to_the_open_records(self):
-        """The live-bridge case: find the open activation(s) among a query page's mixed results."""
+        """The query-path case: find the open activation(s) among a query page's mixed results."""
         response = annotation_pb2.QueryConfigurationActivationsResponse()
         response.queryConfigurationActivationsResult.configurationActivations.extend(
             [

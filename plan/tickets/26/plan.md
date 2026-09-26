@@ -194,6 +194,17 @@ format.
     two open records for one name can exist only through the race that check's own comment accepts as a
     v1 limitation: the check and the write are not atomic.  The recipe raises rather than choosing one.
     Closing either would leave the other open and still overlapping.
+
+  *Revised in review of the implementation PR (#65), 2026-09-26.*  The shipped recipe does not filter by
+  configuration name and `activation_is_open()`.  A name query pages through the configuration's whole
+  activation history on every changeover.  It also misses the case that actually gets step 3 rejected:
+  `overlapExists()` checks by category as well as by name, and a bridge switching to a new configuration may
+  not know the name of the one in effect.  The recipe instead reads the incoming configuration's category and
+  queries `CA.category([category])` with `CA.timestamp(changeover)`.  The server's `activationContainsInstantFilter`
+  counts an absent `endTime` as in effect.  It deliberately does not narrow to open records: an activation with
+  a scheduled end after the changeover blocks step 3 just as an open one does, and step 2 closes either kind.
+  The zero / one / more-than-one handling is unchanged.  An activation starting after the changeover is not
+  returned, and the recipe leaves that conflict to the server's rejection.
 - "Copy every field forward" (the list after the closing recipe): add `end_time` to it.  A re-save that
   is not closing the activation carries the end time forward with `end_time=activation_end_time(current)`,
   never `current.endTime`.  Give the one-sentence reason (T4, last bullet).
