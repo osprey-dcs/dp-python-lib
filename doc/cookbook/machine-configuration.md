@@ -21,6 +21,8 @@ from dp_python_lib.client import (
     ConfigurationQuery as C,
     ConfigurationActivationQuery as CA,
     to_timestamp,
+    activation_is_open,
+    activation_end_time,
 )
 ```
 
@@ -180,7 +182,8 @@ machine_config.save_configuration_activation(SaveConfigurationActivationRequestP
 after its `start_time`.  To close it, re-save the record with the same `client_activation_id` and
 a real `end_time` — see the next section.
 
-To test whether a record you have read back is still open, check the field directly:
+To test whether a record you have read back is still open, use `activation_is_open()`, and read
+its end time with `activation_end_time()`, which returns `None` for an open record:
 
 ```python
 # cookbook:partial
@@ -190,8 +193,12 @@ read = machine_config.get_configuration_activation(client_activation_id="act-ope
 activation = read.configuration_activation
 assert activation is not None
 
-still_open = not activation.HasField("endTime")
+still_open = activation_is_open(activation)      # True
+ends_at = activation_end_time(activation)        # None while still open
 ```
+
+Do not read `activation.endTime` directly.  On an open record it does not fail: it returns a zero
+`Timestamp`, which is 1970-01-01, is truthy, and is not `None`, so no ordinary check catches it.
 
 ## Closing one activation and opening the next
 
@@ -242,7 +249,53 @@ Two things to get right:
   than a second, overlapping activation record.
 - **Copy every field forward.**  `save_*` is full-replace, so omitting `description`, `tags`, or
   `attributes` erases them.  Note that `start_time` accepts the `common.Timestamp` you read back
-  directly — no conversion needed.
+  directly — no conversion needed.  For a re-save that is *not* closing the activation (a retag,
+  say), carry the end time forward with `end_time=activation_end_time(current)`, never
+  `end_time=current.endTime`.  The helper passes `None` through, so an open activation stays open;
+  the raw field would send the 1970 value, and the server rejects the save because the end
+  precedes the start.
+
+### When you do not have the activation's id
+
+A live bridge often knows only the configuration it is switching *to*, not the id of the
+activation it must close, or even which configuration that activation belongs to.  Look it up
+by what the server checks.  Step 3 is rejected if the new interval overlaps any activation in
+the same category, whatever that activation's configuration name.  So ask for the activation in
+that category that is in effect at the changeover:
+
+```python
+# cookbook:partial
+machine_config = client.annotation.machine_config
+changeover = datetime(2026, 2, 2, 23, 0, tzinfo=timezone.utc)
+
+incoming = machine_config.get_configuration("mfx-production")
+if incoming.result_status.is_error:
+    raise RuntimeError(incoming.result_status.message)
+assert incoming.configuration is not None
+category = incoming.configuration.category
+
+in_effect = list(machine_config.iter_configuration_activations([
+    CA.category([category]),
+    CA.timestamp(changeover),       # in effect at the changeover, open-ended ones included
+]))
+if len(in_effect) > 1:
+    raise RuntimeError(f"{len(in_effect)} activations in effect for category {category!r}; expected at most one")
+current = in_effect[0] if in_effect else None   # None: nothing to close, go to step 3
+```
+
+Do not narrow this to open activations with `activation_is_open()`.  An activation with a
+scheduled end after the changeover blocks step 3 just as an open one does, and step 2 closes
+either kind the same way, by setting `end_time` to the changeover.
+
+Zero results is normal: nothing in that category is in effect, so skip the close and go straight
+to step 3.  More than one should not happen, since the server rejects an activation overlapping
+another in the same category.  It can arise only if two saves race past that check, which is not
+atomic.  Raise rather than pick one: closing either leaves the other in effect and still
+overlapping.
+
+An activation in the category that *starts* after the changeover is not returned, and step 3
+is still rejected if it overlaps one.  That is a scheduled activation, and a real conflict for
+a person to resolve, not something for the bridge to close.
 
 ### Late reports
 
@@ -272,8 +325,8 @@ for activation in result.configuration_activations:
 ```
 
 `get_active_configurations()` returns every activation whose interval covers that instant —
-`startTime <= t` and `endTime > t`.  Several may be active at once when they belong to different
-categories.
+`startTime <= t`, and either `endTime > t` or no `endTime` at all (an open-ended activation).
+Several may be active at once when they belong to different categories.
 
 Called with no argument, it answers **"what is active right now"**:
 
@@ -328,7 +381,8 @@ for activation in client.annotation.machine_config.iter_configuration_activation
 for activation in client.annotation.machine_config.iter_configuration_activations([
     CA.configuration_name(["cxi-production"]),
 ]):
-    print(activation.startTime.epochSeconds, activation.endTime.epochSeconds)
+    ends_at = activation_end_time(activation)
+    print(activation.startTime.epochSeconds, ends_at.epochSeconds if ends_at is not None else "still in effect")
 ```
 
 ### All the beam time an experiment received

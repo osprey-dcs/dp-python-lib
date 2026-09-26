@@ -15,6 +15,8 @@ from dp_python_lib.client.machine_config_client import (
     ConfigurationQuery,
     SaveConfigurationActivationRequestParams,
     SaveConfigurationRequestParams,
+    activation_end_time,
+    activation_is_open,
 )
 from dp_python_lib.client.mldp_client import MldpClient
 
@@ -359,6 +361,9 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
             activation.HasField("endTime"),
             "an open-ended activation must round-trip with endTime absent, not defaulted to zero",
         )
+        # The helpers must agree with the raw check above, which is the one that verifies the wire.
+        self.assertTrue(activation_is_open(activation))
+        self.assertIsNone(activation_end_time(activation))
         self.logger.info("Open-ended activation round-tripped with endTime absent")
 
         # --- an open-ended activation is active at any instant at or after start_time ---
@@ -401,6 +406,10 @@ class TestMachineConfigClientIntegration(unittest.TestCase):
         self.assertIsNotNone(closed, "getConfigurationActivation should return the closed record")
         self.assertTrue(closed.HasField("endTime"), "closing the activation should set endTime")
         self.assertEqual(closed.endTime.epochSeconds, end_time)
+        self.assertFalse(activation_is_open(closed))
+        closed_end = activation_end_time(closed)
+        self.assertIsNotNone(closed_end)
+        self.assertEqual(closed_end.epochSeconds, end_time)
         self.logger.info("Closed the open-ended activation at %d", end_time)
 
         # --- once closed, the far-future probe no longer sees it ---

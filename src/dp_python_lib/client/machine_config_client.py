@@ -268,6 +268,45 @@ class ConfigurationActivationQuery:
         return criterion
 
 
+# Reading an open-ended activation back (issue #26).  The server leaves endTime genuinely absent on every read path
+# (get, query, and getActiveConfigurations share one converter), so presence is the whole test.  These take a
+# ConfigurationActivation rather than a result object so they cover all four read paths with one definition.
+
+
+def activation_is_open(activation: common_pb2.ConfigurationActivation) -> bool:
+    """
+    Reports whether an activation is open-ended, meaning its configuration is still in effect.
+
+    An open-ended activation has no endTime at all.  Test it with this (or activation_end_time()) rather than by
+    reading activation.endTime: on an open record that read does not fail, but returns a zero Timestamp
+    (1970-01-01), which is truthy, is not None, and converts to 0 epoch nanoseconds.
+
+    An endTime that is present with value zero is a real end time, not an open one; only absence means open.
+
+    :param activation: An activation from any read path: get, query, iterate, or get_active_configurations().
+    :return: True if the activation has no endTime.
+    """
+    return not activation.HasField("endTime")
+
+
+def activation_end_time(activation: common_pb2.ConfigurationActivation) -> common_pb2.Timestamp | None:
+    """
+    Returns an activation's endTime, or None if the activation is open-ended.
+
+    Use this instead of reading activation.endTime directly, which on an open record silently yields a zero
+    Timestamp (1970-01-01) rather than signalling absence.
+
+    The result is the field's own Timestamp, which end_time= accepts as-is, so this is also the correct way to
+    carry the end time forward in a full-replace re-save: end_time=activation_end_time(current) keeps an open
+    activation open, whereas end_time=current.endTime would send the 1970 value and be rejected by the server as
+    ending before it starts.
+
+    :param activation: An activation from any read path: get, query, iterate, or get_active_configurations().
+    :return: The activation's endTime (the message's own sub-message, not a copy), or None if it is open-ended.
+    """
+    return None if activation_is_open(activation) else activation.endTime
+
+
 class SaveConfigurationRequestParams:
     """
     Encapsulates client parameters for a call to the saveConfiguration() API method.
@@ -438,6 +477,7 @@ class SaveConfigurationActivationRequestParams:
         :param start_time: Start of the activation interval (tz-aware datetime, epoch seconds, or common.Timestamp).
         :param end_time: End of the activation interval (tz-aware datetime, epoch seconds, or common.Timestamp).
             Omit or pass None for an open-ended activation, meaning the configuration is still in effect.
+            Read it back with activation_is_open() / activation_end_time(), not by reading endTime directly.
         :param client_activation_id: Optional client-supplied identifier for the activation.
         :param description: Human-readable description of the activation.
         :param tags: List of tags (keywords) describing the activation.
