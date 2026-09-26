@@ -29,6 +29,7 @@ person cutting the release has any reason to re-read.
 - [Type checking in CI (#30)](#type-checking-in-ci-issue-30)
 - [Ready for typed gRPC stubs (#61)](#ready-for-typed-grpc-stubs-issue-61)
 - [Environment variables override the config file (#19)](#environment-variables-override-the-config-file-issue-19)
+- [Detecting open-ended activations (#26)](#detecting-open-ended-activations-issue-26)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -113,6 +114,30 @@ Two smaller consequences of the same fix:
 
 See [#19](https://github.com/osprey-dcs/dp-python-lib/issues/19) and the configuration priority
 section of [`doc/cookbook/connecting.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/connecting.md#configuration-priority).
+
+## Detecting open-ended activations (Issue #26)
+
+Two new helpers, exported from `dp_python_lib.client`, read an open-ended configuration activation
+back (one saved without `end_time`, meaning "still in effect"):
+
+- **`activation_is_open(activation)`** reports whether an activation has no end time.
+- **`activation_end_time(activation)`** returns the end time as a `common.Timestamp`, or `None`
+  for an open activation.
+
+Both work on an activation from any read path: get, query, iterate, or
+`get_active_configurations()`.  They exist because reading `activation.endTime` directly on an open
+record does not fail.  It returns a zero `Timestamp`, 1970-01-01, which is truthy and not `None`,
+so no ordinary check notices.  Passing that value back as `end_time=` in a re-save turns the open
+activation into one the server rejects for ending before it starts; `end_time=activation_end_time(current)`
+carries it forward correctly.
+
+This is additive; nothing needs to change on upgrade.  **If you copied the "Every interval a
+configuration was in effect" recipe** from
+[`doc/cookbook/machine-configuration.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/machine-configuration.md),
+it printed `0` as the end of an open interval; the recipe now uses `activation_end_time()`.  The
+cookbook also gains a recipe for finding the open activation when you do not have its id.
+
+See [#26](https://github.com/osprey-dcs/dp-python-lib/issues/26).
 
 ## Installing
 

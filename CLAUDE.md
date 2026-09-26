@@ -234,7 +234,7 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `src/dp_python_lib/client/ingestion_client.py` - Ingestion service client with methods like `register_provider()`
 - `src/dp_python_lib/client/annotation_client.py` - Annotation service facade; groups feature-scoped clients sharing the one `DpAnnotationService` channel (`.pv_metadata`, `.machine_config`, `.sample_status`, `.datasets`, `.annotations`, `.export` — every implemented `DpAnnotationService` feature area)
 - `src/dp_python_lib/client/pv_metadata_client.py` - PV metadata client (`save_pv_metadata()`, `get_pv_metadata()`, `query_pv_metadata()`, `iter_pv_metadata()`, `delete_pv_metadata()`) plus the `PvMetadataQuery` (`Q`) criterion helpers
-- `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers. The shared time converters it used to own now live in `time_conversions.py`. Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire
+- `src/dp_python_lib/client/machine_config_client.py` - Machine configuration client covering both configurations (`save_configuration()`, `get_configuration()`, `query_configurations()`, `iter_configurations()`, `delete_configuration()`) and their temporal activations (`save_configuration_activation()`, `get_configuration_activation()`, `query_configuration_activations()`, `iter_configuration_activations()`, `delete_configuration_activation()`, `get_active_configurations()`). Includes the `ConfigurationQuery` (`C`) and `ConfigurationActivationQuery` (`CA`) criterion helpers. The shared time converters it used to own now live in `time_conversions.py`. Get/delete activation take a composite key (`client_activation_id` XOR `configuration_name`+`start_time`). Activation `end_time` is optional — omit it for an open-ended activation ("still in effect"); the field is then genuinely absent on the wire. Read it back with the module-level `activation_is_open()` / `activation_end_time()` (#26), which work on an activation from any read path: reading `.endTime` directly on an open record silently yields a zero `Timestamp` (1970), and passing that back as `end_time=` in a re-save gets the save rejected. `activation_end_time()` returns `None` for an open record, so `end_time=activation_end_time(current)` is the correct carry-forward. Presence is the only test: an `endTime` present with value 0 is closed, not open
 - `src/dp_python_lib/client/sample_status_client.py` - Sample status client (`save_sample_statuses()`, `query_sample_statuses()`, `iter_sample_statuses()`, `iter_sample_statuses_stream()`, `delete_sample_statuses()`) plus the `SampleStatusColumn` / `SampleStatusFrame` construction classes.  The `sampling_clock()` / `timestamp_list()` axis builders now live in `data_frame.py` (issue #6 Phase 2, once calculations frames became a second caller) and are re-exported here, so existing imports are unaffected. A status's identity key is `(pvName, timestamp, domain, layer)`; `delete_sample_statuses()` requires either `pv_names` or an explicit `all_pvs=True` opt-in for the destructive wildcard
 - `src/dp_python_lib/client/sample_status_conversions.py` - Per-sample expansion of query results (no optional extras required): `expand_data_timestamps()` (SamplingClock positions computed in **integer nanoseconds**, never float seconds — the exact-match contract depends on it), `bucket_to_rows()` / `buckets_to_rows()` / `iter_rows()` yielding `SampleStatusRow` objects with absent confidence/reason surfaced as `None` rather than fabricated `0.0`/`""`
 - `src/dp_python_lib/client/dataset_client.py` - DataSet client (`save_dataset()`, `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, plus the `get_datasets(ids)` batch fetch that avoids the annotation-listing N+1) with the `DataSetQuery` (`DS`) criterion helpers and the `data_block()` builder. `data_block()` is the only place `begin < end` is checked — the server does not
@@ -495,6 +495,8 @@ from dp_python_lib.client import (
     SaveConfigurationActivationRequestParams,
     ConfigurationQuery as C,
     ConfigurationActivationQuery as CA,
+    activation_is_open,
+    activation_end_time,
 )
 
 client = MldpClient()
@@ -527,7 +529,7 @@ mc.get_configuration_activation(configuration_name="beamline-optics", start_time
 
 # query/iterate activations (raises RuntimeError on a page error)
 for a in mc.iter_configuration_activations([CA.configuration_name(["beamline-optics"])]):
-    print(a.clientActivationId)
+    print(a.clientActivationId, "open" if activation_is_open(a) else activation_end_time(a).epochSeconds)
 
 # what is active right now? (pass a timestamp for a historical instant)
 active = mc.get_active_configurations().configuration_activations
@@ -539,6 +541,8 @@ mc.delete_configuration("beamline-optics")
 Notes:
 - `to_timestamp()` (also exported) is the shared time converter; naive datetimes raise `ValueError`.
 - Composite-key get/delete require exactly one key form (id XOR name+start_time); violations raise `ValueError`.
+- Never read `activation.endTime` without a presence check: on an open-ended activation it is a zero `Timestamp`
+  (1970-01-01), not an error or `None`.  Use `activation_is_open()` / `activation_end_time()`.
 - `ConfigurationQuery` (`C`) criteria: `name`/`category`/`tags`/`attributes`/`parent`.
   `ConfigurationActivationQuery` (`CA`) criteria: `timestamp`/`time_range`/`configuration_name`/`client_activation_id`/`category`/`tags`/`attributes`.  Each helper raises `ValueError` on empty inputs.
 

@@ -16,6 +16,8 @@ from dp_python_lib.client.machine_config_client import (
     MachineConfigClient,
     QueryConfigurationActivationsApiResult,
     SaveConfigurationActivationRequestParams,
+    activation_end_time,
+    activation_is_open,
 )
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
@@ -192,6 +194,89 @@ class TestBuildSaveActivationRequest(unittest.TestCase):
 
         self.assertTrue(request.HasField("endTime"))
         self.assertEqual(request.endTime.epochSeconds, 0)
+
+
+class TestActivationOpenEndedHelpers(unittest.TestCase):
+    """activation_is_open() / activation_end_time(): reading an open-ended activation back (#26)."""
+
+    @staticmethod
+    def _activation(activation_id="act-1", end_seconds=None):
+        activation = common_pb2.ConfigurationActivation(
+            configurationName="cfg-1",
+            clientActivationId=activation_id,
+            startTime=common_pb2.Timestamp(epochSeconds=100),
+        )
+        if end_seconds is not None:
+            activation.endTime.CopyFrom(common_pb2.Timestamp(epochSeconds=end_seconds))
+        return activation
+
+    def test_open_ended(self):
+        activation = self._activation()
+        self.assertTrue(activation_is_open(activation))
+        self.assertIsNone(activation_end_time(activation))
+
+    def test_bounded(self):
+        activation = self._activation(end_seconds=200)
+        self.assertFalse(activation_is_open(activation))
+        self.assertEqual(activation_end_time(activation), common_pb2.Timestamp(epochSeconds=200))
+
+    def test_epoch_zero_end_time_is_not_open(self):
+        """Presence is the only test: an endTime present with value 0 is a real end time, not an open one."""
+        activation = self._activation(end_seconds=0)
+        self.assertFalse(activation_is_open(activation))
+        end_time = activation_end_time(activation)
+        self.assertIsNotNone(end_time)
+        self.assertEqual(end_time.epochSeconds, 0)
+
+    def test_reading_end_time_does_not_close_an_open_record(self):
+        """Reading .endTime on an open record yields a zero Timestamp but must not set presence."""
+        activation = self._activation()
+        self.assertEqual(activation.endTime.epochSeconds, 0)  # the silent 1970 value the helpers exist to avoid
+        self.assertTrue(activation_is_open(activation))
+        self.assertIsNone(activation_end_time(activation))
+
+    def test_end_time_round_trips_into_a_resave(self):
+        client = MachineConfigClient(Mock())
+        activation = self._activation(end_seconds=200)
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name=activation.configurationName,
+            start_time=activation.startTime,
+            end_time=activation_end_time(activation),
+        )
+        request = client._build_save_configuration_activation_request(params)
+        self.assertTrue(request.HasField("endTime"))
+        self.assertEqual(request.endTime.epochSeconds, 200)
+
+    def test_carrying_an_open_record_forward_keeps_it_open(self):
+        """end_time=activation_end_time(open) re-saves as open; end_time=open.endTime would send 1970."""
+        client = MachineConfigClient(Mock())
+        activation = self._activation()
+        params = SaveConfigurationActivationRequestParams(
+            configuration_name=activation.configurationName,
+            start_time=activation.startTime,
+            end_time=activation_end_time(activation),
+        )
+        request = client._build_save_configuration_activation_request(params)
+        self.assertFalse(request.HasField("endTime"))
+
+    def test_filters_a_query_page_to_the_open_records(self):
+        """The live-bridge case: find the open activation(s) among a query page's mixed results."""
+        response = annotation_pb2.QueryConfigurationActivationsResponse()
+        response.queryConfigurationActivationsResult.configurationActivations.extend(
+            [
+                self._activation("closed-1", end_seconds=200),
+                self._activation("open-1"),
+                self._activation("closed-2", end_seconds=0),
+            ]
+        )
+        client = MachineConfigClient(Mock())
+        client._stub = Mock()
+        client._stub.queryConfigurationActivations.return_value = response
+
+        result = client._send_query_configuration_activations(annotation_pb2.QueryConfigurationActivationsRequest())
+        self.assertFalse(result.result_status.is_error)
+        open_ids = [a.clientActivationId for a in result.configuration_activations if activation_is_open(a)]
+        self.assertEqual(open_ids, ["open-1"])
 
 
 class TestActivationKeyValidation(unittest.TestCase):

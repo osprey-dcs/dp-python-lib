@@ -87,6 +87,8 @@ from dp_python_lib.client import (
     ConfigurationActivationQuery,
     ConfigurationActivationQuery as CA,
     to_timestamp,
+    activation_is_open,
+    activation_end_time,
     SaveConfigurationRequestParams,
     SaveConfigurationActivationRequestParams,
     QueryClient,

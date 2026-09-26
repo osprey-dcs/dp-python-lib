@@ -67,6 +67,8 @@ from dp_python_lib.client.machine_config_client import (
     SaveConfigurationActivationRequestParams,
     SaveConfigurationApiResult,
     SaveConfigurationRequestParams,
+    activation_end_time,
+    activation_is_open,
 )
 from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.pv_metadata_client import (
@@ -163,6 +165,8 @@ __all__ = [
     "SaveSampleStatusesApiResult",
     "SaveSampleStatusesRequestParams",
     "TimestampInput",
+    "activation_end_time",
+    "activation_is_open",
     "bool_column",
     "calculations",
     "calculations_source",
