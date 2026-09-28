@@ -7,8 +7,8 @@
   verification.  But its central premise is out of date: the "shared payload/params model" it scopes as
   Phase 1 already exists, built by #6 (T1).  It also misses what an ack actually means (T2), which is why
   `queryRequestStatus` moves into scope.  Findings are under
-  [Background](#background--triage-findings).  Scope questions Q1–Q4 were resolved with Craig on
-  2026-09-27; the issue body has been updated to match.
+  [Background](#background--triage-findings).  Scope questions Q1–Q5 were resolved with Craig on
+  2026-09-27 and 2026-09-28; the issue body has been updated to match Q1–Q4 (Q5 is design-level).
 
 ## Overview
 
@@ -62,6 +62,12 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   - Criteria are ANDed (`MongoSyncIngestionClient.executeQueryRequestStatus`, L245-337).  `providerId`,
     `providerName`, and `requestId` match exactly.  `requestId` is the `clientRequestId` (the doc is built
     from `request.getClientRequestId()`, `IngestDataJob.java:184`).  Status matches with `$in`.
+  - **`RequestIdCriterion` carries one id**, and two of them AND to an empty result, so one query cannot
+    ask about several requests.  A caller waiting on N requests either issues N queries or queries more
+    broadly and filters client-side (D6).
+  - **A blank `providerId`, `providerName`, or `requestId` is skipped, not rejected** (the `isBlank()`
+    guards in the same method).  A criterion that looks narrow silently vanishes and the query matches more
+    than the caller meant: the same shape as the blank attribute key in #40.
   - The time range matches the status document's `createdAt`, the moment the job *finished*, inclusive at
     both ends, at millisecond resolution.  It is not receipt time and not data time, although the proto says
     "the time indicated for the IngestDataRequest".  `end <= 0` means "now".
@@ -69,7 +75,9 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
     that makes the server log an exception after replying).  Unlike the annotation-service queries (#41),
     criteria are therefore required client-side.
   - **No limit and no paging.**  All matches come back in one message.  A broad query can exceed gRPC's
-    default 4 MB *receive* limit on the client.
+    default 4 MB *receive* limit on the client.  That is a gap in the API, not a client concern: the method
+    needs paging upstream (dp-grpc proto + dp-service handler; no ticket yet, to be filed).  Until then the
+    client bounds its own queries by time range (D6).
   - There is **no unique index on `(providerId, clientRequestId)`**: re-using an id yields several
     documents.
   - **The enum's zero value is `INGESTION_REQUEST_STATUS_SUCCESS`.**  An unset status field reads as
@@ -229,14 +237,35 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 
 - **D6 — `queryRequestStatus` gets a criterion helper and a poller.**
   - `RequestStatusQuery` (`RS`): `provider_id(id)`, `provider_name(name)`, `request_id(id)`,
-    `status(statuses)`, `time_range(begin, end)`, each rejecting blank input, like the other helpers.
+    `status(statuses)`, `time_range(begin, end)`, each rejecting blank input, like the other helpers.  For
+    the three id/name helpers the rejection is **load-bearing**, not just consistent: the server skips a
+    blank value rather than rejecting it (T3), so it is the only thing stopping a narrow-looking query from
+    silently broadening.  The docstrings say so, so a later cleanup does not relax it.
   - `query_request_status(criteria)` requires at least one criterion (T3).
   - `IngestionRequestStatus`, a Python `IntEnum` mirroring the proto values, so code compares names, not
     numbers.
-  - `await_request_statuses(provider_id, client_request_ids, timeout=30.0, poll_interval=0.25)` polls until
-    every id has a status document, then returns `{client_request_id: [RequestStatus, ...]}`.  It is a list
-    because ids can repeat (T3).  On timeout it raises `TimeoutError` naming the ids still missing.  It does
-    not judge success: callers check for ERROR/REJECTED, and the cookbook shows how.
+  - `await_request_statuses(provider_id, client_request_ids, *, since, timeout=30.0, poll_interval=0.25)`
+    polls until every id has a status document, then returns `{client_request_id: [RequestStatus, ...]}`.
+    It is a list because ids can repeat (T3).  On timeout it raises `TimeoutError` naming the ids still
+    missing.  It does not judge success: callers check for ERROR/REJECTED, and the cookbook shows how.
+  - **Each poll is one query: `RS.provider_id(provider_id)` + `RS.time_range(since - skew, now)`**, with the
+    ids matched client-side.  One id per `RequestIdCriterion` (T3) rules out a single id-based query, and
+    one query per pending id per poll is rejected: a 500-chunk `split_data_frame()` ingest would cost 500
+    RPCs per interval.  There is no per-id fallback.
+  - **The time floor is required, for two reasons.**  It bounds the response while the method has no paging
+    (T3); a provider-only query grows with the provider's whole history until it exceeds the client's 4 MB
+    receive limit.  And it keeps stale documents out: with no unique index, a caller that reuses a fixed
+    `client_request_id` across runs would otherwise have the poll satisfied at once by a previous run's
+    document, possibly a SUCCESS for a request that has now failed.  Only documents inside the window count.
+  - `since` is a `TimestampInput` the caller captures *before* sending the first request (the cookbook shows
+    the pattern).  It is keyword-only and has no default: defaulting to "when the await started" would miss
+    a fast request that finished before the call.  `createdAt` is the server's clock, so the floor is backed
+    off by a fixed skew margin (`REQUEST_STATUS_CLOCK_SKEW`, 60 s, module constant).  A document from an
+    earlier run inside that margin can still match a reused id; the docstring says to use unique ids (the
+    D2 default) when that matters.
+  - The window still grows with the provider's ingest rate × duration.  A `RESOURCE_EXHAUSTED` on the
+    status query is reported as the receive limit (D9) with a pointer to narrowing `since`; the real fix
+    is upstream paging (Out of scope).
   - The request-status docs lead with T2: an ack is not success.
   - *Rejected:* an `ingest_and_wait()` convenience.  It hides the async model the caller has to understand
     anyway, and composes trivially from the two calls.
@@ -267,18 +296,31 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   - Columns are sliced per kind: `values` for scalars, `dataValues` for `DataColumn`, `images` for images,
     and `prod(dims)`-sized blocks for arrays.
   - A frame with a `SerializedDataColumn` is rejected, since its payload can't be divided.
-  - At least one limit is required.  `max_bytes` is measured with protobuf's `ByteSize()` on the chunk
-    *plus* a fixed allowance for the request envelope, so a chunk that fits the budget fits the message.  A
-    single row larger than `max_bytes` raises, naming the row.
+  - At least one limit is required.  `max_bytes` bounds the **whole serialized `IngestDataRequest`**, not
+    just the frame, so a chunk that fits the budget fits the message.  The envelope is small and knowable:
+    the request is exactly `providerId`, `clientRequestId`, and the frame.  But the ids are caller strings
+    of any length, and `split_data_frame()` does not see them.  So the envelope is budgeted for ids of up
+    to `MAX_BUDGETED_ID_CHARS` (256) characters each, encoded as UTF-8 (≤ 4 bytes/char), plus the tags and
+    length prefixes: the overhead is `ByteSize()` of an `IngestDataRequest` holding the chunk and two
+    worst-case ids, which is computed once rather than hard-coded.  `IngestDataRequestParams` rejects an id
+    longer than 256 characters, so the budget can't be exceeded by anything the params accept.  A single
+    row larger than the budget raises, naming the row.
   - The module exports `SERVER_DEFAULT_MAX_MESSAGE_BYTES = 4_096_000` as a *documented reference*, not a
     default: it is the dp-service default for a configurable setting, so callers opt into it explicitly.
     This keeps #6's "don't duplicate deployment caps" rule; a chunker whose purpose is the cap has to let
     the caller name it.  The same goes for `max_span_nanos` and the 1-day bucket span.
   - Lazy: yields chunks, so a large frame is never copied whole.
 
-- **D9 — Size errors point at the cap.**  A `RESOURCE_EXHAUSTED` from any ingest call gets a message
-  naming the server's inbound message limit and `split_data_frame()`, rather than grpcio's bare text.  This
-  is additive to the `"gRPC error: ..."` contract, so it is appended, not substituted.
+- **D9 — Size errors point at the cap, and only size errors.**  `RESOURCE_EXHAUSTED` is not specific to
+  message size; it also covers quota and other resource limits, and a "split your frame" hint there would
+  send the caller after the wrong fix.  So the hint is gated on the status details identifying a size
+  violation, matched case-insensitively on the known texts: the server's inbound rejection (grpc-java,
+  "gRPC message exceeds maximum size") and the client's own receive limit (grpcio, "Received message
+  larger than max").  The first gets a hint naming the server's inbound limit and `split_data_frame()`, on
+  an ingest call; the second, on `query_request_status()`, names the receive limit and a narrower time
+  range (D6).  Any other `RESOURCE_EXHAUSTED` keeps the plain message.  The hint is appended to the
+  `"gRPC error: ..."` text, never substituted, since that text is part of the contract.  The matched
+  strings live in one module constant with a comment naming their sources, since neither is a stable API.
 
 - **D10 — Exposure stays `client.ingestion_client`.**  The ticket mentions `client.ingestion`.  An alias
   would make naming consistent with `client.query` / `client.annotation`, but two names for one object is
@@ -299,7 +341,8 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 - Extend `_check_column()` with T7's rules: enum `enumId` non-blank; array dims count 1–3; image
   descriptor present with positive width/height/channels and non-blank encoding; struct `schemaId`
   non-blank; serialized `encoding` non-blank.
-- Add the D7 builders and `split_data_frame()` (D8), plus `SERVER_DEFAULT_MAX_MESSAGE_BYTES`.
+- Add the D7 builders and `split_data_frame()` (D8), plus `SERVER_DEFAULT_MAX_MESSAGE_BYTES` and
+  `MAX_BUDGETED_ID_CHARS`.
 - Update the module docstring: the builders are no longer deferred; add the chunking rationale.
 
 **`src/dp_python_lib/client/ingestion_client.py`**
@@ -311,9 +354,11 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 - `_send_ingest_data_bidi_stream()` (yields, like the query stream senders),
   `iter_ingest_data_bidi_stream()`.
 - The request-iterator wrapper of D5, shared by both streaming senders.
-- `_send_query_request_status()` via `_dispatch`, `query_request_status()`, `await_request_statuses()`.
-- The `RESOURCE_EXHAUSTED` hint (D9).  If it fits `_dispatch` cleanly as an optional hook, add it there;
-  otherwise keep it local to the ingestion senders.
+- `_send_query_request_status()` via `_dispatch`, `query_request_status()`, `await_request_statuses()`
+  (provider + time-range polling, client-side id matching, `REQUEST_STATUS_CLOCK_SKEW`; D6).
+- `IngestDataRequestParams` rejects ids over `MAX_BUDGETED_ID_CHARS` (D8).
+- The size-gated `RESOURCE_EXHAUSTED` hint (D9).  If it fits `_dispatch` cleanly as an optional hook, add
+  it there; otherwise keep it local to the ingestion senders.
 - `RegisterProviderApiResult.provider_id` / `.is_new_provider` (D3).  Document re-registration: a
   description is overwritten (to `""` if omitted), but empty tags/attributes do not clear stored ones.
 
@@ -323,14 +368,18 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 - `tests/unit/test_ingestion_client.py`: request building (generated vs explicit id, blank id rejected,
   frame re-validated); three-tier errors on each unary call; stream result keeps `rejected_request_ids` on
   error with `num_requests is None`; bidi yields rejects without raising and raises on transport error;
-  `RS` helpers and empty-criteria rejection; `await_request_statuses()` success, repeated ids, and timeout
-  naming the missing ids (mock the clock; no real sleeps); `RESOURCE_EXHAUSTED` hint.
+  `RS` helpers and empty-criteria rejection; `await_request_statuses()` success, repeated ids, timeout
+  naming the missing ids, one query per poll regardless of id count, the query carrying provider id and a
+  time range floored at `since - skew`, and a document for a watched id but outside the window not
+  satisfying the wait (mock the clock; no real sleeps); the `RESOURCE_EXHAUSTED` hint present for each size
+  text and absent for an unrelated `RESOURCE_EXHAUSTED`; an over-long id rejected.
 - `tests/unit/test_ingestion_streaming_grpc.py`: D5 against an in-process `grpc.server` on `localhost:0`,
   for both streaming shapes, asserting the original exception type and the sent-count message.
 - `tests/unit/test_data_frame.py`: fix the three tests T12 names; then each new builder (shape inference, NumPy duck-typing behind an
   `[analysis]` skip, dims rules, descriptor rules); each new `_check_column()` rule on a *hand-built* column
   (the T7 point); `split_data_frame()` for both axis forms, integer-nanosecond start times at present-day
-  epochs, every column kind, the byte budget holding for every chunk, the oversize-row and serialized
+  epochs, every column kind, the byte budget holding for every chunk *as a full `IngestDataRequest` with
+  256-character ids, including multibyte ones*, the oversize-row and serialized
   rejections, and chunk concatenation reproducing the original frame.
 - `tests/unit/test_data_frame_conversions.py`: build → read round trip for each non-scalar builder.
 
@@ -379,6 +428,10 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   (`queryBuckets`).  #16 should add a live round trip for each D7 builder when it lands.
 - **pandas support for array/object columns** in `data_frame_from_pandas()` — no consumer yet (D7).
 - **A `client.ingestion` alias** (D10).
+- **Paging for `queryRequestStatus`** — needs a proto change in dp-grpc and a handler change in
+  dp-service; ticket to be filed there.  D6 bounds its queries by time range in the meantime.  Once paging
+  ships, `query_request_status()` gains `iter_`/token support like the other paged queries, and the D6
+  window stays for the stale-id reason.
 - **Working around dp-service's bugs** (T3 empty-criteria fallthrough, T4 shutdown double-complete, the
   unenforced unique index, the proto comments T2–T4 contradict).  These are dp-service/dp-grpc issues.
   Worth filing there; the client documents actual behavior.
@@ -390,12 +443,13 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   as all integration tests do.
 - #16 does not block this ticket, and this ticket does not block #16.  #16 gains the live non-scalar round
   trip (Out of scope).
-- The rel-1.16.0 server behaviors cited here are unchanged on dp-service `main`; nothing upstream is
-  pending.
+- The rel-1.16.0 server behaviors cited here are unchanged on dp-service `main`.
+- Upstream `queryRequestStatus` paging does **not** block this ticket: D6 works without it.  It is a
+  follow-up here once it ships (Out of scope).
 
 ## Open questions
 
-All resolved 2026-09-27 with Craig.
+All resolved with Craig: Q1–Q4 on 2026-09-27, Q5 in plan review on 2026-09-28.
 
 - **Q1 — Wrap `queryRequestStatus`?**  The ticket excluded it.  *Resolved: include it* (T2, D6).  Without
   it a caller cannot tell whether an acked request landed, and the live tests need it to synchronize.
@@ -405,6 +459,10 @@ All resolved 2026-09-27 with Craig.
 - **Q3 — One PR or two?**  The ticket asked for one.  *Resolved: two* (PR A client, PR B live tests + docs),
   the split #6 used.
 - **Q4 — Chunking helper here or a follow-up?**  *Resolved: here* (T6, D8).
+- **Q5 — How does `await_request_statuses()` cover several ids?**  Raised in plan review (2026-09-28):
+  one id per criterion (T3) means either a query per id or a broader query filtered client-side.
+  *Resolved: provider + time range only, no per-id fallback* (D6); the unbounded-response problem goes
+  upstream as request-status paging.
 
 Decisions taken without a question, flagged for plan review: D2 (generated request ids), D4 (bidi yields
 rejects rather than raising), D8 (no default byte budget; the server default exported as a reference),
