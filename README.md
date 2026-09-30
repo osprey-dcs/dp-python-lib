@@ -88,8 +88,13 @@ for their service.
   bridges to pandas under the optional `[analysis]` extra.
 - **Export** — `client.annotation.export`.  Export a saved dataset, ad-hoc data blocks, and/or
   calculations to HDF5, CSV, or XLSX.  The file is written on the server; there is no retrieval RPC.
-- **Provider registration** — `client.ingestion_client.register_provider()`.  The rest of the
-  ingestion API is not yet implemented.
+- **Ingestion** — `client.ingestion_client`.  Register a provider with `register_provider()`, then
+  ingest a `data_frame` frame with `ingest_data()`, `ingest_data_stream()` (many requests, one
+  summary), or `iter_ingest_data_bidi_stream()` (an ack or reject per request).  An ack means only
+  that a request passed validation: confirm it landed with `await_request_statuses()` or
+  `query_request_status()`.  `data_frame.split_data_frame()` cuts a large frame into chunks under
+  the server's message-size and time-span limits, and the `data_frame` builders now cover array,
+  image, struct, and serialized columns as well as scalars.
 
 **Supporting framework:** YAML + environment-variable configuration (`MLDP_*`, via
 pydantic-settings), TLS-capable channel creation, hierarchical logging, three-tier error handling
@@ -105,10 +110,6 @@ older than your `dp_python_lib` will not implement everything listed here.  The 
 **Low-level API coverage**
 
 - **Ingestion Service**
-  - `ingestData()` / `ingestDataStream()` / `ingestDataBidiStream()` — full ingestion client with a
-    shared DataFrame payload model ([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17);
-    also unblocks the closed-loop query integration test and the cookbook's ingestion recipe)
-  - `queryRequestStatus()` — async status of ingestion requests
   - `subscribeData()` — receive data for specified PVs from the ingestion stream
 - **Query Service**
   - `queryBuckets()` / `queryBucketsStream()` — raw data buckets
