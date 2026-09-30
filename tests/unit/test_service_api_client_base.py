@@ -172,6 +172,27 @@ class TestDispatch(unittest.TestCase):
         self.assertIn("Calling someOperation API", "\n".join(captured.output))
         self.assertIn("someOperation completed successfully", "\n".join(captured.output))
 
+    def test_rpc_error_hint_is_appended_to_the_grpc_error_message(self):
+        error = grpc.RpcError()
+        error.details = Mock(return_value="too big")
+        stub_call = Mock(side_effect=error)
+        hint = Mock(return_value=" (split it)")
+
+        result = self._dispatch(stub_call, rpc_error_hint=hint)
+
+        # Appended, never substituted: the "gRPC error: <details>" prefix is part of the result contract.
+        self.assertEqual("gRPC error: too big (split it)", result.result_status.message)
+        hint.assert_called_once_with(error)
+
+    def test_rpc_error_hint_not_consulted_on_success_or_business_error(self):
+        hint = Mock(return_value=" (unused)")
+        for field in ("someResult", "exceptionalResult"):
+            with self.subTest(field=field):
+                response = _response_with_field(field)
+                response.exceptionalResult.message = "rejected"
+                self._dispatch(Mock(return_value=response), rpc_error_hint=hint)
+        hint.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

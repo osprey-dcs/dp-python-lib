@@ -237,6 +237,15 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   `RpcError`) instead of returning a gRPC error.  Its message says how many requests had already been sent,
   because those were ingested (T4).  Unit-tested against an in-process grpcio server, since a mocked stub
   would not reproduce grpcio's swallowing.
+  - *Corrected in implementation (2026-09-30).*  Two details above were wrong.  (1) "Already sent" does not
+    mean "ingested", or even "received": the in-process tests show grpcio's cancellation racing the sends, so
+    the server holds some prefix of the requests handed over, possibly none.  The note therefore says "any that
+    reached the server are ingested -- check request status" (T10's "have already been ingested" is corrected
+    the same way).  (2) The count cannot go in the exception's *message* without changing its type or mutating
+    its args, so it travels as a PEP 678 note (Python 3.11+) and is always logged.
+  - *Added in implementation.*  Abandoning `iter_ingest_data_bidi_stream()` early cancels the call.  Without
+    that, grpcio keeps pulling and sending the caller's requests on its own thread after the caller has walked
+    away; an in-process test showed all 1,000 queued requests drained into the server.
 
 - **D6 — `queryRequestStatus` gets a criterion helper and a poller.**
   - `RequestStatusQuery` (`RS`): `provider_id(id)`, `provider_name(name)`, `request_id(id)`,
@@ -337,8 +346,10 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 
 **`src/dp_python_lib/client/data_frame.py`**
 - Extract `validate_data_frame(frame)` from `data_frame()`: axis via `timestamp_count()`, at least one
-  column, then `_check_column()` on every column across all 16 arms.  `data_frame()` calls it after
-  assembly.
+  column, then `_check_column()` on every column across all 16 arms.  *(As implemented, `data_frame()` does
+  not call it after assembly: both share one column-list check, which `data_frame()` runs on the caller's list
+  before routing, so an unsupported type is caught before it must be routed and messages keep the caller's
+  index.)*
 - Extend `_check_column()` with T7's rules: enum `enumId` non-blank; array dims count 1–3; image
   descriptor present with positive width/height/channels and non-blank encoding; struct `schemaId`
   non-blank; serialized `encoding` non-blank.
