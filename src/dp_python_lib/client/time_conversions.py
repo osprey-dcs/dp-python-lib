@@ -3,7 +3,8 @@ Time conversions shared across the client library.
 
 Every API that takes an instant accepts the same three spellings -- a timezone-aware datetime, epoch seconds, or an
 already-built common.Timestamp -- and every conversions module that reads one back wants integer nanoseconds.  Those
-two directions are `to_timestamp()` and `to_epoch_nanos()`, and they live here rather than in a feature client.
+two directions are `to_timestamp()` and `to_epoch_nanos()`, and they live here rather than in a feature client, along
+with `from_epoch_nanos()`, which turns integer nanoseconds back into a Timestamp.
 
 They were originally defined in machine_config_client, the first module to need them, and four other modules grew
 imports of `to_timestamp()` from there -- which read as though datasets, queries, and DataFrames depended on the
@@ -50,6 +51,22 @@ def to_epoch_nanos(timestamp: common_pb2.Timestamp) -> int:
     :return: Epoch nanoseconds as a Python int.
     """
     return timestamp.epochSeconds * NANOS_PER_SECOND + timestamp.nanoseconds
+
+
+def from_epoch_nanos(epoch_nanos: int) -> common_pb2.Timestamp:
+    """
+    Converts integer epoch nanoseconds into a common.Timestamp -- the inverse of to_epoch_nanos().
+
+    Integer division throughout, for the same exactness reason as to_epoch_nanos().  It was written out privately
+    in data_frame_conversions and sample_status_conversions before split_data_frame() became a third caller.
+
+    :param epoch_nanos: Epoch nanoseconds, as an int.
+    :return: The equivalent common.Timestamp.
+    :raises ValueError: if epoch_nanos is negative, since Timestamp.epochSeconds is unsigned.
+    """
+    timestamp = common_pb2.Timestamp()
+    timestamp.epochSeconds, timestamp.nanoseconds = divmod(epoch_nanos, NANOS_PER_SECOND)
+    return timestamp
 
 
 def to_timestamp(value: TimestampInput) -> common_pb2.Timestamp:

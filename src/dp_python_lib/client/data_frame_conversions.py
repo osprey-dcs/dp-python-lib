@@ -23,7 +23,7 @@ from typing import Any
 
 from dp_python_lib.client.query_conversions import data_value_to_python
 from dp_python_lib.client.sample_status_conversions import expand_data_timestamps
-from dp_python_lib.client.time_conversions import to_epoch_nanos
+from dp_python_lib.client.time_conversions import from_epoch_nanos, to_epoch_nanos
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 # The DataFrame fields holding typed scalar columns, in the proto's declaration order.  Each carries `values`
@@ -545,18 +545,6 @@ def _timestamps_from_index(index: Any) -> common_pb2.DataTimestamps:
     return timestamps
 
 
-def _timestamp_from_nanos(epoch_nanos: int) -> common_pb2.Timestamp:
-    """
-    Builds a common.Timestamp from integer epoch nanoseconds -- the inverse of to_epoch_nanos().
-
-    :param epoch_nanos: Epoch nanoseconds.
-    :return: The equivalent common.Timestamp.
-    """
-    timestamp = common_pb2.Timestamp()
-    timestamp.epochSeconds, timestamp.nanoseconds = divmod(epoch_nanos, 1_000_000_000)
-    return timestamp
-
-
 def column_metadata_from_dict(summary: dict[str, Any] | None) -> common_pb2.ColumnMetadata | None:
     """
     Rebuilds a ColumnMetadata from the dict column_metadata_dict() produced -- the inverse of that function.
@@ -604,8 +592,8 @@ def column_metadata_from_dict(summary: dict[str, Any] | None) -> common_pb2.Colu
             time_range = entry.get("time_range")
             if time_range is not None:
                 begin_nanos, end_nanos = time_range
-                source.timeRange.beginTime.CopyFrom(_timestamp_from_nanos(begin_nanos))
-                source.timeRange.endTime.CopyFrom(_timestamp_from_nanos(end_nanos))
+                source.timeRange.beginTime.CopyFrom(from_epoch_nanos(begin_nanos))
+                source.timeRange.endTime.CopyFrom(from_epoch_nanos(end_nanos))
 
     return metadata
 

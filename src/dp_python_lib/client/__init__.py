@@ -16,19 +16,29 @@ from dp_python_lib.client.annotations_client import (
 # `import dp_python_lib.client.data_frame` would hand back the function instead of the module -- breaking the
 # documented `from dp_python_lib.client import data_frame as dfb` usage.  Reach it as dfb.data_frame(...).
 from dp_python_lib.client.data_frame import (
+    bool_array_column,
     bool_column,
     calculations_source,
     column_metadata,
     data_column,
+    double_array_column,
     double_column,
     enum_column,
+    float_array_column,
     float_column,
+    image_column,
+    int32_array_column,
     int32_column,
+    int64_array_column,
     int64_column,
     provenance,
     pv_source,
+    serialized_column,
+    split_data_frame,
     string_column,
+    struct_column,
     timestamp_count,
+    validate_data_frame,
 )
 from dp_python_lib.client.dataset_client import (
     DataSetClient,
@@ -101,7 +111,7 @@ from dp_python_lib.client.sample_status_client import (
     timestamp_list,
 )
 from dp_python_lib.client.sample_status_conversions import SampleStatusRow
-from dp_python_lib.client.time_conversions import TimestampInput, to_epoch_nanos, to_timestamp
+from dp_python_lib.client.time_conversions import TimestampInput, from_epoch_nanos, to_epoch_nanos, to_timestamp
 
 __all__ = [
     "AnnotationClient",
@@ -167,6 +177,7 @@ __all__ = [
     "TimestampInput",
     "activation_end_time",
     "activation_is_open",
+    "bool_array_column",
     "bool_column",
     "calculations",
     "calculations_source",
@@ -174,17 +185,27 @@ __all__ = [
     "column_metadata",
     "data_block",
     "data_column",
+    "double_array_column",
     "double_column",
     "enum_column",
+    "float_array_column",
     "float_column",
+    "from_epoch_nanos",
+    "image_column",
+    "int32_array_column",
     "int32_column",
+    "int64_array_column",
     "int64_column",
     "provenance",
     "pv_source",
     "sampling_clock",
+    "serialized_column",
+    "split_data_frame",
     "string_column",
+    "struct_column",
     "timestamp_count",
     "timestamp_list",
     "to_epoch_nanos",
     "to_timestamp",
+    "validate_data_frame",
 ]
