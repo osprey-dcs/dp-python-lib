@@ -198,11 +198,13 @@ ingesting, confirming, chunking, and streaming.  It was run end to end against a
 were the query and sample-status recipes over the data it stores, and the integration tests now
 ingest their own data through the library and wait for its SUCCESS status.
 
-**Behavior change: `QueryParams` requires a `pv_selector`.**  It used to accept `config_criteria`
-alone, but the server rejects every such query (`querySpec.pvSelector must be specified`), so
-`QueryParams` now raises `ValueError` instead, as it does for a `PvSelector` with no form set.
-Nothing that worked is lost.  To query every PV under a configuration, select them explicitly with
-`PvQuery.pattern(".*")` alongside the `config_criteria`.
+**Upgrade item — an error at call time: `QueryParams` requires a `pv_selector`.**  It used to accept
+`config_criteria` alone, but the server rejects every such query (`querySpec.pvSelector must be
+specified`), so `QueryParams` now refuses it itself.  `pv_selector` no longer has a default, so
+leaving it out raises `TypeError` (missing argument), which a type checker also reports; passing
+`None` or a `PvSelector` with no form set raises `ValueError`.  Nothing that worked is lost.  To
+query every PV under a configuration, select them explicitly with `PvQuery.pattern(".*")`
+alongside the `config_criteria`.
 
 Re-running the older recipes against real data also corrected two things they claimed:
 

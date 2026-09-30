@@ -130,6 +130,12 @@ timestamp, names are unique and non-blank — and `IngestDataRequestParams` chec
 malformed frame raises `ValueError` naming the column rather than being rejected by the server.
 Size limits are left to the server; see [frames too big for one message](#frames-too-big-for-one-message).
 
+Every column builder also takes `metadata=`, a `dfb.column_metadata(...)` carrying tags,
+attributes, and provenance, built exactly as
+[DataSets and annotations](datasets-and-annotations.md#recording-where-the-numbers-came-from)
+shows for calculations.  A `rel-1.16.0` or later server stores it with the ingested column; an
+older one does not.
+
 ## Confirming what landed
 
 ```python

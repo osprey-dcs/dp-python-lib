@@ -55,8 +55,10 @@ Independently, `config_criteria` restricts results to the intervals when matchin
 configurations were **active**.  It narrows a PV selector; it does not replace one.
 
 **A PV selector is required**, even with `config_criteria`: the server rejects a query without one,
-so `QueryParams` raises `ValueError` up front.  To query every PV, say so with `PV.pattern(".*")` —
-see [everything under one configuration](#everything-under-one-configuration).
+so `QueryParams` refuses one up front.  `pv_selector` has no default, so leaving it out raises
+`TypeError` (and a type checker flags it); passing `None` or an empty `PvSelector()` raises
+`ValueError`.  To query every PV, say so with `PV.pattern(".*")` — see
+[everything under one configuration](#everything-under-one-configuration).
 
 Results arrive as a **`ColumnTable`**: a list of timestamps plus one `DataColumn` per PV.  You can
 work with that directly, or convert it — see

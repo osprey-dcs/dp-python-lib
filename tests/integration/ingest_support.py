@@ -5,12 +5,33 @@ Every test that needs archived samples -- a dataset's data block, a v2 query, a 
 ingests its own, and synchronizes on the request-status document rather than on an ack or a probe loop.  An ack
 means only that the request passed validation; the status document is written after the buckets, so a SUCCESS
 status means the data is persisted and queryable (plan/tickets/17/plan.md, T2).
+
+It also holds require_services(), the reachability check every ingesting test class runs first.
 """
 
+import unittest
 import uuid
 from datetime import datetime, timezone
 
+import grpc
+
 from dp_python_lib.client import IngestDataRequestParams, IngestionRequestStatus, RegisterProviderRequestParams
+
+INGESTION_ADDRESS = "localhost:50051"
+QUERY_ADDRESS = "localhost:50052"
+ANNOTATION_ADDRESS = "localhost:50053"
+
+
+def require_services(*services: tuple[str, str]) -> None:
+    """Skips the calling test class unless each (label, address) accepts a connection within 5s."""
+    for label, address in services:
+        channel = grpc.insecure_channel(address)
+        try:
+            grpc.channel_ready_future(channel).result(timeout=5)
+        except grpc.FutureTimeoutError:
+            raise unittest.SkipTest(f"MLDP {label} service not available at {address}") from None
+        finally:
+            channel.close()
 
 
 def register_provider(ingestion, name: str) -> str:

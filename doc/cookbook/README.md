@@ -39,8 +39,8 @@ query recipes is the data the earlier recipes create:
   `Z` and `S`.
 - A physics-shift configuration, `cxi-production` (`PATH=CU_HXR`, `E=14.6`, `RATE=10000`,
   `MODE=09`), activated over a shift with `DEST=CXI` and `EXP=CXI_3443`.
-- One second of those three signals at 10 kHz, from 18:04:12 during the shift, ingested by provider
-  `bpm-daq` — the samples the query and labeling recipes read back.
+- Samples of those signals ingested by provider `bpm-daq` during the shift, at 10 kHz from
+  18:04:12 — the first second of them is what the query and labeling recipes read back.
 - Queries that retrieve those PVs by name, by *"every monitor in GUNB"*, and by *"whatever ran
   during the CXI shift"*.
 - A dataset naming the first hour of that shift, an annotation recording an orbit drift, and a 1 Hz
@@ -55,7 +55,8 @@ Attribute names and values are the facility's; tag values are illustrative place
   will not implement everything documented here.  Where a recipe uses something added in a
   particular release, it says so in the body — the [v2 query API](query.md) needs a `rel-1.15.0` or
   later server, [sample status](sample-status.md) needs `rel-1.16.0` or later, and
-  [ingested column provenance](ingestion.md) survives only into `rel-1.16.0` or later.
+  [column provenance](datasets-and-annotations.md#recording-where-the-numbers-came-from) sent
+  with [ingested data](ingestion.md#ingesting-a-frame) survives only into `rel-1.16.0` or later.
 - Snippets omit imports and client construction except where a recipe is specifically about those
   things.  Each recipe lists the imports its examples assume.
 - Examples check `result_status.is_error` before reading a payload.  This is not ceremony: the

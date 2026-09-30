@@ -25,7 +25,14 @@ from dp_python_lib.client.sample_status_client import (
 )
 from dp_python_lib.client.time_conversions import from_epoch_nanos
 
-from .ingest_support import ingest_confirmed, register_provider
+from .ingest_support import (
+    ANNOTATION_ADDRESS,
+    INGESTION_ADDRESS,
+    QUERY_ADDRESS,
+    ingest_confirmed,
+    register_provider,
+    require_services,
+)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -389,18 +396,7 @@ class TestSampleStatusQueryFiltering(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        for label, address in (
-            ("ingestion", "localhost:50051"),
-            ("query", "localhost:50052"),
-            ("annotation", "localhost:50053"),
-        ):
-            channel = grpc.insecure_channel(address)
-            try:
-                grpc.channel_ready_future(channel).result(timeout=5)
-            except grpc.FutureTimeoutError:
-                raise unittest.SkipTest(f"MLDP {label} service not available at {address}") from None
-            finally:
-                channel.close()
+        require_services(("ingestion", INGESTION_ADDRESS), ("query", QUERY_ADDRESS), ("annotation", ANNOTATION_ADDRESS))
 
         cls.client = MldpClient()
         cls.sample_status = cls.client.annotation.sample_status

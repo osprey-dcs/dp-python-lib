@@ -703,7 +703,7 @@ qc.dataframe_to_excel(df_all, "out.xlsx")        # thin to_excel() wrapper (row-
 Notes:
 - Time inputs accept a tz-aware datetime, epoch seconds, or `common.Timestamp` (shared `to_timestamp()`); `begin`
   must be strictly before `end`, and **`pv_selector` is required**, with one arm set, even alongside
-  `config_criteria`: `QuerySpec.pvSelector` is required by the proto, and dp-service rejects its absence
+  `config_criteria` (it has no default, so omitting it is a `TypeError`; `None` or an empty `PvSelector()` a `ValueError`): `QuerySpec.pvSelector` is required by the proto, and dp-service rejects its absence
   (`querySpec.pvSelector must be specified`, `QueryV2Resolver`).  `QueryParams` accepted a config-only query until
   #17 PR B, whose cookbook re-verification found the server rejecting it; "every PV under a configuration" is
   `PV.pattern(".*")` plus `config_criteria`.  Empty inputs raise `ValueError`, as does a negative `limit` (`limit=0` is

@@ -19,8 +19,6 @@ import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import grpc
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client import (
@@ -34,10 +32,7 @@ from dp_python_lib.client import (
 )
 from dp_python_lib.client import data_frame as dfb
 
-from .ingest_support import ingest_confirmed, register_provider
-
-INGESTION_ADDRESS = "localhost:50051"
-QUERY_ADDRESS = "localhost:50052"
+from .ingest_support import INGESTION_ADDRESS, QUERY_ADDRESS, ingest_confirmed, register_provider, require_services
 
 # The server's bucket-span cap (Buckets.maxBucketSpanSeconds, 86400 s by default).  The client deliberately leaves
 # caps to the server, so a frame spanning more than this passes every client check and is rejected by the server
@@ -45,22 +40,11 @@ QUERY_ADDRESS = "localhost:50052"
 SERVER_MAX_SPAN_SECONDS = 86_400
 
 
-def _require_service(label, address):
-    channel = grpc.insecure_channel(address)
-    try:
-        grpc.channel_ready_future(channel).result(timeout=5)
-    except grpc.FutureTimeoutError:
-        raise unittest.SkipTest(f"MLDP {label} service not available at {address}") from None
-    finally:
-        channel.close()
-
-
 class TestIngestionClientIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        _require_service("ingestion", INGESTION_ADDRESS)
-        _require_service("query", QUERY_ADDRESS)
+        require_services(("ingestion", INGESTION_ADDRESS), ("query", QUERY_ADDRESS))
         cls.client = MldpClient()
         cls.ingestion = cls.client.ingestion_client
         cls.run_id = uuid.uuid4().hex[:12]

@@ -190,6 +190,12 @@ class TestQueryParams(unittest.TestCase):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("ABC:.*"))
         self.assertIsNotNone(p.pv_selector)
 
+    def test_omitting_the_selector_is_a_type_error(self):
+        # The realistic mistake: config criteria alone.  pv_selector has no default, so this fails at the call,
+        # before QueryParams' own check runs -- and mypy flags it statically.
+        with self.assertRaises(TypeError):
+            QueryParams(BEGIN, END, config_criteria=[ConfigQuery.configuration_name(["c"])])  # type: ignore[call-arg]
+
     def test_config_only_is_rejected(self):
         # The server requires a PV selector even with config criteria (#17 PR B), so fail here, pointing at ".*".
         with self.assertRaises(ValueError) as ctx:

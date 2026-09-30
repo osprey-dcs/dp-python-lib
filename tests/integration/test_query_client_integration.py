@@ -16,7 +16,7 @@ from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.query_client import PvQuery, QueryParams
 from dp_python_lib.client.time_conversions import from_epoch_nanos
 
-from .ingest_support import ingest_confirmed, register_provider
+from .ingest_support import INGESTION_ADDRESS, QUERY_ADDRESS, ingest_confirmed, register_provider, require_services
 
 
 class TestQueryClientIntegration(unittest.TestCase):
@@ -148,14 +148,7 @@ class TestQueryClosedLoop(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        for label, address in (("ingestion", "localhost:50051"), ("query", "localhost:50052")):
-            channel = grpc.insecure_channel(address)
-            try:
-                grpc.channel_ready_future(channel).result(timeout=5)
-            except grpc.FutureTimeoutError:
-                raise unittest.SkipTest(f"MLDP {label} service not available at {address}") from None
-            finally:
-                channel.close()
+        require_services(("ingestion", INGESTION_ADDRESS), ("query", QUERY_ADDRESS))
         cls.client = MldpClient()
         run_id = uuid.uuid4().hex[:12]
         cls.pv_a = f"ITEST:QUERY:{run_id}:A"
@@ -210,8 +203,8 @@ class TestQueryClosedLoop(unittest.TestCase):
         )
 
     def test_range_is_half_open_at_both_bounds(self):
-        # [10 ms, 40 ms): the sample exactly at begin is kept, the one exactly at end is not, and so is the one
-        # before begin -- both bounds fall inside the ingested bucket, so this is per-sample trimming.
+        # [10 ms, 40 ms): the sample exactly at begin is kept, the one exactly at end is not, and neither is the
+        # one before begin -- both bounds fall inside the ingested bucket, so this is per-sample trimming.
         result = self.client.query.query_samples(self._params(self.PERIOD_A, 4 * self.PERIOD_A, [self.pv_a]))
         self.assertFalse(result.result_status.is_error, result.result_status.message)
         self.assertEqual(
