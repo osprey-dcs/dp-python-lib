@@ -65,9 +65,10 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   - **`RequestIdCriterion` carries one id**, and two of them AND to an empty result, so one query cannot
     ask about several requests.  A caller waiting on N requests either issues N queries or queries more
     broadly and filters client-side (D6).
-  - **A blank `providerId`, `providerName`, or `requestId` is skipped, not rejected** (the `isBlank()`
-    guards in the same method).  A criterion that looks narrow silently vanishes and the query matches more
-    than the caller meant: the same shape as the blank attribute key in #40.
+  - Each criterion is validated in `IngestionServiceImpl.queryRequestStatus()` (L401-479): a blank
+    `providerId` / `providerName` / `requestId`, an empty status list, a `beginTime` under 1 s, or an unset
+    criterion is rejected.  The Mongo client's own `isBlank()` skips (L253-294) are therefore unreachable,
+    not a silent-broadening path.
   - The time range matches the status document's `createdAt`, the moment the job *finished*, inclusive at
     both ends, at millisecond resolution.  It is not receipt time and not data time, although the proto says
     "the time indicated for the IngestDataRequest".  `end <= 0` means "now".
@@ -237,10 +238,8 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 
 - **D6 — `queryRequestStatus` gets a criterion helper and a poller.**
   - `RequestStatusQuery` (`RS`): `provider_id(id)`, `provider_name(name)`, `request_id(id)`,
-    `status(statuses)`, `time_range(begin, end)`, each rejecting blank input, like the other helpers.  For
-    the three id/name helpers the rejection is **load-bearing**, not just consistent: the server skips a
-    blank value rather than rejecting it (T3), so it is the only thing stopping a narrow-looking query from
-    silently broadening.  The docstrings say so, so a later cleanup does not relax it.
+    `status(statuses)`, `time_range(begin, end)`, each rejecting blank input, like the other helpers.  The
+    server rejects the same inputs (T3), so this only saves a round trip and names the offending argument.
   - `query_request_status(criteria)` requires at least one criterion (T3).
   - `IngestionRequestStatus`, a Python `IntEnum` mirroring the proto values, so code compares names, not
     numbers.
