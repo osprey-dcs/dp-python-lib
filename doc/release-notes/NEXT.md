@@ -30,6 +30,7 @@ person cutting the release has any reason to re-read.
 - [Ready for typed gRPC stubs (#61)](#ready-for-typed-grpc-stubs-issue-61)
 - [Environment variables override the config file (#19)](#environment-variables-override-the-config-file-issue-19)
 - [Detecting open-ended activations (#26)](#detecting-open-ended-activations-issue-26)
+- [Ingesting data (#17)](#ingesting-data-issue-17)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -139,6 +140,61 @@ cookbook also gains a recipe for finding the activation to close at a changeover
 not have its id.
 
 See [#26](https://github.com/osprey-dcs/dp-python-lib/issues/26).
+
+## Ingesting data (Issue #17)
+
+The library can now put data into MLDP, not just read it.  `client.ingestion_client`, which
+previously offered only `register_provider()`, now covers data ingestion and request status
+(`subscribeData()` is not wrapped yet):
+
+- **`ingest_data()`** sends one request.  **`ingest_data_stream()`** sends many on one call and
+  returns a single summary.  **`iter_ingest_data_bidi_stream()`** yields each request's ack or
+  reject as it arrives.  To stop a bidi stream early, close its iterator, most simply with
+  `contextlib.closing`: that cancels the call.  A plain `break` does not, while the iterator is still
+  referenced, and gRPC keeps sending the remaining requests in the background.
+- **`await_request_statuses()`** and **`query_request_status()`** report whether an ingestion
+  actually landed.  This matters because **an ack means only that a request passed validation.**
+  The server queues the data and writes it afterwards, so a request can be acked and still fail.
+  An unknown provider id fails that way, and so does ingesting the same PV with the same first
+  timestamp twice.  The request-status document, written once the data is stored, is the only
+  confirmation.  Capture the time before sending and pass it as `since`.
+- **`IngestDataRequestParams`** takes a `common.DataFrame` built with the existing `data_frame`
+  builders, or with `data_frame_from_pandas()`.  Its request id defaults to a generated uuid, since
+  the server does not enforce unique ids.
+- **`data_frame.split_data_frame()`** cuts a large frame into chunks that fit the server's inbound
+  message limit (4,096,000 bytes by default, about 500,000 doubles) and its one-day bucket span.
+  **`chunked_request_params()`** turns the chunks into requests with correlated ids, lazily, ready
+  for `ingest_data_stream()`.  No limit is assumed: pass `SERVER_DEFAULT_MAX_MESSAGE_BYTES` to
+  target a default server.
+- **New column builders** for the kinds that had none: `double_array_column()` and its float, int32,
+  int64, and bool siblings (samples as nested lists or NumPy arrays), `image_column()`,
+  `struct_column()`, and `serialized_column()`.
+- **`RegisterProviderApiResult` gains `provider_id` and `is_new_provider`**, so the id no longer
+  has to be dug out of `.response.registrationResult`.
+- **`from_epoch_nanos()`**, the inverse of `to_epoch_nanos()`, is exported.
+
+Two behaviors worth knowing:
+
+- **A rejected request inside `ingest_data_stream()` does not raise.**  The result has `is_error`
+  set and lists `rejected_request_ids`; the other requests were accepted.
+- **If your own request generator raises during a stream, you get your exception back**, not
+  gRPC's generic "Exception iterating requests!".  Requests sent before it may or may not have
+  reached the server, so check their status.
+
+**Behavior change: `data_frame()` rejects hand-built columns it used to pass.**  If you build
+column messages from the protobuf types directly and pass them to `data_frame()`, it now raises
+`ValueError` for an `EnumColumn` without an `enumId`, an array column with more than three
+dimensions, an `ImageColumn` without a complete image descriptor, a `StructColumn` without a
+`schemaId`, and a `SerializedDataColumn` without an `encoding`.  The server rejects all of these
+anyway, so nothing that used to be accepted end to end is lost.  `enum_column()` likewise now
+rejects a whitespace-only `enum_id`.
+
+Non-scalar columns (arrays, images, structs) can be ingested, but not yet read back through the
+query API, which returns scalar columns only; reading them back is
+[#16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
+
+See [#17](https://github.com/osprey-dcs/dp-python-lib/issues/17) and the Ingestion API section of
+[`CLAUDE.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/CLAUDE.md).
 
 ## Installing
 

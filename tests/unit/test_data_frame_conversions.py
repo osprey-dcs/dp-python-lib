@@ -824,5 +824,61 @@ class TestStructuralColumnFields(unittest.TestCase):
         self.assertEqual(dfc.data_frame_schema_ids(frame), {})
 
 
+class TestBuilderReadBackSymmetry(unittest.TestCase):
+    """
+    Each non-scalar builder (#17, D7) round-trips through data_frame() and the read side: values, one entry per
+    sample, plus the structural field the payload needs.  Live read-back waits for the bucket query (#16), so this
+    is the check that the write and read halves agree on layout -- above all, row-major array flattening.
+    """
+
+    def test_array_builders_round_trip_values_and_dims(self):
+        cases = (
+            (dfb.double_array_column, [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]),
+            (dfb.float_array_column, [[0.5, 1.5], [2.5, 3.5]]),
+            (dfb.int32_array_column, [[[1], [2]], [[3], [4]]]),
+            (dfb.int64_array_column, [[2**40, -1], [0, 1]]),
+            (dfb.bool_array_column, [[True, False, True], [False, False, True]]),
+        )
+        for builder, samples in cases:
+            with self.subTest(builder=builder.__name__):
+                frame = dfb.data_frame(_axis(2), [builder("arr", samples)])
+                expected_dims = [len(samples[0])]
+                if isinstance(samples[0][0], list):
+                    expected_dims.append(len(samples[0][0]))
+                self.assertEqual(dfc.data_frame_column_dimensions(frame), {"arr": expected_dims})
+                # column_values() keeps each sample flat; flattening the input row-major must reproduce it.
+                flat = [
+                    [v for row in sample for v in row] if isinstance(sample[0], list) else sample for sample in samples
+                ]
+                self.assertEqual(dfc.data_frame_columns(frame), {"arr": flat})
+
+    def test_explicit_dims_round_trip(self):
+        frame = dfb.data_frame(_axis(1), [dfb.double_array_column("img", [[1.0, 2.0, 3.0, 4.0]], dims=[2, 2])])
+        self.assertEqual(dfc.data_frame_column_dimensions(frame), {"img": [2, 2]})
+        self.assertEqual(dfc.data_frame_columns(frame), {"img": [[1.0, 2.0, 3.0, 4.0]]})
+
+    def test_image_builder_round_trips_payloads_and_descriptor(self):
+        column = dfb.image_column("cam", [b"f0", b"f1"], width=640, height=480, channels=3, encoding="rgb8")
+        frame = dfb.data_frame(_axis(2), [column])
+        self.assertEqual(dfc.data_frame_columns(frame), {"cam": [b"f0", b"f1"]})
+        self.assertEqual(
+            dfc.data_frame_image_descriptors(frame),
+            {"cam": {"width": 640, "height": 480, "channels": 3, "encoding": "rgb8"}},
+        )
+
+    def test_struct_builder_round_trips_payloads_and_schema_id(self):
+        frame = dfb.data_frame(_axis(2), [dfb.struct_column("bpm", [b"s0", b"s1"], schema_id="beam_position:v3")])
+        self.assertEqual(dfc.data_frame_columns(frame), {"bpm": [b"s0", b"s1"]})
+        self.assertEqual(dfc.data_frame_schema_ids(frame), {"bpm": "beam_position:v3"})
+
+    def test_serialized_builder_is_carried_but_not_decoded(self):
+        # The read side skips serialized columns deliberately (their payload is opaque); the message keeps them.
+        frame = dfb.data_frame(
+            _axis(1), [dfb.double_column("d", [1.0]), dfb.serialized_column("blob", b"payload", "proto:Image")]
+        )
+        self.assertEqual(dfc.data_frame_columns(frame), {"d": [1.0]})
+        self.assertEqual([(c.name, c.payload) for c in frame.serializedDataColumns], [("blob", b"payload")])
+
+
 if __name__ == "__main__":
     unittest.main()

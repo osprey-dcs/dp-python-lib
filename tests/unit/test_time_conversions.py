@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
-from dp_python_lib.client.time_conversions import to_epoch_nanos, to_timestamp
+from dp_python_lib.client.time_conversions import from_epoch_nanos, to_epoch_nanos, to_timestamp
 from dp_python_lib.grpc import common_pb2
 
 
@@ -29,6 +29,23 @@ class TestToEpochNanos(unittest.TestCase):
 
     def test_zero_timestamp_is_zero(self):
         self.assertEqual(to_epoch_nanos(common_pb2.Timestamp()), 0)
+
+
+class TestFromEpochNanos(unittest.TestCase):
+    """from_epoch_nanos() is to_epoch_nanos()'s inverse, shared by three modules since split_data_frame() (#17)."""
+
+    def test_splits_into_seconds_and_nanoseconds(self):
+        ts = from_epoch_nanos(1_770_055_200_123_456_789)
+        self.assertEqual((ts.epochSeconds, ts.nanoseconds), (1_770_055_200, 123_456_789))
+
+    def test_round_trips_with_to_epoch_nanos_exactly(self):
+        for original in (0, 1, 999_999_999, 1_000_000_000, 1_770_055_200_123_456_789):
+            with self.subTest(original=original):
+                self.assertEqual(to_epoch_nanos(from_epoch_nanos(original)), original)
+
+    def test_negative_is_rejected_by_the_unsigned_field(self):
+        with self.assertRaises(ValueError):
+            from_epoch_nanos(-1)
 
 
 class TestDatetimeConversionIsExact(unittest.TestCase):

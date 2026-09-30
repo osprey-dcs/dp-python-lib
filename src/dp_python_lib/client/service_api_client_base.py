@@ -50,6 +50,7 @@ class ServiceApiClientBase(ABC):
         op_name: str,
         request_log: Callable[[], None] | None = None,
         success_log: Callable[[Any], None] | None = None,
+        rpc_error_hint: Callable[[grpc.RpcError], str] | None = None,
     ) -> ApiResultT:
         """
         Invokes a unary gRPC API method and applies the standard three-tier error handling shared by every unary
@@ -76,6 +77,10 @@ class ServiceApiClientBase(ABC):
             generic "Calling <op_name> API" is logged instead.
         :param success_log: Optional callable, passed the response, logging a method-specific success message (some
             methods report a record count read off the response).  When omitted, a generic message is logged instead.
+        :param rpc_error_hint: Optional callable, passed a caught grpc.RpcError, returning text to APPEND to the
+            "gRPC error: <details>" message -- advice that grpcio's bare details cannot give, such as pointing an
+            oversized ingest at split_data_frame().  Return "" to add nothing.  It is appended, never substituted,
+            because the message prefix is part of the result contract.
         :return: A result_cls instance with the method response and status information.
         """
         if request_log is not None:
@@ -111,6 +116,8 @@ class ServiceApiClientBase(ABC):
 
         except grpc.RpcError as e:
             error_msg = f"gRPC error: {e.details()}"
+            if rpc_error_hint is not None:
+                error_msg += rpc_error_hint(e)
             # Safely get the error code -- it may not be available on a bare RpcError, as raised by test mocks.
             try:
                 error_code = e.code()

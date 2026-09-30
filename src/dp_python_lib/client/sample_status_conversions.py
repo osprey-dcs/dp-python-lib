@@ -21,7 +21,7 @@ optional [analysis] extra.  A pandas view is deferred to a follow-up.
 
 from collections.abc import Iterator
 
-from dp_python_lib.client.time_conversions import NANOS_PER_SECOND, to_epoch_nanos
+from dp_python_lib.client.time_conversions import from_epoch_nanos, to_epoch_nanos
 from dp_python_lib.grpc import common_pb2
 
 # The Timestamp -> epoch-nanoseconds conversion is shared (see time_conversions.to_epoch_nanos); this private
@@ -29,15 +29,8 @@ from dp_python_lib.grpc import common_pb2
 _timestamp_to_nanos = to_epoch_nanos
 
 
-def _nanos_to_timestamp(epoch_nanos: int) -> common_pb2.Timestamp:
-    """
-    Converts integer epoch nanoseconds back into a common.Timestamp.
-    :param epoch_nanos: Epoch nanoseconds.
-    :return: The equivalent common.Timestamp.
-    """
-    timestamp = common_pb2.Timestamp()
-    timestamp.epochSeconds, timestamp.nanoseconds = divmod(epoch_nanos, NANOS_PER_SECOND)
-    return timestamp
+# Likewise the inverse (time_conversions.from_epoch_nanos).
+_nanos_to_timestamp = from_epoch_nanos
 
 
 def expand_data_timestamps(data_timestamps: common_pb2.DataTimestamps) -> list[int]:
