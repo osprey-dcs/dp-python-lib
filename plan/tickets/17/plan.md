@@ -77,7 +77,9 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
     criteria are therefore required client-side.
   - **No limit and no paging.**  All matches come back in one message.  A broad query can exceed gRPC's
     default 4 MB *receive* limit on the client.  That is a gap in the API, not a client concern: the method
-    needs paging upstream (dp-grpc proto + dp-service handler; no ticket yet, to be filed).  Until then the
+    needs paging upstream: [osprey-dcs/dp-grpc#165](https://github.com/osprey-dcs/dp-grpc/issues/165) (proto)
+    and [osprey-dcs/dp-service#302](https://github.com/osprey-dcs/dp-service/issues/302) (handler), under the
+    [data-platform#104](https://github.com/osprey-dcs/data-platform/issues/104) epic.  Until then the
     client bounds its own queries by time range (D6).
   - There is **no unique index on `(providerId, clientRequestId)`**: re-using an id yields several
     documents.
@@ -427,13 +429,14 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
   (`queryBuckets`).  #16 should add a live round trip for each D7 builder when it lands.
 - **pandas support for array/object columns** in `data_frame_from_pandas()` — no consumer yet (D7).
 - **A `client.ingestion` alias** (D10).
-- **Paging for `queryRequestStatus`** — needs a proto change in dp-grpc and a handler change in
-  dp-service; ticket to be filed there.  D6 bounds its queries by time range in the meantime.  Once paging
+- **Paging for `queryRequestStatus`** — [osprey-dcs/dp-grpc#165](https://github.com/osprey-dcs/dp-grpc/issues/165)
+  (proto) and [osprey-dcs/dp-service#302](https://github.com/osprey-dcs/dp-service/issues/302) (handler).  D6 bounds its queries by time range in the meantime.  Once paging
   ships, `query_request_status()` gains `iter_`/token support like the other paged queries, and the D6
   window stays for the stale-id reason.
-- **Working around dp-service's bugs** (T3 empty-criteria fallthrough, T4 shutdown double-complete, the
-  unenforced unique index, the proto comments T2–T4 contradict).  These are dp-service/dp-grpc issues.
-  Worth filing there; the client documents actual behavior.
+- **Working around dp-service's bugs.**  The client documents actual behavior; fixes belong upstream.  The
+  T3 empty-criteria fall-through is in dp-service#302, and the proto comments T2–T4 contradict are in
+  dp-grpc#165.  Still unfiled: the T4 shutdown double-complete and the unenforced
+  `(providerId, clientRequestId)` uniqueness.
 
 ## Dependencies and sequencing
 
