@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import grpc
@@ -10,8 +11,10 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client import sample_status_conversions as ssc
 from dp_python_lib.client.mldp_client import MldpClient
+from dp_python_lib.client.query_client import PvQuery, QueryParams, SampleStatusFilter
 from dp_python_lib.client.sample_status_client import (
     QuerySampleStatusesRequestParams,
     SampleStatusColumn,
@@ -20,6 +23,9 @@ from dp_python_lib.client.sample_status_client import (
     sampling_clock,
     timestamp_list,
 )
+from dp_python_lib.client.time_conversions import from_epoch_nanos
+
+from .ingest_support import ingest_confirmed, register_provider
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -361,6 +367,122 @@ class TestSampleStatusClientIntegration(unittest.TestCase):
         result = self.sample_status.query_sample_statuses(params)
         self.assertFalse(result.result_status.is_error, result.result_status.message)
         self.assertEqual(result.sample_status_buckets, [])
+
+
+class TestSampleStatusQueryFiltering(unittest.TestCase):
+    """
+    A sample status filter on a live v2 query (#17 PR B): label some ingested samples, then query the data.
+
+    Six samples a second apart.  Samples 1 and 4 are labeled code 2 ("bad"), sample 2 code 1 ("suspect"), the
+    rest not at all.  exclude(code 2) must drop exactly samples 1 and 4 -- keeping the unlabeled ones, since an
+    absent status asserts nothing -- and include(code 2) must keep only them.  The filter names the status code,
+    so sample 2's other code proves the match is by code and not merely by "has a status".
+
+    Needs ingestion (localhost:50051), query (localhost:50052), and annotation (localhost:50053).  The statuses are
+    deleted afterwards; the ingested samples stay, under a run-unique PV name, as with every ingesting test.
+    """
+
+    BAD = 2
+    SUSPECT = 1
+    COUNT = 6
+    PERIOD_NANOS = 1_000_000_000
+
+    @classmethod
+    def setUpClass(cls):
+        for label, address in (
+            ("ingestion", "localhost:50051"),
+            ("query", "localhost:50052"),
+            ("annotation", "localhost:50053"),
+        ):
+            channel = grpc.insecure_channel(address)
+            try:
+                grpc.channel_ready_future(channel).result(timeout=5)
+            except grpc.FutureTimeoutError:
+                raise unittest.SkipTest(f"MLDP {label} service not available at {address}") from None
+            finally:
+                channel.close()
+
+        cls.client = MldpClient()
+        cls.sample_status = cls.client.annotation.sample_status
+        run_id = uuid.uuid4().hex[:12]
+        cls.pv_name = f"ITEST:SAMPLE:FILTER:{run_id}"
+        cls.domain = f"itest_filter_domain_{run_id}"
+        cls.layer = f"itest_filter_layer_{run_id}"
+        cls.t0 = datetime.fromtimestamp(int(time.time()) - 3600, tz=timezone.utc)
+        cls.t0_nanos = _exact_nanos(cls.t0)
+        cls.end = cls.t0 + timedelta(seconds=cls.COUNT)
+
+        ingestion = cls.client.ingestion_client
+        frame = dfb.data_frame(
+            sampling_clock(cls.t0, period_nanos=cls.PERIOD_NANOS, count=cls.COUNT),
+            [dfb.double_column(cls.pv_name, [float(i) for i in range(cls.COUNT)])],
+        )
+        try:
+            ingest_confirmed(ingestion, register_provider(ingestion, f"itest_filter_{run_id}"), frame)
+        except (RuntimeError, TimeoutError) as e:
+            raise unittest.SkipTest(f"could not ingest test data: {e}") from None
+
+        labeled = {1: cls.BAD, 2: cls.SUSPECT, 4: cls.BAD}
+        saved = cls.sample_status.save_sample_statuses(
+            SaveSampleStatusesRequestParams(
+                frames=[
+                    SampleStatusFrame(
+                        domain=cls.domain,
+                        layer=cls.layer,
+                        data_timestamps=timestamp_list(
+                            [from_epoch_nanos(cls.t0_nanos + i * cls.PERIOD_NANOS) for i in labeled]
+                        ),
+                        columns=[SampleStatusColumn(cls.pv_name, status_codes=list(labeled.values()))],
+                    )
+                ],
+                source="dp-python-lib integration test",
+                modified_by="dp-python-lib-integration-test",
+            )
+        )
+        if saved.result_status.is_error:
+            raise unittest.SkipTest(f"could not save sample statuses: {saved.result_status.message}")
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "sample_status", None) is not None:
+            cls.sample_status.delete_sample_statuses(
+                begin_time=cls.t0, end_time=cls.end, domain=cls.domain, layer=cls.layer, pv_names=[cls.pv_name]
+            )
+
+    def _sample_indexes(self, sample_status_filter=None):
+        """The indexes (0..COUNT-1) of the samples a query over the whole range returns."""
+        params = QueryParams(
+            begin_time=self.t0,
+            end_time=self.end,
+            pv_selector=PvQuery.name_list([self.pv_name]),
+            sample_status_filter=sample_status_filter,
+        )
+        result = self.client.query.query_samples(params)
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+        table = result.column_table
+        (column,) = [c for c in table.dataColumns if c.name == self.pv_name] or [None]
+        if column is None:
+            return []
+        stamps = [ts.epochSeconds * 1_000_000_000 + ts.nanoseconds for ts in table.timestampList.timestamps]
+        return [
+            (t - self.t0_nanos) // self.PERIOD_NANOS
+            for t, v in zip(stamps, column.dataValues, strict=True)
+            if v.WhichOneof("value") is not None
+        ]
+
+    def test_unfiltered_query_returns_every_sample(self):
+        self.assertEqual(self._sample_indexes(), list(range(self.COUNT)))
+
+    def test_exclude_drops_exactly_the_matching_samples(self):
+        self.assertEqual(
+            self._sample_indexes(SampleStatusFilter.exclude(self.domain, status_codes=[self.BAD])), [0, 2, 3, 5]
+        )
+
+    def test_include_keeps_only_the_matching_samples(self):
+        self.assertEqual(self._sample_indexes(SampleStatusFilter.include(self.domain, status_codes=[self.BAD])), [1, 4])
+
+    def test_include_without_codes_keeps_every_labeled_sample(self):
+        self.assertEqual(self._sample_indexes(SampleStatusFilter.include(self.domain)), [1, 2, 4])
 
 
 if __name__ == "__main__":

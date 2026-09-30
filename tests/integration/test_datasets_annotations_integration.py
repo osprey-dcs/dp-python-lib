@@ -24,7 +24,9 @@ from dp_python_lib.client.dataset_client import (
 )
 from dp_python_lib.client.export_client import ExportDataRequestParams, ExportFormat, calculations_spec
 from dp_python_lib.client.mldp_client import MldpClient
-from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
+from dp_python_lib.grpc import common_pb2
+
+from .ingest_support import ingest_confirmed, register_provider
 
 
 def _epoch_nanos(when: datetime) -> int:
@@ -50,9 +52,8 @@ class TestDataSetsAnnotationsIntegration(unittest.TestCase):
     IN THE ARCHIVE.  Despite its error text ("no PV metadata found for names: ..."), the server's check is a
     distinct on pvName over the buckets collection (MongoAnnotationHandler.validateSaveDataSetRequest ->
     MongoSyncQueryClient.executeQueryPvExistence), so saving PV metadata is not enough -- the PV must have ingested
-    data.  This class therefore ingests a few samples for its run-unique PV in setUpClass, using the generated
-    ingestion stub directly: the library's IngestionClient wraps only registerProvider() today, and ingestData() is
-    issue #17.
+    data.  This class therefore ingests a few samples for its run-unique PV in setUpClass, through the library's
+    IngestionClient, and waits for the request's SUCCESS status before saving anything.
 
     Each test writes under a run-unique owner id and tag and deletes what it wrote, so runs neither collide with
     each other nor with real data.
@@ -119,71 +120,20 @@ class TestDataSetsAnnotationsIntegration(unittest.TestCase):
         Ingests a handful of samples for this run's PV, so data blocks naming it pass saveDataSet's
         archive-existence check (see the class docstring).
 
-        Uses the generated ingestion stub directly rather than the library, whose IngestionClient covers only
-        registerProvider() today; wrapping ingestData() is issue #17.
+        Waits for the request's SUCCESS status rather than probing saveDataSet: the status document is written
+        after the buckets, so once it says SUCCESS the PV is in the archive.
         """
-        channel = grpc.insecure_channel(cls.INGESTION_ADDRESS)
-        cls._ingestion_channel = channel
-        stub = ingestion_pb2_grpc.DpIngestionServiceStub(channel)
-
-        registration = stub.registerProvider(
-            ingestion_pb2.RegisterProviderRequest(providerName=f"itest_provider_{cls.run_id}"), timeout=10
+        ingestion = cls.client.ingestion_client
+        frame = dfb.data_frame(
+            dfb.sampling_clock(cls.begin_time, period_nanos=cls.SAMPLE_PERIOD_NANOS, count=cls.SAMPLE_COUNT),
+            [dfb.double_column(cls.pv_name, [float(i) for i in range(cls.SAMPLE_COUNT)])],
         )
-        if registration.HasField("exceptionalResult"):
-            raise unittest.SkipTest(
-                f"could not register an ingestion provider: {registration.exceptionalResult.message}"
-            )
-        provider_id = registration.registrationResult.providerId
-
-        request = ingestion_pb2.IngestDataRequest(providerId=provider_id, clientRequestId=f"itest-{cls.run_id}")
-        clock = request.ingestionDataFrame.dataTimestamps.samplingClock
-        clock.startTime.epochSeconds = int(cls.begin_time.timestamp())
-        clock.periodNanos = cls.SAMPLE_PERIOD_NANOS
-        clock.count = cls.SAMPLE_COUNT
-
-        column = request.ingestionDataFrame.dataColumns.add()
-        column.name = cls.pv_name
-        for i in range(cls.SAMPLE_COUNT):
-            column.dataValues.add().doubleValue = float(i)
-
-        response = stub.ingestData(request, timeout=15)
-        if response.HasField("exceptionalResult"):
-            raise unittest.SkipTest(f"could not ingest test data: {response.exceptionalResult.message}")
-
-        cls._await_pv_in_archive()
+        try:
+            provider_id = register_provider(ingestion, f"itest_provider_{cls.run_id}")
+            ingest_confirmed(ingestion, provider_id, frame)
+        except (RuntimeError, TimeoutError) as e:
+            raise unittest.SkipTest(f"could not ingest test data: {e}") from None
         cls.logger.info("Ingested %d samples for %s", cls.SAMPLE_COUNT, cls.pv_name)
-
-    @classmethod
-    def _await_pv_in_archive(cls, attempts=20, delay_seconds=0.5):
-        """
-        Waits until the ingested PV is visible to saveDataSet's existence check.
-
-        ingestData() acks once the request is accepted, which is before the bucket is committed and queryable, so a
-        saveDataSet issued immediately afterwards still fails the check.  Probe with a throwaway save rather than
-        sleeping a fixed interval.
-        """
-        probe_params = SaveDataSetRequestParams(
-            name=f"itest archive probe {cls.run_id}",
-            owner_id=cls.owner_id,
-            data_blocks=[data_block(cls.begin_time, cls.end_time, [cls.pv_name])],
-        )
-        for _ in range(attempts):
-            result = cls.datasets.save_dataset(probe_params)
-            if not result.result_status.is_error:
-                cls.datasets.delete_dataset(result.dataset_id)
-                return
-            time.sleep(delay_seconds)
-
-        raise unittest.SkipTest(
-            f"ingested data for {cls.pv_name} did not become visible to saveDataSet within "
-            f"{attempts * delay_seconds:.0f}s: {result.result_status.message}"
-        )
-
-    @classmethod
-    def tearDownClass(cls):
-        channel = getattr(cls, "_ingestion_channel", None)
-        if channel is not None:
-            channel.close()
 
     @classmethod
     def _verify_modernized_api_available(cls):

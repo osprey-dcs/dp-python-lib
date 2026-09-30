@@ -433,6 +433,16 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
 - `CLAUDE.md`: drop the remaining "until #17" notes; record which verification now exists.
 - `doc/release-notes/NEXT.md`: extend #17's section with the verification now done.
 
+*Found in implementation (2026-09-30).*  Re-verifying `query.md` and `sample-status.md` against
+real data contradicted three of their claims, each confirmed in dp-service and dp-grpc: a
+config-only query is rejected (`QuerySpec.pvSelector` is required; `QueryV2Resolver` rejects its
+absence), although `QueryParams` accepts one; the sample-query path returns no column metadata, so
+`df.attrs["column_metadata"]` is never populated live; and `SampleStatusFilter.include()` without
+`status_codes` keeps every densely labeled sample, code 0 included.  The docs are corrected here.
+Making `QueryParams` reject a config-only query is a query-client change, outside this ticket.  The
+snippet checker also caught `iter_ingest_data_bidi_stream()` annotated `Iterator`, which made the
+documented `contextlib.closing(...)` fail mypy for callers; it is now a `Generator`.
+
 ## Out of scope
 
 - **`subscribeData()`** — implemented server-side, but a long-lived bidi subscription with its own

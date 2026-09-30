@@ -852,7 +852,7 @@ class IngestionClient(ServiceApiClientBase):
 
     def iter_ingest_data_bidi_stream(
         self, requests: Iterable[IngestDataRequestParams]
-    ) -> Iterator[IngestDataApiResult]:
+    ) -> Generator[IngestDataApiResult, None, None]:
         """
         Sends ingestion requests on a bidirectional stream, yielding each one's ack or reject as it arrives.
 
@@ -878,7 +878,8 @@ class IngestionClient(ServiceApiClientBase):
         Reading to the end needs no close: the call has finished by then.
 
         :param requests: The requests to send.
-        :return: A lazy iterator over per-request results.
+        :return: A lazy generator over per-request results.  Typed as a Generator, not an Iterator, because it has
+            the close() that contextlib.closing needs.
         :raises RuntimeError: on a transport or unexpected error.
         :raises Exception: whatever the iterable raised.
         """

@@ -94,7 +94,8 @@ for their service.
   that a request passed validation: confirm it landed with `await_request_statuses()` or
   `query_request_status()`.  `data_frame.split_data_frame()` cuts a large frame into chunks under
   the server's message-size and time-span limits, and the `data_frame` builders now cover array,
-  image, struct, and serialized columns as well as scalars.
+  image, struct, and serialized columns as well as scalars.  See the
+  [ingestion recipe](doc/cookbook/ingestion.md).
 
 **Supporting framework:** YAML + environment-variable configuration (`MLDP_*`, via
 pydantic-settings), TLS-capable channel creation, hierarchical logging, three-tier error handling
@@ -200,6 +201,7 @@ the recipes share one continuous worked example drawn from an accelerator facili
 | [Creating and connecting a client](doc/cookbook/connecting.md) | Building an `MldpClient`, config files and environment variables, TLS, logging |
 | [Cataloguing PVs](doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
 | [Recording machine configuration](doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
+| [Ingesting data](doc/cookbook/ingestion.md) | Registering a provider, sending frames of samples, confirming they landed, and chunking data too big for one message |
 | [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel |
 | [Labeling samples](doc/cookbook/sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
 | [DataSets and annotations](doc/cookbook/datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, and exporting |

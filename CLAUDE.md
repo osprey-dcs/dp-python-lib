@@ -259,8 +259,11 @@ plan documents one change, `CLAUDE.md` documents the invariant it established.
 - `tests/unit/test_annotations_client.py` - Unit tests for AnnotationsClient (incl. `calculations()`, absent-vs-empty calculations on save, the `calculations_id` empty-string-vs-None rule, three-tier error handling, paging)
 - `tests/unit/test_export_client.py` - Unit tests for ExportClient (`ExportFormat` mapping and unreachable `UNSPECIFIED`, `calculations_spec()`, the zero-source rejection, three-tier error handling)
 - `tests/unit/test_annotation_client.py` - Unit tests pinning the `AnnotationClient` facade wiring (every feature client present, one shared channel, one stub apiece)
+- `tests/integration/ingest_support.py` - The integration tests' one way to put samples in the archive: `register_provider()` and `ingest_confirmed()`, which ingests a frame through `IngestionClient` and returns only once its request-status document says SUCCESS (raising otherwise).  Every test needing archived data uses it, so none polls for bucket visibility: SUCCESS is written after the buckets.  A setUpClass that cannot ingest turns the `RuntimeError`/`TimeoutError` into a skip
+- `tests/integration/test_ingestion_client_integration.py` - Live ingestion (#17 PR B), each outcome confirmed through `await_request_statuses()`: unary ack + SUCCESS + exact read-back; an unknown `providerId` and a re-ingest of the same PV + first timestamp both **acked, then ERROR**; a client-streaming call with one server-rejected request (`rejected_request_ids`, the other two SUCCESS, the reject's status REJECTED); the bidi stream's in-order per-request results; a `split_data_frame()`-chunked frame reading back whole; array/image/struct/serialized columns reaching SUCCESS; and an oversized request failing with the `split_data_frame()` hint, unary and streamed.  The reject comes from a frame spanning more than the server's one-day bucket-span cap, which the client deliberately leaves server-side
+- `tests/integration/test_query_client_integration.py` - Live v2 query mechanics against whatever data exists, plus `TestQueryClosedLoop`, which ingests two PVs on different clocks and asserts exact values and timestamps, half-open trimming at both bounds, dense alignment (the slower PV's missing rows are unset `DataValue`s, not zeros), and in-order paging at a small `limit`
 - `tests/integration/test_datasets_annotations_integration.py` - Live-server round trip for datasets/annotations/calculations; ingests its own samples first, because `saveDataSet` requires archived PVs
-- `tests/integration/test_query_helper_relaxations_integration.py` - Live-server coverage for the #40 key-only `attributes()` search and the #41 browse-all `criteria`, on PV metadata, configurations, activations, and the v2 `PvQuery.attr` selector.  Both rest on server behavior a unit test cannot reach: a unit test asserts the request carries `values == []`, but only a real server distinguishes an existence filter from an `$in: []` that matches nothing.  Each test therefore stores an attribute value, asserts the key-only form finds the record, and asserts a query for a *different* value does not -- that pairing is what makes the first assertion meaningful.  The v2 class ingests its own samples (the selector needs archived data) and polls for bucket visibility rather than sleeping; it establishes that visibility with a *name-list* selector before asserting the negative case, so an empty result can only mean the attribute selector matched nothing.  Catalogue records are torn down per run, but the ingested samples are not -- the archive has no delete RPC, so each run leaves a few samples under a run-unique PV name, the same residue `test_datasets_annotations_integration.py` leaves
+- `tests/integration/test_query_helper_relaxations_integration.py` - Live-server coverage for the #40 key-only `attributes()` search and the #41 browse-all `criteria`, on PV metadata, configurations, activations, and the v2 `PvQuery.attr` selector.  Both rest on server behavior a unit test cannot reach: a unit test asserts the request carries `values == []`, but only a real server distinguishes an existence filter from an `$in: []` that matches nothing.  Each test therefore stores an attribute value, asserts the key-only form finds the record, and asserts a query for a *different* value does not -- that pairing is what makes the first assertion meaningful.  The v2 class ingests its own samples (the selector needs archived data) through `ingest_support`, and confirms they are queryable with a *name-list* selector before asserting the negative case, so an empty result can only mean the attribute selector matched nothing.  Catalogue records are torn down per run, but the ingested samples are not -- the archive has no delete RPC, so each run leaves a few samples under a run-unique PV name, the same residue `test_datasets_annotations_integration.py` leaves
 - `tests/unit/test_time_conversions.py` - Unit tests for the shared time converters (`to_timestamp()` input forms and the naive-datetime/bool/unsupported-type rejections; `to_epoch_nanos()` exactness and its round trip with `to_timestamp()`; `from_epoch_nanos()` and its round trip)
 - `tests/unit/test_data_frame.py` - Unit tests for the data_frame builders (axis relocation, each typed column, `data_column()` bool-before-int and unset-oneof handling, provenance helpers, and every `data_frame()` shape rule incl. array dims and serialized-column name-only checks)
 - `tests/unit/test_data_frame_conversions.py` - Unit tests for data_frame_conversions (nanosecond-exact expansion, per-column conversion incl. array reshaping, duplicate-name fail-loud, and — skipping cleanly without `[analysis]` — the pandas round trip, dtype mapping, and NaN fail-loud)
@@ -555,6 +558,10 @@ Invariants worth knowing before touching this code (dp-service citations are in 
   ingestion proto is unchanged since rel-1.15.0.
 - **Non-scalar columns cannot be read back live yet**: `querySamples` is scalar-only, so array, image, struct,
   and serialized data is verified only as far as ingestion (ack + SUCCESS) until the bucket query (#16).
+- **Live verification** (#17 PR B): `tests/integration/test_ingestion_client_integration.py` covers every behavior
+  above that a server can show -- see Key Files -- and `doc/cookbook/ingestion.md` was run as one continuous script
+  against a live stack.  That includes the `RESOURCE_EXHAUSTED` hint on both a unary call and a stream, which also
+  pins the server's size-violation text the hint is gated on.
 
 ### PV Metadata API (Annotation Service)
 PV metadata methods are exposed under the `annotation` facade at `client.annotation.pv_metadata`
@@ -695,8 +702,10 @@ qc.dataframe_to_excel(df_all, "out.xlsx")        # thin to_excel() wrapper (row-
 
 Notes:
 - Time inputs accept a tz-aware datetime, epoch seconds, or `common.Timestamp` (shared `to_timestamp()`); `begin`
-  must be strictly before `end`, and at least one of `pv_selector` / `config_criteria` must be present (a
-  config-only query is legal).  Empty inputs raise `ValueError`, as does a negative `limit` (`limit=0` is
+  must be strictly before `end`, and at least one of `pv_selector` / `config_criteria` must be present.  **A
+  config-only query is not actually legal**: `QuerySpec.pvSelector` is required by the proto, and dp-service rejects
+  its absence (`querySpec.pvSelector must be specified`, `QueryV2Resolver`).  `QueryParams` is looser than the server
+  here; found re-verifying the query cookbook in #17 PR B.  Empty inputs raise `ValueError`, as does a negative `limit` (`limit=0` is
   meaningful — the server picks a default).
 - `PvQuery` (`PV`) selectors: `name_list(values)` / `pattern(str)` / `metadata([...])`, whose criteria are
   `pv_name(exact=, prefix=, contains=)` / `aliases(exact=, prefix=, contains=)` (each repeated & coexisting) plus
@@ -709,7 +718,9 @@ Notes:
   `byteArrayValue`→bytes, `imageValue`→`Image(data, file_type)`); an unhandled oneof arm raises.  `DataValue.valueStatus`
   no longer exists: it was removed in dp-grpc 1.16.0 (field 15 reserved) in favor of the sample status API, and was
   never populated in `querySamples()` results before that.  Per-column `ColumnMetadata` lands in
-  `df.attrs["column_metadata"]` unless `exclude_column_metadata=True`.
+  `df.attrs["column_metadata"]` unless `exclude_column_metadata=True` -- **but the server's sample path populates
+  none** (dp-service: "the tabular path carries no column metadata"; `excludeColumnMetadata` is inert there), so a
+  live `querySamples()` result has an empty `df.attrs`.  The conversion is exercised only by unit tests.
 - Both conversions key columns by `DataColumn.name`, so a `ColumnTable` carrying two columns with the same name
   raises `ValueError` rather than silently dropping the earlier one.  `column_table_to_numpy()` always returns
   1-D arrays: complex arms become 1-D object arrays, so an array-valued column never collapses into a 2-D array
@@ -783,10 +794,9 @@ Invariants worth knowing before touching this code:
   `distinct` on `pvName` over the **buckets** collection (`MongoAnnotationHandler.validateSaveDataSetRequest` →
   `MongoSyncQueryClient.executeQueryPvExistence`), so saving PV metadata does **not** satisfy it.  Nothing is
   validated client-side (the client cannot know what is archived), but any test or example must use an archived PV.
-  `ingestData()` acks *before* the bucket becomes queryable, so a `saveDataSet` issued immediately after ingesting
-  still fails; `tests/integration/test_datasets_annotations_integration.py` probes until it succeeds rather than
-  sleeping a fixed interval, and ingests through the generated stub because it predates the ingestion client;
-  #17's second PR moves it onto `ingest_data()` and `await_request_statuses()`.
+  `ingestData()` acks *before* the bucket becomes queryable, so a `saveDataSet` issued immediately after the ack
+  can still fail; wait for the request's SUCCESS status first, which is written after the buckets.
+  `tests/integration/test_datasets_annotations_integration.py` does exactly that, through `ingest_support`.
 - **The server does not check `begin < end` on a `DataBlock`** (it checks only that each bound is non-zero and that
   `pvNames` is non-empty, and never compares the two bounds), so `data_block()`'s check is the only one there is.
 - **A `DataBlock`'s range is half-open, `[begin, end)`** — the same convention as the v2 query API's `QueryParams`,
@@ -926,8 +936,12 @@ Notes:
   Service built from dp-service `main` carrying the 1.16.0 API: exact nanosecond timestamp round-trip through both
   axis forms, absent-stays-absent, full-replace upsert, and layer independence.  The tests probe for the API first
   and skip with an actionable message against a pre-1.16.0 server, since reachability alone does not imply the RPCs
-  exist.  Status *filtering* of query results is still unit-tested only — it needs ingested sample data to attach
-  to (#17).
+  exist.  Its `TestSampleStatusQueryFiltering` class (#17 PR B) labels ingested samples and asserts the filtered
+  query: `exclude()` drops exactly the samples with the named code and keeps unlabeled ones, `include()` keeps only
+  them.  Two things re-verifying the cookbook showed: a *dense* label (a model scoring every sample) gives every
+  sample a status, code 0 included, so an `include()` without `status_codes` keeps them all; and in a multi-PV
+  query a filtered sample becomes a gap in its own column, the row vanishing only when every column's sample there
+  is filtered.
 
 ### Configuration Priority (High to Low)
 1. **Explicit parameters** (direct channels, config objects)

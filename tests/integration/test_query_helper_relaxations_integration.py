@@ -37,6 +37,7 @@ import grpc
 # Add src directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client.machine_config_client import (
     ConfigurationActivationQuery,
     ConfigurationQuery,
@@ -46,7 +47,8 @@ from dp_python_lib.client.machine_config_client import (
 from dp_python_lib.client.mldp_client import MldpClient
 from dp_python_lib.client.pv_metadata_client import PvMetadataQuery, SavePvMetadataRequestParams
 from dp_python_lib.client.query_client import PvQuery, QueryParams
-from dp_python_lib.grpc import ingestion_pb2, ingestion_pb2_grpc
+
+from .ingest_support import ingest_confirmed, register_provider
 
 ANNOTATION_ADDRESS = "localhost:50053"
 INGESTION_ADDRESS = "localhost:50051"
@@ -306,8 +308,7 @@ class TestV2SelectorRelaxations(unittest.TestCase):
     This is the one path where the client-side non-blank-key check is the ONLY one there is: `QueryV2Resolver`
     does not validate the key, so a blank one would reach Mongo as an existence test on "attributes." and match
     nothing silently (`plan/tickets/40/plan.md` T5).  Reaching the selector at all needs archived samples, so this
-    class ingests its own -- through the generated stub, since IngestionClient wraps only registerProvider()
-    until #17, the same approach test_datasets_annotations_integration.py takes.
+    class ingests its own through IngestionClient, waiting for the request's SUCCESS status.
     """
 
     SAMPLE_COUNT = 5
@@ -345,40 +346,21 @@ class TestV2SelectorRelaxations(unittest.TestCase):
         # Guarded: an early skip can leave these unset.
         if getattr(cls, "client", None) is not None:
             cls.client.annotation.pv_metadata.delete_pv_metadata(cls.pv_name)
-        if getattr(cls, "_ingestion_channel", None) is not None:
-            cls._ingestion_channel.close()
 
     @classmethod
     def _ingest_samples(cls):
         """Ingests a few samples for this run's PV, so the v2 selector has something to select."""
-        cls._ingestion_channel = grpc.insecure_channel(INGESTION_ADDRESS)
-        stub = ingestion_pb2_grpc.DpIngestionServiceStub(cls._ingestion_channel)
-
-        registration = stub.registerProvider(
-            ingestion_pb2.RegisterProviderRequest(providerName=f"itest_relax_provider_{cls.run_id}"), timeout=10
+        ingestion = cls.client.ingestion_client
+        frame = dfb.data_frame(
+            dfb.sampling_clock(cls.begin_time, period_nanos=cls.SAMPLE_PERIOD_NANOS, count=cls.SAMPLE_COUNT),
+            [dfb.double_column(cls.pv_name, [float(i) for i in range(cls.SAMPLE_COUNT)])],
         )
-        if registration.HasField("exceptionalResult"):
-            raise unittest.SkipTest(
-                f"could not register an ingestion provider: {registration.exceptionalResult.message}"
-            )
-
-        request = ingestion_pb2.IngestDataRequest(
-            providerId=registration.registrationResult.providerId,
-            clientRequestId=f"itest-relax-{cls.run_id}",
-        )
-        clock = request.ingestionDataFrame.dataTimestamps.samplingClock
-        clock.startTime.epochSeconds = int(cls.begin_time.timestamp())
-        clock.periodNanos = cls.SAMPLE_PERIOD_NANOS
-        clock.count = cls.SAMPLE_COUNT
-
-        column = request.ingestionDataFrame.dataColumns.add()
-        column.name = cls.pv_name
-        for i in range(cls.SAMPLE_COUNT):
-            column.dataValues.add().doubleValue = float(i)
-
-        response = stub.ingestData(request, timeout=15)
-        if response.HasField("exceptionalResult"):
-            raise unittest.SkipTest(f"could not ingest test data: {response.exceptionalResult.message}")
+        try:
+            provider_id = register_provider(ingestion, f"itest_relax_provider_{cls.run_id}")
+            # SUCCESS is written after the buckets, so the samples are queryable once this returns.
+            ingest_confirmed(ingestion, provider_id, frame)
+        except (RuntimeError, TimeoutError) as e:
+            raise unittest.SkipTest(f"could not ingest test data: {e}") from None
         cls.logger.info("Ingested %d samples for %s", cls.SAMPLE_COUNT, cls.pv_name)
 
     @classmethod
@@ -394,15 +376,12 @@ class TestV2SelectorRelaxations(unittest.TestCase):
         if result.result_status.is_error:
             raise unittest.SkipTest(f"could not catalogue the test PV: {result.result_status.message}")
 
-    def _query_columns(self, criterion, attempts=20, delay_seconds=0.5, name_list=False):
+    def _query_columns(self, criterion, name_list=False):
         """
         Runs a v2 query selecting on `criterion`, returning the column names it produced.
 
-        ingestData() acks before the bucket is queryable, so poll rather than sleeping a fixed interval -- the same
-        reason test_datasets_annotations_integration.py probes for archive visibility.
-
         `name_list=True` ignores `criterion` and selects the run's PV by name instead, which is how the caller
-        establishes bucket visibility without relying on the attribute selector under test.
+        establishes that the samples are queryable without relying on the attribute selector under test.
         """
         selector = PvQuery.name_list([self.pv_name]) if name_list else PvQuery.metadata([criterion])
         params = QueryParams(
@@ -410,27 +389,19 @@ class TestV2SelectorRelaxations(unittest.TestCase):
             end_time=self.end_time,
             pv_selector=selector,
         )
-        for _ in range(attempts):
-            result = self.client.query.query_samples(params)
-            self.assertFalse(
-                result.result_status.is_error,
-                f"querySamples failed: {result.result_status.message}",
-            )
-            names = [column.name for column in result.column_table.dataColumns]
-            if names:
-                return names
-            time.sleep(delay_seconds)
-        return []
+        result = self.client.query.query_samples(params)
+        self.assertFalse(result.result_status.is_error, f"querySamples failed: {result.result_status.message}")
+        return [column.name for column in result.column_table.dataColumns]
 
     def test_v2_key_only_attribute_selector_returns_samples(self):
-        # An empty result means two different things -- "the selector matched nothing" and "the bucket is not
-        # queryable yet" -- and the negative assertion below reads it as the first.  So establish visibility up
-        # front with a selector that does NOT depend on the behavior under test: a plain name list.  Once this
-        # passes, an empty result from an attribute selector can only be the selector.
+        # An empty result means two different things -- "the selector matched nothing" and "there is no data" --
+        # and the negative assertion below reads it as the first.  The ingest waited for SUCCESS, so the samples
+        # should be queryable; confirm it with a selector that does NOT depend on the behavior under test, a plain
+        # name list.  Once this passes, an empty result from an attribute selector can only be the selector.
         self.assertIn(
             self.pv_name,
             self._query_columns(None, name_list=True),
-            "the ingested samples never became queryable; cannot distinguish an empty selector result from an "
+            "the ingested samples are not queryable; cannot distinguish an empty selector result from an "
             "invisible bucket",
         )
 
@@ -450,7 +421,7 @@ class TestV2SelectorRelaxations(unittest.TestCase):
         # hits above came from key existence rather than from an unfiltered match.  Meaningful because the
         # visibility assertion above already proved an empty result here is the selector's doing.
         self.assertEqual(
-            self._query_columns(PvQuery.attr(self.attribute_key, [NON_MATCHING_VALUE]), attempts=1),
+            self._query_columns(PvQuery.attr(self.attribute_key, [NON_MATCHING_VALUE])),
             [],
             "a value-based v2 selector for a value the PV does not have must select nothing",
         )

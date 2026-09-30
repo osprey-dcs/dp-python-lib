@@ -24,15 +24,10 @@ client.
 | [Creating and connecting a client](connecting.md) | The four ways to build an `MldpClient`, configuration files and environment variables, TLS, logging, and when sub-clients are `None` |
 | [Cataloguing PVs](pv-metadata.md) | Recording what a PV *is* — device, area, element type, position — then finding PVs by those properties instead of by name |
 | [Recording machine configuration](machine-configuration.md) | Defining configurations, recording when each was active, closing and opening intervals, and answering "what was the machine doing at 18:04?" |
+| [Ingesting data](ingestion.md) | Registering a provider, sending frames of samples, confirming they landed, and chunking and streaming data too big for one message |
 | [Querying time-series data](query.md) | Retrieving samples by PV name, by metadata, or by machine configuration, and converting results to pandas / NumPy / Excel |
 | [Labeling samples](sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
 | [DataSets and annotations](datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, round-tripping calculations through pandas, and exporting |
-
-**Not yet covered: getting data in.**  `IngestionClient` currently exposes only
-`register_provider()`, so there is no ingestion recipe.
-[Issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17) adds the full ingestion client;
-when it lands, this cookbook needs an ingestion recipe, and the
-[query recipe's examples need re-verifying against real data](query.md#how-far-these-examples-have-been-verified).
 
 ## The worked example
 
@@ -44,6 +39,8 @@ query recipes is the data the earlier recipes create:
   `Z` and `S`.
 - A physics-shift configuration, `cxi-production` (`PATH=CU_HXR`, `E=14.6`, `RATE=10000`,
   `MODE=09`), activated over a shift with `DEST=CXI` and `EXP=CXI_3443`.
+- One second of those three signals at 10 kHz, from 18:04:12 during the shift, ingested by provider
+  `bpm-daq` — the samples the query and labeling recipes read back.
 - Queries that retrieve those PVs by name, by *"every monitor in GUNB"*, and by *"whatever ran
   during the CXI shift"*.
 - A dataset naming the first hour of that shift, an annotation recording an orbit drift, and a 1 Hz
@@ -57,7 +54,8 @@ Attribute names and values are the facility's; tag values are illustrative place
   the dp-grpc version its stubs were generated from, so a server older than your `dp_python_lib`
   will not implement everything documented here.  Where a recipe uses something added in a
   particular release, it says so in the body — the [v2 query API](query.md) needs a `rel-1.15.0` or
-  later server, and [sample status](sample-status.md) needs `rel-1.16.0` or later.
+  later server, [sample status](sample-status.md) needs `rel-1.16.0` or later, and
+  [ingested column provenance](ingestion.md) survives only into `rel-1.16.0` or later.
 - Snippets omit imports and client construction except where a recipe is specifically about those
   things.  Each recipe lists the imports its examples assume.
 - Examples check `result_status.is_error` before reading a payload.  This is not ceremony: the
