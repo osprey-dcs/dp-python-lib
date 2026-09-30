@@ -438,8 +438,9 @@ real data contradicted three of their claims, each confirmed in dp-service and d
 config-only query is rejected (`QuerySpec.pvSelector` is required; `QueryV2Resolver` rejects its
 absence), although `QueryParams` accepts one; the sample-query path returns no column metadata, so
 `df.attrs["column_metadata"]` is never populated live; and `SampleStatusFilter.include()` without
-`status_codes` keeps every densely labeled sample, code 0 included.  The docs are corrected here.
-Making `QueryParams` reject a config-only query is a query-client change, outside this ticket.  The
+`status_codes` keeps every densely labeled sample, code 0 included.  The docs are corrected here,
+and at Craig's direction `QueryParams` now rejects a config-only query (and an empty `PvSelector`)
+with a `ValueError` pointing at `PvQuery.pattern(".*")`, although it is a query-client change.  The
 snippet checker also caught `iter_ingest_data_bidi_stream()` annotated `Iterator`, which made the
 documented `contextlib.closing(...)` fail mypy for callers; it is now a `Generator`.
 

@@ -190,14 +190,24 @@ class TestQueryParams(unittest.TestCase):
         p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("ABC:.*"))
         self.assertIsNotNone(p.pv_selector)
 
-    def test_valid_config_only(self):
-        # A config-only query (no pv_selector) is legal.
-        p = QueryParams(BEGIN, END, config_criteria=[ConfigQuery.configuration_name(["c"])])
-        self.assertIsNone(p.pv_selector)
+    def test_config_only_is_rejected(self):
+        # The server requires a PV selector even with config criteria (#17 PR B), so fail here, pointing at ".*".
+        with self.assertRaises(ValueError) as ctx:
+            QueryParams(BEGIN, END, pv_selector=None, config_criteria=[ConfigQuery.configuration_name(["c"])])
+        self.assertIn('PvQuery.pattern(".*")', str(ctx.exception))
 
-    def test_requires_a_selector_or_config(self):
+    def test_requires_a_selector(self):
         with self.assertRaises(ValueError):
-            QueryParams(BEGIN, END)
+            QueryParams(BEGIN, END, pv_selector=None)
+
+    def test_an_empty_selector_is_rejected(self):
+        # A default-constructed PvSelector sets no oneof arm; the server rejects that too.
+        with self.assertRaises(ValueError):
+            QueryParams(BEGIN, END, pv_selector=query_pb2.PvSelector())
+
+    def test_config_criteria_still_narrow_a_selector(self):
+        p = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern(".*"), config_criteria=[ConfigQuery.category(["c"])])
+        self.assertEqual(len(p.config_criteria), 1)
 
     def test_begin_equal_end_raises(self):
         with self.assertRaises(ValueError):
@@ -268,10 +278,12 @@ class TestBuildRequest(unittest.TestCase):
         self.assertFalse(req.resultRepresentation.useSerializedColumns)
         self.assertFalse(req.resultRepresentation.excludeColumnMetadata)
 
-    def test_build_config_only(self):
-        p = QueryParams(BEGIN, END, config_criteria=[ConfigQuery.category(["optics"])])
+    def test_build_with_config_criteria(self):
+        p = QueryParams(
+            BEGIN, END, pv_selector=PvQuery.pattern(".*"), config_criteria=[ConfigQuery.category(["optics"])]
+        )
         req = self.client._build_query_samples_request(p)
-        self.assertEqual(req.querySpec.pvSelector.WhichOneof("selector"), None)
+        self.assertEqual(req.querySpec.pvSelector.pvNamePattern.pattern, ".*")
         self.assertEqual(len(req.querySpec.configurationSelector.criteria), 1)
 
     def test_build_no_limit_no_token(self):

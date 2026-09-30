@@ -702,10 +702,11 @@ qc.dataframe_to_excel(df_all, "out.xlsx")        # thin to_excel() wrapper (row-
 
 Notes:
 - Time inputs accept a tz-aware datetime, epoch seconds, or `common.Timestamp` (shared `to_timestamp()`); `begin`
-  must be strictly before `end`, and at least one of `pv_selector` / `config_criteria` must be present.  **A
-  config-only query is not actually legal**: `QuerySpec.pvSelector` is required by the proto, and dp-service rejects
-  its absence (`querySpec.pvSelector must be specified`, `QueryV2Resolver`).  `QueryParams` is looser than the server
-  here; found re-verifying the query cookbook in #17 PR B.  Empty inputs raise `ValueError`, as does a negative `limit` (`limit=0` is
+  must be strictly before `end`, and **`pv_selector` is required**, with one arm set, even alongside
+  `config_criteria`: `QuerySpec.pvSelector` is required by the proto, and dp-service rejects its absence
+  (`querySpec.pvSelector must be specified`, `QueryV2Resolver`).  `QueryParams` accepted a config-only query until
+  #17 PR B, whose cookbook re-verification found the server rejecting it; "every PV under a configuration" is
+  `PV.pattern(".*")` plus `config_criteria`.  Empty inputs raise `ValueError`, as does a negative `limit` (`limit=0` is
   meaningful — the server picks a default).
 - `PvQuery` (`PV`) selectors: `name_list(values)` / `pattern(str)` / `metadata([...])`, whose criteria are
   `pv_name(exact=, prefix=, contains=)` / `aliases(exact=, prefix=, contains=)` (each repeated & coexisting) plus
@@ -831,7 +832,7 @@ Invariants worth knowing before touching this code:
     page size (100, hardcoded in `MongoSyncAnnotationClient.DEFAULT_QUERY_LIMIT`, **not** configurable) applies
     **unconditionally**: dropping the last criterion does not change the page size, so a bare `query_*()` still
     returns one page and a token.  That is why `iter_*` is the right call for browsing.  Note the v2 query methods
-    are deliberately *not* included: `QueryParams` still requires a PV selector or config criteria, since a
+    are deliberately *not* included: `QueryParams` still requires a PV selector, since a
     time-series query with no selection is unbounded rather than a browse-all
 - `ExportFormat` makes the server-rejected `EXPORT_FORMAT_UNSPECIFIED` unreachable, and `ExportDataRequestParams`
   requires at least one of `dataset_id` / `data_blocks` / `calculations_spec`.  The exported file lives on the

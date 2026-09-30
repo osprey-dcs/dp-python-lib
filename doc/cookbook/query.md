@@ -54,9 +54,9 @@ PVs are chosen in one of **three mutually exclusive ways** — pick exactly one:
 Independently, `config_criteria` restricts results to the intervals when matching machine
 configurations were **active**.  It narrows a PV selector; it does not replace one.
 
-**A PV selector is required.**  `QueryParams` currently accepts `config_criteria` alone, but the
-server rejects such a query (`querySpec.pvSelector must be specified`).  To query every PV, say so
-with `PV.pattern(".*")` — see [everything under one configuration](#everything-under-one-configuration).
+**A PV selector is required**, even with `config_criteria`: the server rejects a query without one,
+so `QueryParams` raises `ValueError` up front.  To query every PV, say so with `PV.pattern(".*")` —
+see [everything under one configuration](#everything-under-one-configuration).
 
 Results arrive as a **`ColumnTable`**: a list of timestamps plus one `DataColumn` per PV.  You can
 work with that directly, or convert it — see
@@ -75,7 +75,8 @@ QueryParams(begin_time=end, end_time=begin,
             pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))   # ValueError: begin must precede end
 ```
 
-Also rejected: no selector at all, and a negative `limit`.  Note that **`limit=0` is meaningful** —
+Also rejected: no PV selector (even alongside `config_criteria`), and a negative `limit`.  Note
+that **`limit=0` is meaningful** —
 it means "let the server choose a page size".
 
 ## Querying a known list of PVs
@@ -243,8 +244,7 @@ params = QueryParams(
 ```
 
 Occasionally what you want, but it can return a great deal of data: bound it with a tight time
-range and a `limit`, and prefer the streaming form below.  Leaving `pv_selector` out instead is
-rejected by the server, although `QueryParams` does not yet catch it.
+range and a `limit`, and prefer the streaming form below.
 
 ## Getting results into pandas and NumPy
 

@@ -196,12 +196,16 @@ query API, which returns scalar columns only; reading them back is
 A new cookbook recipe, [Ingesting data](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md), walks through registering,
 ingesting, confirming, chunking, and streaming.  It was run end to end against a live MLDP stack, as
 were the query and sample-status recipes over the data it stores, and the integration tests now
-ingest their own data through the library and wait for its SUCCESS status.  Re-running the older
-recipes against real data corrected three things they claimed:
+ingest their own data through the library and wait for its SUCCESS status.
 
-- **A query with `config_criteria` and no PV selector is rejected by the server**
-  (`querySpec.pvSelector must be specified`), although `QueryParams` accepts it.  To query every PV
-  under a configuration, select them explicitly with `PvQuery.pattern(".*")`.
+**Behavior change: `QueryParams` requires a `pv_selector`.**  It used to accept `config_criteria`
+alone, but the server rejects every such query (`querySpec.pvSelector must be specified`), so
+`QueryParams` now raises `ValueError` instead, as it does for a `PvSelector` with no form set.
+Nothing that worked is lost.  To query every PV under a configuration, select them explicitly with
+`PvQuery.pattern(".*")` alongside the `config_criteria`.
+
+Re-running the older recipes against real data also corrected two things they claimed:
+
 - **Sample query results carry no column metadata.**  The server's sample path populates none, so
   `to_dataframe()` leaves `df.attrs` empty; read the catalogue with `get_pv_metadata()` instead.
 - **With dense sample-status labeling, name the codes in `SampleStatusFilter.include()`.**  A model
