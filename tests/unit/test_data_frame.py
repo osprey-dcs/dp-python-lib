@@ -618,6 +618,19 @@ class TestValidateDataFrame(unittest.TestCase):
             dfb.validate_data_frame(frame)
         self.assertIn("1 values", str(ctx.exception))
 
+    def test_messages_name_the_function_the_caller_called(self):
+        # A frame that never went through data_frame() should not be reported as if it had.
+        frame = common_pb2.DataFrame()
+        frame.dataTimestamps.CopyFrom(_axis(2))
+        frame.enumColumns.add(name="state").values[:] = [0, 1]
+        for kwargs, prefix in (
+            ({}, "validate_data_frame() "),
+            ({"caller": "split_data_frame()"}, "split_data_frame() "),
+        ):
+            with self.subTest(prefix=prefix), self.assertRaises(ValueError) as ctx:
+                dfb.validate_data_frame(frame, **kwargs)
+            self.assertTrue(str(ctx.exception).startswith(prefix), str(ctx.exception))
+
 
 class TestArrayColumnBuilders(unittest.TestCase):
     def test_one_dimensional_samples_infer_their_dims(self):

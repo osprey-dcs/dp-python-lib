@@ -144,11 +144,14 @@ See [#26](https://github.com/osprey-dcs/dp-python-lib/issues/26).
 ## Ingesting data (Issue #17)
 
 The library can now put data into MLDP, not just read it.  `client.ingestion_client`, which
-previously offered only `register_provider()`, now covers the rest of the ingestion API:
+previously offered only `register_provider()`, now covers data ingestion and request status
+(`subscribeData()` is not wrapped yet):
 
 - **`ingest_data()`** sends one request.  **`ingest_data_stream()`** sends many on one call and
   returns a single summary.  **`iter_ingest_data_bidi_stream()`** yields each request's ack or
-  reject as it arrives.
+  reject as it arrives.  To stop a bidi stream early, close its iterator, most simply with
+  `contextlib.closing`: that cancels the call.  A plain `break` does not, while the iterator is still
+  referenced, and gRPC keeps sending the remaining requests in the background.
 - **`await_request_statuses()`** and **`query_request_status()`** report whether an ingestion
   actually landed.  This matters because **an ack means only that a request passed validation.**
   The server queues the data and writes it afterwards, so a request can be acked and still fail.

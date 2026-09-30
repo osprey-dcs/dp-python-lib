@@ -30,7 +30,11 @@ from enum import IntEnum
 
 import grpc
 
-from dp_python_lib.client.data_frame import MAX_BUDGETED_ID_CHARS, validate_data_frame
+from dp_python_lib.client.data_frame import (
+    MAX_BUDGETED_ID_CHARS,
+    SERVER_DEFAULT_MAX_MESSAGE_BYTES,
+    validate_data_frame,
+)
 from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 from dp_python_lib.client.time_conversions import (
@@ -84,9 +88,9 @@ def _ingest_size_hint(e: grpc.RpcError) -> str:
     if details is None or _SERVER_INBOUND_SIZE_TEXT not in details:
         return ""
     return (
-        " (the request exceeds the server's inbound message limit, 4,096,000 bytes by default; split the frame "
-        "with data_frame.split_data_frame(frame, max_bytes=...) and ingest the chunks, e.g. with "
-        "ingest_data_stream())"
+        f" (the request exceeds the server's inbound message limit, {SERVER_DEFAULT_MAX_MESSAGE_BYTES:,} bytes by "
+        "default; split the frame with data_frame.split_data_frame(frame, max_bytes=...) and ingest the chunks, "
+        "e.g. with ingest_data_stream())"
     )
 
 
@@ -205,7 +209,10 @@ class IngestDataRequestParams:
     in two places -- whitespace-only column names and duplicate timestamps are rejected -- because the library must
     be able to read back what it writes; a caller who needs either can build the request and call the stub directly.
 
-    Validation happens at construction, so a bad request fails where it is made rather than mid-stream.
+    Validation happens at construction, so a request built up front fails where it is made rather than
+    mid-stream.  Params built lazily -- by chunked_request_params(), or any generator feeding a streaming ingest --
+    are constructed as the stream consumes them, so there a bad frame does fail mid-stream, after earlier requests
+    may already have been sent (see ingest_data_stream()).
     """
 
     def __init__(
@@ -228,7 +235,7 @@ class IngestDataRequestParams:
             client_request_id = str(uuid.uuid4())
         else:
             _require_id(client_request_id, "client_request_id")
-        validate_data_frame(frame)
+        validate_data_frame(frame, caller="IngestDataRequestParams")
 
         self.provider_id = provider_id
         self.frame = frame
@@ -249,11 +256,21 @@ def chunked_request_params(
 
     :param provider_id: The id registerProvider() returned.
     :param frames: The frames to wrap.
-    :param base_request_id: The id prefix.  Defaults to a generated uuid4 string.
+    :param base_request_id: The id prefix.  Defaults to a generated uuid4 string.  Must be non-blank, and short
+        enough to leave room for the "-<n>" suffix within MAX_BUDGETED_ID_CHARS.
     :return: An iterator over IngestDataRequestParams.
-    :raises ValueError: during iteration, if a frame fails validation or an id would be too long.
+    :raises ValueError: on the first iteration, if base_request_id is blank or too long; later, if a frame fails
+        validation or a suffixed id would exceed the cap.
     """
     base = base_request_id if base_request_id is not None else str(uuid.uuid4())
+    # Checked with the shortest suffix, before any frame is consumed, so a bad base fails as itself rather than as
+    # the first chunk's client_request_id.  (A generator body runs at first next(), not at the call.)
+    _require_id(base, "base_request_id")
+    if len(base) + len("-0") > MAX_BUDGETED_ID_CHARS:
+        raise ValueError(
+            f"base_request_id is {len(base)} characters; with the '-<n>' suffix the request ids would exceed "
+            f"{MAX_BUDGETED_ID_CHARS} characters"
+        )
     for index, frame in enumerate(frames):
         yield IngestDataRequestParams(provider_id, frame, client_request_id=f"{base}-{index}")
 
@@ -846,9 +863,19 @@ class IngestionClient(ServiceApiClientBase):
         ingest_data_stream(), requests sent before it may have been ingested.
 
         grpcio consumes the iterable on its own thread, so a producer generator runs concurrently with the
-        responses being read.  The server applies backpressure through HTTP/2 flow control.  Stopping early (a
-        break, or closing this iterator) cancels the call, so no further requests are sent; requests already sent
-        may still be ingested.
+        responses being read.  The server applies backpressure through HTTP/2 flow control.
+
+        **Closing the returned iterator cancels the call**, so no further requests are sent (requests already sent
+        may still be ingested).  A bare `break` does NOT close it while anything still references it: until it is
+        closed or garbage-collected, grpcio keeps pulling and sending requests.  So to stop early, close it
+        explicitly -- `contextlib.closing` does that on every exit, a break or an exception included:
+
+            with contextlib.closing(ingestion.iter_ingest_data_bidi_stream(requests)) as results:
+                for result in results:
+                    if result.result_status.is_error:
+                        break  # the call is cancelled as the with block exits
+
+        Reading to the end needs no close: the call has finished by then.
 
         :param requests: The requests to send.
         :return: A lazy iterator over per-request results.
@@ -857,8 +884,9 @@ class IngestionClient(ServiceApiClientBase):
         """
         self.logger.info("Starting ingestDataBidiStream operation")
         feed = _RequestFeed(requests, self._build_ingest_data_request, self.logger)
-        # closing() so that abandoning THIS generator closes the sender's at once, running the finally that cancels
-        # the call, instead of whenever the garbage collector gets to it.
+        # closing() so that closing THIS generator closes the sender's at once, running the finally that cancels the
+        # call.  It does not make a caller's `break` a close: a suspended generator that is still referenced is
+        # closed only explicitly or when collected, which is why the docstring asks for contextlib.closing.
         with contextlib.closing(self._send_ingest_data_bidi_stream(feed)) as results:
             for result in results:
                 if result.result_status.is_error and result.response is None:

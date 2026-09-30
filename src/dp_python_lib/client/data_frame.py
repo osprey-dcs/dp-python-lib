@@ -979,7 +979,7 @@ def _column_sample_count(column: Any) -> int | None:
     return len(column.values)
 
 
-def _check_column(column: Any, index: int, expected_count: int, seen_names: set[str]) -> None:
+def _check_column(column: Any, index: int, expected_count: int, seen_names: set[str], caller: str) -> None:
     """
     Applies the server's per-column shape rules to one column, with a message naming the column.
 
@@ -987,25 +987,24 @@ def _check_column(column: Any, index: int, expected_count: int, seen_names: set[
     :param index: The column's position in the caller's list, for messages about an unnamed column.
     :param expected_count: The frame's sample count, which every counted column must match.
     :param seen_names: Names already used in this frame; mutated to record this column's name.
+    :param caller: The public entry point, as it should appear at the start of an error message.
     :raises ValueError: if the column is of an unsupported type, unnamed, empty, duplicate-named, count-mismatched,
         or missing a structural field its kind requires (enumId, 1-3 array dims, an image descriptor, schemaId,
         or a serialized column's encoding).
     """
     if type(column) not in _COLUMN_FIELD_BY_TYPE:
         raise ValueError(
-            f"data_frame() received an unsupported column type at index {index}: {type(column).__name__}. "
+            f"{caller} received an unsupported column type at index {index}: {type(column).__name__}. "
             f"Use one of the column builders, or pass a pre-built typed column message."
         )
 
     name = column.name
     if not name or not name.strip():
         # Blank, not merely empty: the rule is a non-blank name, and a whitespace-only one is not a name.
-        raise ValueError(
-            f"data_frame() requires a non-blank name for every column; column at index {index} has {name!r}"
-        )
+        raise ValueError(f"{caller} requires a non-blank name for every column; column at index {index} has {name!r}")
     if name in seen_names:
         raise ValueError(
-            f"data_frame() requires unique column names within a frame; '{name}' appears more than once "
+            f"{caller} requires unique column names within a frame; '{name}' appears more than once "
             f"(names must be unique across ALL column types, not just within one type)"
         )
     seen_names.add(name)
@@ -1015,15 +1014,15 @@ def _check_column(column: Any, index: int, expected_count: int, seen_names: set[
     if isinstance(column, common_pb2.SerializedDataColumn):
         # Serialized payloads are opaque; the server checks only the name and the encoding, never a count.
         if not column.encoding.strip():
-            raise ValueError(f"data_frame() serialized column '{name}' requires a non-blank encoding")
+            raise ValueError(f"{caller} serialized column '{name}' requires a non-blank encoding")
         return
     if isinstance(column, common_pb2.EnumColumn) and not column.enumId.strip():
-        raise ValueError(f"data_frame() enum column '{name}' requires a non-blank enumId")
+        raise ValueError(f"{caller} enum column '{name}' requires a non-blank enumId")
     if isinstance(column, common_pb2.StructColumn) and not column.schemaId.strip():
-        raise ValueError(f"data_frame() struct column '{name}' requires a non-blank schemaId")
+        raise ValueError(f"{caller} struct column '{name}' requires a non-blank schemaId")
     if isinstance(column, common_pb2.ImageColumn):
         if not column.HasField("imageDescriptor"):
-            raise ValueError(f"data_frame() image column '{name}' requires an imageDescriptor")
+            raise ValueError(f"{caller} image column '{name}' requires an imageDescriptor")
         descriptor = column.imageDescriptor
         for label, value in (
             ("width", descriptor.width),
@@ -1031,53 +1030,54 @@ def _check_column(column: Any, index: int, expected_count: int, seen_names: set[
             ("channels", descriptor.channels),
         ):
             if value <= 0:
-                raise ValueError(f"data_frame() image column '{name}' requires imageDescriptor.{label} > 0")
+                raise ValueError(f"{caller} image column '{name}' requires imageDescriptor.{label} > 0")
         if not descriptor.encoding.strip():
-            raise ValueError(f"data_frame() image column '{name}' requires a non-blank imageDescriptor.encoding")
+            raise ValueError(f"{caller} image column '{name}' requires a non-blank imageDescriptor.encoding")
 
     if isinstance(column, _ARRAY_COLUMN_TYPES):
         dims = list(column.dimensions.dims)
         if len(dims) > _MAX_ARRAY_DIMS:
             raise ValueError(
-                f"data_frame() array column '{name}' has {len(dims)} dimensions {dims}; array columns support "
+                f"{caller} array column '{name}' has {len(dims)} dimensions {dims}; array columns support "
                 f"1 to {_MAX_ARRAY_DIMS}"
             )
         product = _array_sample_size(column)
         if product is None:
             raise ValueError(
-                f"data_frame() cannot determine the sample count of array column '{name}': its dimensions are "
+                f"{caller} cannot determine the sample count of array column '{name}': its dimensions are "
                 f"missing or zero.  Set ArrayDimensions.dims so that values is samples x prod(dims)."
             )
         if len(column.values) % product != 0:
             raise ValueError(
-                f"data_frame() array column '{name}' has {len(column.values)} values, which is not a whole "
+                f"{caller} array column '{name}' has {len(column.values)} values, which is not a whole "
                 f"multiple of its per-sample size {product} (from dims {list(column.dimensions.dims)}); "
                 f"values must be samples x prod(dims)"
             )
 
     count = _column_sample_count(column)
     if count == 0:
-        raise ValueError(f"data_frame() requires a non-empty values list for column '{name}'")
+        raise ValueError(f"{caller} requires a non-empty values list for column '{name}'")
     if count != expected_count:
         raise ValueError(
-            f"data_frame() column '{name}' has {count} values but the time axis has {expected_count} timestamps; "
+            f"{caller} column '{name}' has {count} values but the time axis has {expected_count} timestamps; "
             f"every column must carry exactly one value per sample"
         )
 
 
-def _check_columns(columns: Sequence[Any], expected_count: int) -> None:
+def _check_columns(columns: Sequence[Any], expected_count: int, caller: str) -> None:
     """
     Applies _check_column() to every column of one frame, sharing a single set of names across them all.
 
     :param columns: The frame's columns, in any mix of supported types.
     :param expected_count: The frame's sample count.
+    :param caller: The public entry point, as it should appear at the start of an error message.
     :raises ValueError: as for _check_column(), or if there are no columns.
     """
     if not columns:
-        raise ValueError("data_frame() requires at least one column")
+        raise ValueError(f"{caller} requires at least one column")
     seen_names: set[str] = set()
     for index, column in enumerate(columns):
-        _check_column(column, index, expected_count, seen_names)
+        _check_column(column, index, expected_count, seen_names, caller)
 
 
 def _frame_columns(frame: common_pb2.DataFrame) -> list[Any]:
@@ -1090,7 +1090,7 @@ def _frame_columns(frame: common_pb2.DataFrame) -> list[Any]:
     return [column for field in _COLUMN_FIELD_BY_TYPE.values() for column in getattr(frame, field)]
 
 
-def validate_data_frame(frame: common_pb2.DataFrame) -> None:
+def validate_data_frame(frame: common_pb2.DataFrame, *, caller: str = "validate_data_frame()") -> None:
     """
     Applies data_frame()'s checks to an already-assembled frame, however it was made.
 
@@ -1100,11 +1100,13 @@ def validate_data_frame(frame: common_pb2.DataFrame) -> None:
     repeated fields in type order, since an assembled frame no longer has the caller's original ordering.
 
     :param frame: The frame to check.
+    :param caller: The name an error message starts with.  A function that validates a frame on its caller's
+        behalf passes its own name, so the message names what the caller actually called.
     :raises ValueError: if the axis is empty or malformed, if the frame has no columns, or if any column violates a
         shape rule (see data_frame()).
     """
     expected_count = timestamp_count(frame.dataTimestamps)
-    _check_columns(_frame_columns(frame), expected_count)
+    _check_columns(_frame_columns(frame), expected_count, caller)
 
 
 def data_frame(
@@ -1136,7 +1138,7 @@ def data_frame(
 
     # Checked here, against the caller's list, rather than by validate_data_frame() after assembly: an unsupported
     # type cannot be routed at all, and the caller's own index is the useful one in a message.
-    _check_columns(columns, timestamp_count(data_timestamps))
+    _check_columns(columns, timestamp_count(data_timestamps), "data_frame()")
 
     frame = common_pb2.DataFrame()
     frame.dataTimestamps.CopyFrom(data_timestamps)
@@ -1309,7 +1311,7 @@ def split_data_frame(
     if max_span_nanos is not None and max_span_nanos < 0:
         raise ValueError(f"split_data_frame() requires max_span_nanos >= 0, got {max_span_nanos}")
 
-    validate_data_frame(frame)
+    validate_data_frame(frame, caller="split_data_frame()")
     if len(frame.serializedDataColumns) > 0:
         names = [column.name for column in frame.serializedDataColumns]
         raise ValueError(

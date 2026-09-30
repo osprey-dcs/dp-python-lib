@@ -243,9 +243,12 @@ All dp-service citations are `origin/main` @ `7e8b2e6`, paths relative to
     reached the server are ingested -- check request status" (T10's "have already been ingested" is corrected
     the same way).  (2) The count cannot go in the exception's *message* without changing its type or mutating
     its args, so it travels as a PEP 678 note (Python 3.11+) and is always logged.
-  - *Added in implementation.*  Abandoning `iter_ingest_data_bidi_stream()` early cancels the call.  Without
-    that, grpcio keeps pulling and sending the caller's requests on its own thread after the caller has walked
-    away; an in-process test showed all 1,000 queued requests drained into the server.
+  - *Added in implementation.*  Closing the iterator `iter_ingest_data_bidi_stream()` returns cancels the call.
+    Without that, grpcio keeps pulling and sending the caller's requests on its own thread after the caller has
+    walked away; an in-process test showed all 1,000 queued requests drained into the server.  The cancel needs an
+    explicit close: a `break` out of a loop over a generator that is still referenced leaves it suspended until
+    garbage collection, so the documented way to stop early is `with contextlib.closing(...)` (corrected in PR
+    review, 2026-09-30; the first draft said abandoning the iterator was enough).
 
 - **D6 — `queryRequestStatus` gets a criterion helper and a poller.**
   - `RequestStatusQuery` (`RS`): `provider_id(id)`, `provider_name(name)`, `request_id(id)`,

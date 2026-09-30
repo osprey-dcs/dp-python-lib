@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import unittest
@@ -385,6 +386,8 @@ class TestIngestDataRequestParams(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             IngestDataRequestParams(PROVIDER, frame)
         self.assertIn("enumId", str(ctx.exception))
+        # Named for what the caller called, not data_frame(), which this frame never went through.
+        self.assertTrue(str(ctx.exception).startswith("IngestDataRequestParams "), str(ctx.exception))
 
 
 class TestChunkedRequestParams(unittest.TestCase):
@@ -405,6 +408,21 @@ class TestChunkedRequestParams(unittest.TestCase):
             raise AssertionError("consumed too far")
 
         self.assertEqual(next(chunked_request_params(PROVIDER, frames())).client_request_id[-2:], "-0")
+
+    def test_bad_base_fails_as_itself_before_any_frame_is_consumed(self):
+        def frames():
+            raise AssertionError("a frame was consumed")
+            yield
+
+        for base, expected in (("", "non-blank"), ("  ", "non-blank"), ("b" * 255, "base_request_id is 255")):
+            with self.subTest(base=base[:5]), self.assertRaises(ValueError) as ctx:
+                next(chunked_request_params(PROVIDER, frames(), base_request_id=base))
+            self.assertIn("base_request_id", str(ctx.exception))
+            self.assertIn(expected, str(ctx.exception))
+
+    def test_longest_base_that_fits_the_first_suffix_is_accepted(self):
+        (params,) = chunked_request_params(PROVIDER, [_frame()], base_request_id="b" * 254)
+        self.assertEqual(len(params.client_request_id), dfb.MAX_BUDGETED_ID_CHARS)
 
 
 class TestIngestData(_ClientTestCase):
@@ -509,6 +527,16 @@ class TestIngestDataStream(_ClientTestCase):
         )
         self.assertIn("split_data_frame", self.client.ingest_data_stream([_params()]).result_status.message)
 
+    def test_unexpected_exception_has_no_response(self):
+        self.stub.ingestDataStream.side_effect = RuntimeError("kaboom")
+        result = self.client.ingest_data_stream([_params()])
+        self.assertTrue(result.result_status.is_error)
+        self.assertEqual(result.result_status.message, "Unexpected error: kaboom")
+        self.assertIsNone(result.response)
+        self.assertIsNone(result.client_request_ids)
+        self.assertIsNone(result.rejected_request_ids)
+        self.assertIsNone(result.num_requests)
+
     def test_unrecognized_response_is_an_error(self):
         self.stub.ingestDataStream.side_effect, _ = _consume_then(ingestion_pb2.IngestDataStreamResponse())
         result = self.client.ingest_data_stream([_params()])
@@ -542,6 +570,25 @@ class TestIngestDataBidiStream(_ClientTestCase):
         self.assertEqual(seen, ["a"])
         self.assertIn("gRPC error: stream reset", str(ctx.exception))
 
+    def test_unexpected_exception_raises_runtime_error(self):
+        self.stub.ingestDataBidiStream.side_effect = RuntimeError("kaboom")
+        with self.assertRaises(RuntimeError) as ctx:
+            list(self.client.iter_ingest_data_bidi_stream([_params("a")]))
+        self.assertEqual(str(ctx.exception), "ingestDataBidiStream failed: Unexpected error: kaboom")
+
+    def test_unexpected_exception_mid_stream_raises_after_earlier_results(self):
+        def responses():
+            yield _ack("a")
+            raise RuntimeError("kaboom")
+
+        self.stub.ingestDataBidiStream.return_value = responses()
+        seen = []
+        with self.assertRaises(RuntimeError) as ctx:
+            for result in self.client.iter_ingest_data_bidi_stream([_params("a"), _params("b")]):
+                seen.append(result.client_request_id)
+        self.assertEqual(seen, ["a"])
+        self.assertIn("Unexpected error: kaboom", str(ctx.exception))
+
 
 class _CancellableResponses:
     """A response iterator with the cancel() a grpcio stream-stream call has."""
@@ -561,6 +608,27 @@ class TestIngestDataBidiStreamCancellation(_ClientTestCase):
         self.stub.ingestDataBidiStream.return_value = responses
         results = self.client.iter_ingest_data_bidi_stream([_params("a"), _params("b")])
         next(results)
+        results.close()
+        responses.cancel.assert_called_once()
+
+    def test_closing_around_a_break_cancels_the_call(self):
+        # The documented way to stop early.
+        responses = _CancellableResponses([_ack("a"), _ack("b")])
+        self.stub.ingestDataBidiStream.return_value = responses
+        with contextlib.closing(self.client.iter_ingest_data_bidi_stream([_params("a"), _params("b")])) as results:
+            for _result in results:
+                break
+        responses.cancel.assert_called_once()
+
+    def test_a_bare_break_on_a_retained_iterator_does_not_cancel(self):
+        # Pins the premise behind the docs asking for an explicit close: breaking out of a loop leaves a generator
+        # that is still referenced suspended, so its finally -- and the cancel -- have not run.
+        responses = _CancellableResponses([_ack("a"), _ack("b")])
+        self.stub.ingestDataBidiStream.return_value = responses
+        results = self.client.iter_ingest_data_bidi_stream([_params("a"), _params("b")])
+        for _result in results:
+            break
+        responses.cancel.assert_not_called()
         results.close()
         responses.cancel.assert_called_once()
 

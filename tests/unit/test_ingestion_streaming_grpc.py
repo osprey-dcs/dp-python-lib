@@ -7,6 +7,7 @@ client must re-raise the caller's own exception instead.  The server here listen
 and records what it received, so the tests can also check that requests sent before the failure did arrive.
 """
 
+import contextlib
 import os
 import sys
 import threading
@@ -167,9 +168,8 @@ class TestStreamingAgainstInProcessServer(unittest.TestCase):
         self.assertIn(self.servicer.received, (["ok-0", "ok-1"], ["ok-0"], []))
         self.assertIn(seen, (["ok-0", "ok-1"], ["ok-0"], []))
 
-    def test_bidi_stops_sending_when_the_caller_stops_reading(self):
-        # grpcio pulls requests on its own thread.  The producer blocks after a few requests until the caller has
-        # closed the results; without a cancel, grpcio would then drain the rest of it into the server.
+    def _gated_producer(self):
+        """1,000 requests whose producer blocks after three until the gate opens, and a record of what it made."""
         gate = threading.Event()
         produced = []
 
@@ -180,13 +180,31 @@ class TestStreamingAgainstInProcessServer(unittest.TestCase):
                 produced.append(index)
                 yield _params(f"n-{index}")
 
-        results = self.client.iter_ingest_data_bidi_stream(gated())
-        next(results)
-        results.close()
+        return gated(), gate, produced
+
+    def _assert_stopped_sending(self, gate, produced):
         gate.set()
         time.sleep(0.3)  # time enough for an uncancelled call to drain all 1,000
         self.assertLess(len(produced), 10)
         self.assertLess(len(self.servicer.received), 10)
+
+    def test_bidi_stops_sending_when_the_results_are_closed(self):
+        # grpcio pulls requests on its own thread.  The producer blocks after a few requests until the caller has
+        # closed the results; without a cancel, grpcio would then drain the rest of it into the server.
+        requests, gate, produced = self._gated_producer()
+        results = self.client.iter_ingest_data_bidi_stream(requests)
+        next(results)
+        results.close()
+        self._assert_stopped_sending(gate, produced)
+
+    def test_bidi_stops_sending_on_a_break_inside_closing(self):
+        # The documented way to stop early.  A bare break would not do: the loop's iterator stays referenced, so it
+        # is not closed until collected, and grpcio keeps sending meanwhile.
+        requests, gate, produced = self._gated_producer()
+        with contextlib.closing(self.client.iter_ingest_data_bidi_stream(requests)) as results:
+            for _result in results:
+                break
+        self._assert_stopped_sending(gate, produced)
 
     def test_bidi_transport_failure_raises_runtime_error(self):
         self.server.stop(grace=None)
