@@ -86,9 +86,9 @@ those timestamps with `timestamp_list()`.
 # cookbook:partial
 # Timestamps taken from the data itself -- never recomputed or rounded.
 bad_times = [
-    datetime(2024, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc),
-    datetime(2024, 2, 2, 18, 4, 12, 500000, tzinfo=timezone.utc),
-    datetime(2024, 2, 2, 18, 4, 13, 750000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 500000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 750000, tzinfo=timezone.utc),
 ]
 
 frame = SampleStatusFrame(
@@ -107,7 +107,7 @@ frame = SampleStatusFrame(
 result = client.annotation.sample_status.save_sample_statuses(
     SaveSampleStatusesRequestParams(
         frames=[frame],
-        source="control room, shift log entry 2024-02-02-B",
+        source="control room, shift log entry 2026-02-02-B",
         modified_by="operator",
     )
 )
@@ -126,9 +126,9 @@ Several PVs sharing the same bad timestamps go in the same frame, one column eac
 ```python
 # cookbook:partial
 bad_times = [
-    datetime(2024, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc),
-    datetime(2024, 2, 2, 18, 4, 12, 500000, tzinfo=timezone.utc),
-    datetime(2024, 2, 2, 18, 4, 13, 750000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 500000, tzinfo=timezone.utc),
+    datetime(2026, 2, 2, 18, 4, 12, 750000, tzinfo=timezone.utc),
 ]
 
 frame = SampleStatusFrame(
@@ -161,7 +161,7 @@ def model_confidence() -> list[float]:      # and 10,000 confidence values
     return [1.0] * 10_000
 
 axis = sampling_clock(
-    start_time=datetime(2024, 2, 2, 18, 4, 12, tzinfo=timezone.utc),
+    start_time=datetime(2026, 2, 2, 18, 4, 12, tzinfo=timezone.utc),
     period_nanos=100_000,
     count=10_000,
 )
@@ -272,16 +272,27 @@ params = QueryParams(
     begin_time=begin,
     end_time=end,
     pv_selector=PV.name_list(["BPMS:GUNB:314:X"]),
-    sample_status_filter=SampleStatusFilter.include(domain="ml_anomaly", layers=["ml_model_v1"]),
+    sample_status_filter=SampleStatusFilter.include(
+        domain="ml_anomaly",
+        layers=["ml_model_v1"],
+        status_codes=[1],                 # the model's "anomalous" code
+    ),
 )
 ```
 
 Omitting `layers` matches every layer in the domain; omitting `status_codes` matches any code.
+**Name the codes when the labeling is dense.**  The model above scored *every* sample, so every
+sample carries a status — `0` for the ones it found normal — and an `include()` with no
+`status_codes` keeps all of them.
 
 The "absence means no assertion" rule decides what happens to unlabeled samples, and it is worth
 being deliberate about: an unlabeled sample **does not match** the filter. So `exclude()` keeps it
 (you remove only what was explicitly flagged) and `include()` drops it (you narrow to explicitly
 labeled samples only). `exclude()` is almost always what you want for analysis.
+
+The filter works per sample, per PV.  With several PVs in one query, a sample that is filtered out
+becomes a **gap** in its own column — `NaN` in a DataFrame — while the other PVs keep their value
+at that instant; a row disappears only when every column's sample there is filtered out.
 
 There is no `MODE_UNSPECIFIED` to fall into — `include()` and `exclude()` are the ways to build a
 filter, and the server rejects an unspecified mode. If you hand-build a `SampleStatusSelector`
@@ -301,7 +312,7 @@ frame = SampleStatusFrame(
     domain="data_quality",
     layer="operator_override",
     data_timestamps=timestamp_list(
-        [datetime(2024, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc)]),
+        [datetime(2026, 2, 2, 18, 4, 12, 250000, tzinfo=timezone.utc)]),
     columns=[SampleStatusColumn(
         pv_name="BPMS:GUNB:314:X",
         status_codes=[1],
@@ -365,24 +376,15 @@ delete would remove, run the same range and `(domain, layer)` through
 
 ### How far these examples have been verified
 
-The save/query/delete loop **has** been exercised against a live Annotation Service built from
-dp-service `main` (the 1.16.0 API, pre-release), by
-`tests/integration/test_sample_status_client_integration.py`.  That covers the parts most likely
-to break silently:
+The examples on this page were re-run against a live MLDP stack, over the BPM samples
+[Ingesting data](ingestion.md) stores (one second of `BPMS:GUNB:314:X`, `:Y`, and `:TMIT` at
+10 kHz from 18:04:12): the sparse labels and the dense 10,000-sample clock both attach to real
+samples, the rows read back with their reasons, `exclude()` drops exactly the samples labeled with
+the named code, `include()` keeps only them, and the correction and both deletes behave as
+described.
 
-- Timestamps round-trip exactly, through both `timestamp_list()` and `sampling_clock()` — the
-  dense case labels 100 samples at 1 kHz and checks every expanded position against
-  `startTime + i * periodNanos`.
-- Unsupplied `confidence` / `reasons` come back as `None`, not `0.0` / `""`.
-- Re-saving a key with `reasons` omitted clears the stored reason (full replace, not merge).
-- The same PV and instant in two layers stay two distinct statuses.
-
-What has **not** been observed is the last link: labeling *real archived samples* and watching a
-status-filtered query drop exactly those rows.  The integration tests save statuses and read them
-back, but there is no way to ingest sample data from Python yet
-([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17)), so the statuses they write
-have no underlying samples to attach to.
-
-**When the ingestion client lands, re-verify the filtering examples** — the
-[querying with flagged samples removed](#querying-data-with-flagged-samples-removed) section is
-the part still standing on unit tests alone.
+The tests pin the parts most likely to break silently.
+`tests/integration/test_sample_status_client_integration.py` covers exact timestamp round trips
+through both axis forms, absent `confidence` / `reasons` coming back as `None`, full-replace
+upserts, and layers staying distinct; its `TestSampleStatusQueryFiltering` class labels ingested
+samples and asserts which rows a filtered query returns.

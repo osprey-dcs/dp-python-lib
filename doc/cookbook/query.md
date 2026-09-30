@@ -3,9 +3,10 @@
 Retrieving archived PV samples over a time range — by name, by what the PVs *are*, or by what the
 machine was *doing* — and getting the results into pandas or NumPy.
 
-See [API conventions](conventions.md) for result checking and paging.  The metadata- and
-configuration-driven queries below read the catalogue built in
-[Cataloguing PVs](pv-metadata.md) and [Recording machine configuration](machine-configuration.md).
+See [API conventions](conventions.md) for result checking and paging.  The samples queried here
+are the ones [Ingesting data](ingestion.md) stores, and the metadata- and configuration-driven
+queries read the catalogue built in [Cataloguing PVs](pv-metadata.md) and
+[Recording machine configuration](machine-configuration.md).
 
 All examples use `client.query`, which is `None` unless a query channel is configured.
 
@@ -51,10 +52,13 @@ PVs are chosen in one of **three mutually exclusive ways** — pick exactly one:
 | `PV.metadata([...])` | You want PVs by what they *are* — area, type, device |
 
 Independently, `config_criteria` restricts results to the intervals when matching machine
-configurations were **active**.  It can be combined with any PV selector, or used alone — a
-config-only query returns everything recorded while that configuration was in effect.
+configurations were **active**.  It narrows a PV selector; it does not replace one.
 
-At least one of `pv_selector` or `config_criteria` must be present.
+**A PV selector is required**, even with `config_criteria`: the server rejects a query without one,
+so `QueryParams` refuses one up front.  `pv_selector` has no default, so leaving it out raises
+`TypeError` (and a type checker flags it); passing `None` or an empty `PvSelector()` raises
+`ValueError`.  To query every PV, say so with `PV.pattern(".*")` — see
+[everything under one configuration](#everything-under-one-configuration).
 
 Results arrive as a **`ColumnTable`**: a list of timestamps plus one `DataColumn` per PV.  You can
 work with that directly, or convert it — see
@@ -73,7 +77,8 @@ QueryParams(begin_time=end, end_time=begin,
             pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))   # ValueError: begin must precede end
 ```
 
-Also rejected: no selector at all, and a negative `limit`.  Note that **`limit=0` is meaningful** —
+Also rejected: no PV selector (even alongside `config_criteria`), and a negative `limit`.  Note
+that **`limit=0` is meaningful** —
 it means "let the server choose a page size".
 
 ## Querying a known list of PVs
@@ -226,21 +231,22 @@ the outer `[begin_time, end_time)` range.
 The returned rows are therefore not necessarily contiguous in time.  A DataFrame built from them
 has a jump in its index at each gap, which matters if you resample or difference across it.
 
-### Config-only queries
+### Everything under one configuration
 
-Omit the PV selector entirely to get **everything** recorded while a configuration was active:
+To get **every PV** recorded while a configuration was active, select all PVs explicitly:
 
 ```python
 # cookbook:partial
 params = QueryParams(
     begin_time=datetime(2026, 2, 2, 0, 0, tzinfo=timezone.utc),
     end_time=datetime(2026, 2, 3, 0, 0, tzinfo=timezone.utc),
+    pv_selector=PV.pattern(".*"),
     config_criteria=[CFG.attr("DEST", ["CXI"])],
 )
 ```
 
-This is legal and occasionally what you want, but it can return a great deal of data.  Bound it
-with a tight time range and a `limit`.
+Occasionally what you want, but it can return a great deal of data: bound it with a tight time
+range and a `limit`, and prefer the streaming form below.
 
 ## Getting results into pandas and NumPy
 
@@ -265,27 +271,24 @@ df = result.to_dataframe()
 print(df)
 ```
 
-The frame has a **UTC datetime index** and one column per PV, named by `DataColumn.name`:
+The frame has a **UTC datetime index** and one column per PV, named by `DataColumn.name`.  For the
+three BPM signals [the ingestion recipe](ingestion.md#ingesting-a-frame) stores at 10 kHz:
 
 ```
-                           BPMS:GUNB:314:X  BPMS:GUNB:314:TMIT
-2026-02-02 17:00:00+00:00              0.1                 100
-2026-02-02 17:00:01+00:00              0.2                 200
-2026-02-02 17:00:02+00:00              0.3                 300
+                                  BPMS:GUNB:314:TMIT  BPMS:GUNB:314:X  BPMS:GUNB:314:Y
+2026-02-02 18:04:12+00:00                    1000.00             0.00             0.50
+2026-02-02 18:04:12.000100+00:00             1000.01             0.01             0.51
+2026-02-02 18:04:12.000200+00:00             1000.02             0.02             0.52
 ```
 
-Per-column metadata from the catalogue — tags and attributes — travels with the results and lands
-in `df.attrs`:
+Columns need not come back in the order the selector listed them; here they arrived sorted by name.
 
-```python
-# cookbook:partial
-df = client.query.query_samples(params).to_dataframe()
-print(df.attrs["column_metadata"])
-# {'BPMS:GUNB:314:X': {'tags': ['production'], 'attributes': {'AREA': 'GUNB'}}}
-```
-
-Pass `exclude_column_metadata=True` to `QueryParams` to skip fetching it, or
-`to_dataframe(exclude_column_metadata=True)` to drop it from the frame.
+**Sample query results carry no column metadata today.**  The conversions put any `ColumnMetadata`
+a result carries into `df.attrs["column_metadata"]`, and `QueryParams` has an
+`exclude_column_metadata` flag to suppress it, but the server's sample-query path populates none —
+not the catalogue's tags and attributes, and not metadata ingested with the columns — so
+`df.attrs` is empty.  Read the catalogue with
+[`get_pv_metadata()`](pv-metadata.md#looking-up-a-single-pv) when you need it alongside the data.
 
 ### The whole query to one DataFrame
 
@@ -343,7 +346,9 @@ Three ways to consume a query, in increasing order of scale:
 
 **`query_samples()`** — one page.  Simple, and enough when you know the result is small.
 
-**`iter_query_samples()`** — pages transparently, yielding one result per page:
+**`iter_query_samples()`** — pages transparently, yielding one result per page.  The last page can
+be empty: a full page comes with a token, and the server discovers there is nothing more only when
+asked for the next one.
 
 ```python
 # cookbook:partial
@@ -398,18 +403,14 @@ or use `itertools.islice`.
 
 ### How far these examples have been verified
 
-Worth knowing what stands behind the recipes on this page, since it differs from the rest of the
-cookbook.
+The examples on this page were re-run against a live MLDP stack holding the data
+[Ingesting data](ingestion.md) stores: one second of `BPMS:GUNB:314:X`, `:Y`, and `:TMIT` at
+10 kHz, catalogued as in [Cataloguing PVs](pv-metadata.md), under a `cxi-production` activation
+from 17:00 to 23:00.  The name-list, pattern, metadata (`DEVICE`, and `AREA` with `TYPE`), and
+configuration (by name and by `EXP`) queries each returned those samples; the DataFrame above is
+real output; and paging, streaming, `query_samples_to_dataframe()`, and
+`stream_query_samples_to_dataframes()` agreed on the row count.
 
-The request-building side was exercised against a live MLDP stack: the queries below are accepted
-and well-formed.  What has **not** been observed end to end is the data path — rows coming back,
-`ColumnTable` populating, a DataFrame with real samples in it.  There is currently no way to
-ingest sample data from Python (`IngestionClient` exposes only `register_provider()`), so every
-query here returned zero rows.  The DataFrame and NumPy output shown above is illustrative, and
-the conversions themselves are covered by unit tests over hand-built `ColumnTable` objects.
-
-[Issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17) adds the ingestion client, and
-its Phase 3 is a closed-loop ingest→query round-trip.  **When that lands, re-verify this recipe
-against real data and delete this note** — in particular, confirm the sample DataFrame output
-above matches what a real query returns, and add the ingestion recipe this cookbook currently
-lacks.
+`tests/integration/test_query_client_integration.py` pins the data path itself: values and
+timestamps round-trip exactly, the range is half-open at both bounds, columns on different clocks
+align with gaps rather than zeros, and pages at a small `limit` concatenate in order.

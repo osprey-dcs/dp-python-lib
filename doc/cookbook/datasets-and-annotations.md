@@ -606,11 +606,10 @@ calculations, are left dangling.
   reuse tokens across queries.
 - **`patchDataSet` and `patchAnnotation` are not wrapped.** They are reserved placeholders that
   return "not implemented"; use the full-replace `save_*` methods.
-- **Array, image, and struct column builders do not exist yet.** `data_frame.py` covers the typed
-  scalar columns and the `DataColumn` escape hatch; the rest are
-  [issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17)'s to design with ingestion data
-  in hand. Meanwhile, build those column protos directly and pass them to `data_frame()`, which
-  accepts pre-built columns alongside the ones its builders return.
+- **Array, image, struct, and serialized columns have builders too** — `double_array_column()` and
+  its siblings, `image_column()`, `struct_column()`, and `serialized_column()`; see
+  [Ingesting data](ingestion.md#arrays-images-and-structures).  `data_frame()` still accepts
+  pre-built column protos alongside the ones the builders return, and checks both the same way.
 - **Serialized columns are skipped on read.** `data_frame_columns()` ignores
   `serializedDataColumns`, whose payloads this library does not decode; read the field directly if
   you need it.
@@ -626,9 +625,8 @@ versus id-only on `query_annotations()`, the full-replace clearing behavior, the
 the referenced-dataset refusal.
 
 That test ingests its own samples first, because of the archive-existence rule described in
-[Model](#model) — there is no ingestion client yet
-([issue #17](https://github.com/osprey-dcs/dp-python-lib/issues/17)), so it uses the generated stub
-directly.
+[Model](#model), and waits for the ingest's SUCCESS status before saving a dataset over them — the
+same sequence as [Ingesting data](ingestion.md#confirming-what-landed).
 
 The `x_rms_values` in these examples stand in for real analysis output. The **numbers** are
 illustrative; the calls around them are the verified part.

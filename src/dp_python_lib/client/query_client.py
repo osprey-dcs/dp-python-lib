@@ -357,16 +357,18 @@ class QueryParams:
     this release) and, in a future release, the bucket-oriented queryBuckets() requests.
 
     A query selects data over a half-open time range [begin_time, end_time) for a set of PVs.  The PV set is chosen
-    by at most one pv_selector form (see PvQuery: name-list, pattern, or metadata) and/or restricted by a list of
-    config_criteria (see ConfigQuery).  A config-only query (all PVs active under a configuration in the window) is
-    legal, so pv_selector may be omitted -- but at least one of {pv_selector, config_criteria} must be present.
+    by exactly one pv_selector form (see PvQuery: name-list, pattern, or metadata), optionally restricted by a list
+    of config_criteria (see ConfigQuery).  The selector is required, as the proto says and the server enforces
+    (dp-service QueryV2Resolver: "querySpec.pvSelector must be specified"): to query every PV active under a
+    configuration, select them explicitly with PvQuery.pattern(".*").  Through #17 this class accepted a
+    config-only query, which the server always rejected.
     """
 
     def __init__(
         self,
         begin_time: TimestampInput,
         end_time: TimestampInput,
-        pv_selector: query_pb2.PvSelector | None = None,
+        pv_selector: query_pb2.PvSelector,
         config_criteria: list["query_pb2.ConfigurationSelector.Criterion"] | None = None,
         limit: int | None = None,
         exclude_column_metadata: bool = False,
@@ -376,8 +378,8 @@ class QueryParams:
         :param begin_time: Inclusive start of the query range (tz-aware datetime, epoch seconds, or common.Timestamp).
         :param end_time: Exclusive end of the query range (tz-aware datetime, epoch seconds, or common.Timestamp).
             The range is half-open [begin_time, end_time); the server trims edge samples.
-        :param pv_selector: The PV selection (see PvQuery: name_list/pattern/metadata).  Optional for a config-only
-            query.  At most one form may be set -- the PvQuery helpers each produce exactly one form.
+        :param pv_selector: The PV selection (see PvQuery: name_list/pattern/metadata).  Required, with exactly one
+            form set -- the PvQuery helpers each produce exactly one form.  For every PV, use PvQuery.pattern(".*").
         :param config_criteria: List of AND-combined configuration criteria (see ConfigQuery) restricting results to
             intervals when matching configurations were active.  Optional.
         :param limit: Maximum number of rows to return per page (optional).  This is a per-page size, NOT a total
@@ -387,8 +389,8 @@ class QueryParams:
         :param sample_status_filter: Optional SampleStatusSelector (see SampleStatusFilter.include()/exclude())
             restricting results to, or away from, samples carrying matching sample statuses.  Supported by
             querySamples()/querySamplesStream() only -- see the note in _build_query_spec().
-        :raises ValueError: if both begin_time and end_time are not supplied, if neither pv_selector nor
-            config_criteria is present, if begin_time is not strictly before end_time, if limit is negative, or if
+        :raises ValueError: if both begin_time and end_time are not supplied, if pv_selector is None or sets no
+            selector form, if begin_time is not strictly before end_time, if limit is negative, or if
             sample_status_filter is present but carries an empty domain or MODE_UNSPECIFIED.
         """
         if begin_time is None or end_time is None:
@@ -402,8 +404,13 @@ class QueryParams:
         ):
             raise ValueError("QueryParams requires begin_time strictly before end_time (half-open [begin, end))")
 
-        if pv_selector is None and not config_criteria:
-            raise ValueError("QueryParams requires at least one of pv_selector or config_criteria")
+        # The signature makes the selector required, but None or an empty PvSelector() still type-checks at runtime,
+        # and the server rejects both -- so say so here, with the way to ask for every PV.
+        if pv_selector is None or pv_selector.WhichOneof("selector") is None:
+            raise ValueError(
+                "QueryParams requires a pv_selector (PvQuery.name_list/pattern/metadata); the server rejects a query "
+                'without one, even with config_criteria.  To select every PV, use PvQuery.pattern(".*")'
+            )
 
         # Validate eagerly here rather than letting a negative surface as a raw protobuf range error deep in
         # request building (ExecutionOptions.limit is a uint32).  Note limit=0 is explicitly meaningful per the
@@ -557,8 +564,7 @@ class QueryClient(ServiceApiClientBase):
         spec.timeRange.beginTime.CopyFrom(request_params.begin_timestamp)
         spec.timeRange.endTime.CopyFrom(request_params.end_timestamp)
 
-        if request_params.pv_selector is not None:
-            spec.pvSelector.CopyFrom(request_params.pv_selector)
+        spec.pvSelector.CopyFrom(request_params.pv_selector)  # always set: QueryParams requires it
 
         if request_params.config_criteria:
             spec.configurationSelector.criteria.extend(request_params.config_criteria)

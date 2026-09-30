@@ -69,13 +69,19 @@ DIRECTIVE_RE = re.compile(r"#\s*cookbook:(partial|skip|no-mypy)\b")
 # without re-establishing it.  Adding a name to paper over a broken snippet defeats the point.
 PREAMBLE = """\
 # --- checker preamble (not part of the recipe) ---
-from datetime import datetime, timezone
+import contextlib
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 from dp_python_lib.client import (
     MldpClient,
     IngestionClient,
     RegisterProviderRequestParams,
+    IngestDataRequestParams,
+    IngestionRequestStatus,
+    RequestStatusQuery,
+    RequestStatusQuery as RS,
+    chunked_request_params,
     AnnotationClient,
     PvMetadataClient,
     PvMetadataQuery,
@@ -162,6 +168,21 @@ dataset_id: str | None = "6aa1bb271a768e97db44d426"
 annotation_id: str | None = "6aa1bb271a768e97db44d427"
 calculations_id: str | None = "6aa1bb271a768e97db44d428"
 assert dataset_id is not None and annotation_id is not None and calculations_id is not None
+
+# The ingestion recipe's handles, carried forward the same way: the registration snippet binds provider_id
+# (narrowing it with an assert), and every later snippet sends as that provider.
+provider_id: str | None = "6aa1bb271a768e97db44d429"
+assert provider_id is not None
+since: datetime = datetime.now(timezone.utc)
+request: IngestDataRequestParams
+
+
+def acquire(pv: str, count: int) -> list[float]:
+    # The recipe's stand-in for an acquisition system.  Its own snippet is syntax-checked only (no-mypy), since
+    # this definition and that one would otherwise collide.
+    return [0.0] * count
+
+
 # --- end preamble ---
 """
 

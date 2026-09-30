@@ -193,6 +193,27 @@ Non-scalar columns (arrays, images, structs) can be ingested, but not yet read b
 query API, which returns scalar columns only; reading them back is
 [#16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
 
+A new cookbook recipe, [Ingesting data](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md), walks through registering,
+ingesting, confirming, chunking, and streaming.  It was run end to end against a live MLDP stack, as
+were the query and sample-status recipes over the data it stores, and the integration tests now
+ingest their own data through the library and wait for its SUCCESS status.
+
+**Upgrade item — an error at call time: `QueryParams` requires a `pv_selector`.**  It used to accept
+`config_criteria` alone, but the server rejects every such query (`querySpec.pvSelector must be
+specified`), so `QueryParams` now refuses it itself.  `pv_selector` no longer has a default, so
+leaving it out raises `TypeError` (missing argument), which a type checker also reports; passing
+`None` or a `PvSelector` with no form set raises `ValueError`.  Nothing that worked is lost.  To
+query every PV under a configuration, select them explicitly with `PvQuery.pattern(".*")`
+alongside the `config_criteria`.
+
+Re-running the older recipes against real data also corrected two things they claimed:
+
+- **Sample query results carry no column metadata.**  The server's sample path populates none, so
+  `to_dataframe()` leaves `df.attrs` empty; read the catalogue with `get_pv_metadata()` instead.
+- **With dense sample-status labeling, name the codes in `SampleStatusFilter.include()`.**  A model
+  that scores every sample gives every sample a status, including its "normal" code, so an
+  `include()` without `status_codes` keeps them all.
+
 See [#17](https://github.com/osprey-dcs/dp-python-lib/issues/17) and the Ingestion API section of
 [`CLAUDE.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/CLAUDE.md).
 
