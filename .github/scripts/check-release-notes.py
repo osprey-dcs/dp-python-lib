@@ -21,6 +21,7 @@ fail; R5 runs on the raw text, because the placeholders it catches live in code 
         `#anchor` fails (`../../README.md`, `doc/x.md`).
     R2  Every github.com/osprey-dcs/<repo>/(blob|tree)/<ref>/... and raw.githubusercontent.com/osprey-dcs/<repo>/
         <ref>/... link, into any of the five repos, has <ref> equal to this file's tag (they release in lockstep).
+        Links into the org's other repos, which do not, are not checked.
         Exception: a full 40-character commit SHA, for a target that did not exist at the tag -- a section added
         to the notes after the release, linking a file added after the tag.  A SHA cannot drift; `main`, a short
         SHA, or any other tag still fails.
@@ -47,8 +48,8 @@ release.yml at the tag: no git, no tag peeling, no network.  Cross-repo paths an
 tree is not checked out, and so do SHA-pinned links.
 
 Deliberately not checked: whether URLs resolve over the network (before the tag is pushed, every correctly pinned
-link 404s); and `releases/tag/...` and `compare/...` links, which R2 leaves alone because linking an earlier
-release, or comparing against one, is legitimate.
+link 404s); `releases/tag/...` and `compare/...` links, which R2 leaves alone because linking an earlier
+release, or comparing against one, is legitimate; and whether a blob link's `#L<n>` line anchor is in range.
 
 WHICH NOTES ARE ALREADY RELEASED.  The rel-*.md with the highest X.Y.Z in its directory is the release being cut
 (or, between cuts, the latest one) and gets every rule.  Every other rel-*.md is already released and gets the
@@ -108,6 +109,10 @@ from urllib.parse import unquote
 # dp-grpc's documented cosign identity regexp: anchored, and pinned to its repository, release.yml, and a `rel-` tag.
 # Shared by every copy (the self-test uses it), and defined here so dp-grpc's configuration below can name it.
 DP_GRPC_IDENTITY_REGEXP = r"^https://github.com/osprey-dcs/dp-grpc/\.github/workflows/release\.yml@refs/tags/rel-"
+
+# The five repos that release in lockstep, and so the only ones R2/N2 apply to.  The org's other repos (dp-support,
+# dp-jal, ...) have their own release cycles, so a link into one of them is left alone.  The same in every copy.
+LOCKSTEP_REPOS = frozenset({"dp-grpc", "dp-service", "dp-desktop-app", "dp-python-lib", "data-platform"})
 
 # ==================================================================================================================
 # REPO-SPECIFIC CONFIGURATION -- the only lines that differ between the five copies of this script.
@@ -292,7 +297,7 @@ def heading_anchors(text: str) -> tuple[set[str], set[str]]:
         anchors.add(slug)
         by_base.setdefault(base, []).append(slug)
     duplicated = {slug for slugs in by_base.values() if len(slugs) > 1 for slug in slugs}
-    anchors.update(HTML_ANCHOR_RE.findall(text))
+    anchors.update(HTML_ANCHOR_RE.findall(strip_code(text)))  # an `<a id>` quoted in code is not an anchor
     return anchors, duplicated
 
 
@@ -321,7 +326,8 @@ FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def parse_repo_link(url: str) -> RepoLink | None:
-    """The parts of an osprey-dcs blob/tree/raw URL, or None for any other URL (issues, PRs, compare, ...)."""
+    """The parts of a blob/tree/raw URL into one of the five lockstep repos, or None for any other URL (issues, PRs,
+    compare, another osprey-dcs repo, ...)."""
     blob = BLOB_RE.match(url)
     if blob:
         repo, kind, ref, path, _query, anchor = blob.groups()
@@ -331,6 +337,8 @@ def parse_repo_link(url: str) -> RepoLink | None:
             return None
         repo, ref, path, _query, anchor = raw.groups()
         kind = "raw"
+    if repo not in LOCKSTEP_REPOS:
+        return None
     return RepoLink(
         repo=repo,
         kind=kind,
@@ -435,8 +443,10 @@ def check_placeholders(name: str, text: str) -> list[str]:
 VERIFY_HEADING_RE = re.compile(r"^## Verifying these artifacts\s*$", re.MULTILINE)
 # The whole command, backslash continuations included, up to the first line that does not continue.
 SIGSTORE_VERIFY_RE = re.compile(r"\bsigstore\s+verify\s+identity\b(?:[^\n]*\\\n)*[^\n]*")
-SIGSTORE_IDENTITY_RE = re.compile(r"--cert-identity[ =]\"?([^\"\s]+)\"?")
-SIGSTORE_ISSUER_RE = re.compile(r"--cert-oidc-issuer[ =]\"?([^\"\s]+)\"?")
+# Between an option and its value: `=`, spaces, or a backslash-newline continuation.
+OPTION_SEP = r"(?:=|[ \t]+\\\n[ \t]*|[ \t]+)"
+SIGSTORE_IDENTITY_RE = re.compile(rf"--cert-identity{OPTION_SEP}\"?([^\"\s]+)\"?")
+SIGSTORE_ISSUER_RE = re.compile(rf"--cert-oidc-issuer{OPTION_SEP}\"?([^\"\s]+)\"?")
 # A command as written in a code block, rather than named in prose.
 SIGSTORE_VERIFY_COMMAND_RE = re.compile(r"^[ \t]*sigstore\s+verify\s+identity\b", re.MULTILINE)
 CHANGELOG_RE = re.compile(r"^\*\*Full Changelog\*\*:\s*(\S+)\s*$", re.MULTILINE)
@@ -548,10 +558,11 @@ def check_next_sigstore_python(name: str, text: str) -> list[str]:
 
 
 def option_values(option: str, text: str) -> list[tuple[int, str]]:
-    """(offset, value) of every `option VALUE` / `option=VALUE`, the value optionally single- or double-quoted.
+    """(offset, value) of every `option VALUE` / `option=VALUE`, the value optionally single- or double-quoted and
+    optionally on the next line after a backslash continuation.
     `--certificate-identity` does not match `--certificate-identity-regexp`, nor prose naming the flag in
     backticks."""
-    pattern = re.compile(rf"{re.escape(option)}[ =](?:'([^'\n]*)'|\"([^\"\n]*)\"|([^\s'\"]+))")
+    pattern = re.compile(rf"{re.escape(option)}{OPTION_SEP}(?:'([^'\n]*)'|\"([^\"\n]*)\"|([^\s'\"]+))")
     return [(m.start(), next(g for g in m.groups() if g is not None)) for m in pattern.finditer(text)]
 
 
@@ -661,7 +672,7 @@ def _make_tree(root: Path) -> None:
     (root / "doc").mkdir()
     (root / "README.md").write_text(
         "# Project\n\n## Configuration priority\n\n### Methods\n\n### Methods\n\n"
-        '<a name="pinned"></a>\n\n```\n## Not a heading\n```\n',
+        '<a name="pinned"></a>\n\n```\n## Not a heading\n<a id="quoted"></a>\n```\n\nSee `<a name="spanned">`.\n',
         encoding="utf-8",
     )
     (root / "doc" / "guide.md").write_text(
@@ -682,6 +693,8 @@ _GOOD_LINKS = f"""# Notes
 - [doc dir]({_PY}/tree/{_TAG}/doc), raw: https://raw.githubusercontent.com/osprey-dcs/dp-python-lib/{_TAG}/README.env
 - [dp-grpc notes](https://github.com/osprey-dcs/dp-grpc/blob/{_TAG}/doc/release-notes/{_TAG}.md#anything)
 - [added later]({_PY}/blob/0123456789abcdef0123456789abcdef01234567/not/in/this/tree.md)
+- not in lockstep, so unchecked: https://github.com/osprey-dcs/dp-support/blob/main/README.md and
+  https://raw.githubusercontent.com/osprey-dcs/dp-grpc-extras/rel-1.0.0/x.md
 - [issue]({_PY}/issues/7), [mail](mailto:x@example.org), [up](#installing), <{_PY}/pull/9>
 - quoted, not linked: `[x](../../README.md)` and `{_PY}/blob/main/README.md`
 - a bare version placeholder is prose, not a leftover: `dp-service-<version>.jar.sha256`
@@ -702,6 +715,7 @@ _GOOD_NEXT = f"""# Release Notes -- next release (unreleased)
 
 - [config]({_PY}/blob/main/README.md#configuration-priority), [guide][guide], [down](#cutting-the-release)
 - [dp-grpc](https://github.com/osprey-dcs/dp-grpc/blob/main/README.md)
+- not in lockstep, so unchecked: [dp-support](https://github.com/osprey-dcs/dp-support/blob/rel-1.0.0/README.md)
 
 ## Cutting the release
 
@@ -749,6 +763,8 @@ def _self_test_links(root: Path) -> list[str]:
         "R2 a main-pinned reference definition": f"[readme-env]: {_PY}/blob/main/README.env",
         "R2 a stale tag": f"[s]({_PY}/blob/rel-2.0.0/README.md)",
         "R2 a stale tag into another repo": "[g](https://github.com/osprey-dcs/dp-grpc/blob/rel-2.0.0/README.md)",
+        "R2 a link left on main in data-platform": "[d](https://github.com/osprey-dcs/data-platform/blob/main/x.md)",
+        "R2 a link left on main in dp-desktop-app": "[d](https://github.com/osprey-dcs/dp-desktop-app/tree/main/doc)",
         "R2 a tree link on main": f"[t]({_PY}/tree/main/doc)",
         "R2 a raw link on main": "https://raw.githubusercontent.com/osprey-dcs/dp-service/main/README.md",
         "R2 a bare URL on main": f"See {_PY}/blob/main/README.md.",
@@ -764,6 +780,8 @@ def _self_test_links(root: Path) -> list[str]:
         "R3 a blob link to a directory": f"[p]({_PY}/blob/{_TAG}/doc)",
         "R4 a missing anchor": f"[a]({_PY}/blob/{_TAG}/README.md#configuration)",
         "R4 an anchor only inside a code block": f"[a]({_PY}/blob/{_TAG}/README.md#not-a-heading)",
+        "R4 an HTML anchor only inside a code block": f"[a]({_PY}/blob/{_TAG}/README.md#quoted)",
+        "R4 an HTML anchor only inside a code span": f"[a]({_PY}/blob/{_TAG}/README.md#spanned)",
         "R4 an anchor to a duplicated heading": f"[d]({_PY}/blob/{_TAG}/README.md#methods)",
         "R4 an anchor to a duplicate's -1": f"[d]({_PY}/blob/{_TAG}/README.md#methods-1)",
         "R4 a missing same-document anchor": "[c](#contents)",
@@ -842,9 +860,11 @@ def _self_test_released_rule() -> list[str]:
 def _self_test_sigstore_python() -> list[str]:
     failures: list[str] = []
     cfg = replace(CONFIG, repository="osprey-dcs/dp-python-lib")
-    good = check_sigstore_python("<good>", _TAG, _sigstore_sample(), cfg)
-    if good:
-        failures.append("a correct sigstore sample was rejected:\n      " + "\n      ".join(good))
+    wrapped = _sigstore_sample().replace('--cert-identity "', '--cert-identity \\\n    "')
+    for description, notes in {"a correct sigstore sample": _sigstore_sample(), "a wrapped one": wrapped}.items():
+        good = check_sigstore_python("<good>", _TAG, notes, cfg)
+        if good:
+            failures.append(f"{description} was rejected:\n      " + "\n      ".join(good))
     for description, notes in {
         "a stale --cert-identity tag": _sigstore_sample(identity_tag="rel-2.0.0"),
         "a verify of the wheel only": _sigstore_sample(files="dp_python_lib-*.whl"),
@@ -857,6 +877,9 @@ def _self_test_sigstore_python() -> list[str]:
             "dp-python-lib/compare", "dp-grpc/compare"
         ),
         "no verification heading": _sigstore_sample().replace("## Verifying these artifacts", "## Verification"),
+        "a stale --cert-identity tag on a continuation line": _sigstore_sample(identity_tag="rel-2.0.0").replace(
+            '--cert-identity "', '--cert-identity \\\n    "'
+        ),
     }.items():
         if not check_sigstore_python(f"<{description}>", _TAG, notes, cfg):
             failures.append(f"{description} was accepted")
@@ -898,15 +921,23 @@ def _self_test_cosign() -> list[str]:
         f"  ghcr.io/osprey-dcs/dp-service:{_TAG}\n"
         "Prose naming `--certificate-identity` is not an identity.\n"
     )
+
+    def wrapped(option: str, value: str) -> str:
+        """A verify command with each option's value on the line after it."""
+        return (
+            f"cosign verify-blob \\\n  {option} \\\n    '{value}' \\\n"
+            f"  --certificate-oidc-issuer \\\n    {OIDC_ISSUER} SHA256SUMS\n"
+        )
+
     desktop_id = ident("dp-desktop-app")
     desktop_good = (
         f"cosign verify-blob --certificate-identity '{desktop_id}' {issuer} SHA256SUMS\n"
         f'cosign verify-blob --certificate-identity "{desktop_id}" {issuer} '
-        "--certificate-github-workflow-trigger push SHA256SUMS\n"
+        "--certificate-github-workflow-trigger push SHA256SUMS\n" + wrapped("--certificate-identity", desktop_id)
     )
     grpc_good = (
         f"cosign verify-blob \\\n  --certificate-identity-regexp '{DP_GRPC_IDENTITY_REGEXP}' \\\n"
-        f"  {issuer} \\\n  SHA256SUMS\n"
+        f"  {issuer} \\\n  SHA256SUMS\n" + wrapped("--certificate-identity-regexp", DP_GRPC_IDENTITY_REGEXP)
     )
     for description, cfg, text in [
         ("dp-service", service, service_good),
@@ -957,6 +988,27 @@ def _self_test_cosign() -> list[str]:
             "dp-desktop-app: release-image.yml, which it does not publish",
             desktop,
             desktop_good.replace("release.yml", "release-image.yml", 1),
+        ),
+        (
+            "dp-desktop-app: a stale identity on a continuation line",
+            desktop,
+            desktop_good.replace(
+                wrapped("--certificate-identity", desktop_id),
+                wrapped("--certificate-identity", ident("dp-desktop-app", tag=stale)),
+            ),
+        ),
+        (
+            "dp-desktop-app: a wrong issuer on a continuation line",
+            desktop,
+            desktop_good.replace(f"\\\n    {OIDC_ISSUER}", "\\\n    https://accounts.google.com"),
+        ),
+        (
+            "dp-grpc: a loosened regexp on a continuation line",
+            grpc,
+            grpc_good.replace(
+                wrapped("--certificate-identity-regexp", DP_GRPC_IDENTITY_REGEXP),
+                wrapped("--certificate-identity-regexp", ".*"),
+            ),
         ),
         ("dp-grpc: an unanchored regexp", grpc, grpc_good.replace("'^https", "'https")),
         ("dp-grpc: a regexp for any workflow", grpc, grpc_good.replace(r"release\.yml", ".*")),
