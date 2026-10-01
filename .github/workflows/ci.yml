@@ -101,7 +101,7 @@ jobs:
         # here so a mistake fails the notes PR, not the tag push.  doc/release-notes/NEXT.md, the
         # version-less draft renamed at the cut, is checked the other way round: it must carry none
         # of those tag-bearing parts, since any it has guesses a version not yet decided.
-        run: python .dev/tools/check-release-notes.py
+        run: python .github/scripts/check-release-notes.py
 
   build:
     name: Build distributions

@@ -5,8 +5,9 @@ which holds the rules (R1–R5, N1–N3) and their rationale; they are not repea
 
 ## Overview
 
-`.dev/tools/check-release-notes.py` gains #98's link and placeholder rules, and becomes the copy the
-other four repos take verbatim, changing only a configuration block.  rel-1.16.0's one `main`-pinned
+The release-notes checker gains #98's link and placeholder rules, moves from
+`.dev/tools/check-release-notes.py` to `.github/scripts/check-release-notes.py`, and becomes the copy
+the other four repos take verbatim, changing only a configuration block.  rel-1.16.0's one `main`-pinned
 link is fixed in the file and, after merge, on the published release page.  For whoever cuts
 releases and reviews PRs that touch release notes or headings they link to.
 
@@ -53,9 +54,20 @@ configurations in every copy, so a port is configuration only.
 **D5 — Bare URLs and autolinks count for R2–R4**; GitHub links them.  R1 looks only at inline and
 reference-definition targets.  Paths are matched case-sensitively per component, since macOS is not.
 
+**D6 — Decisions made after the ports reported back (2026-10-01).**
+- *Location:* `.github/scripts/check-release-notes.py` in all five repos.  The script finds the
+  repository root by walking up to the first directory containing `.git` (directory or worktree
+  file) rather than a fixed `parents[N]`, and fails clearly when there is none.  The path is no
+  longer gitignored, so ruff covers it by default.  Plans for earlier tickets (#19, #26, #56, #58)
+  keep the old path: they record where the file was when they shipped.
+- *R5 is narrowed* to `rel-<version>` and `<previous>`.  A bare `<version>` is allowed: three repos
+  use it deliberately in prose that survives the cut (`dp-service-<version>.jar.sha256`).
+- *Repo-neutral text:* nothing outside the configuration block names this repo's paths or history.
+- R2 does not look at `releases/tag/…` or `compare/…` links: linking an earlier release is legitimate.
+
 ## Implementation tasks
 
-- `.dev/tools/check-release-notes.py`: the rules, the configuration block, and self-test cases for
+- `.github/scripts/check-release-notes.py` (moved from `.dev/tools/`; CI and `release.yml` updated): the rules, the configuration block, and self-test cases for
   each rule (good and bad, newest vs released, draft), all three cosign profiles, and the released
   rule's numeric ordering.  Verified by mutation: disabling any rule fails the self-test.
 - `doc/release-notes/rel-1.16.0.md:410`: SHA pin (D3).

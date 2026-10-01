@@ -93,7 +93,7 @@ jobs:
             echo "::error::Add the notes for ${{ steps.version.outputs.version }} and retag once they are on the tagged commit."
             exit 1
           fi
-          python .dev/tools/check-release-notes.py "$NOTES"
+          python .github/scripts/check-release-notes.py "$NOTES"
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
 
       - name: Build wheel and sdist
