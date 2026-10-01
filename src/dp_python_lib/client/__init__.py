@@ -100,6 +100,7 @@ from dp_python_lib.client.pv_metadata_client import (
 from dp_python_lib.client.query_client import (
     ConfigQuery,
     PvQuery,
+    QueryBucketsApiResult,
     QueryClient,
     QueryParams,
     QuerySamplesApiResult,
@@ -157,6 +158,7 @@ __all__ = [
     "PvMetadataQuery",
     "PvQuery",
     "QueryAnnotationsApiResult",
+    "QueryBucketsApiResult",
     "QueryClient",
     "QueryConfigurationActivationsApiResult",
     "QueryConfigurationsApiResult",

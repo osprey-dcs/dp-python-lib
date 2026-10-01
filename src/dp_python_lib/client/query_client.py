@@ -1,6 +1,6 @@
 import logging
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, TypeVar
 
 import grpc
 
@@ -8,6 +8,9 @@ from dp_python_lib.client.result import ApiResultBase
 from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import common_pb2, query_pb2, query_pb2_grpc
+
+# The result type a server-streaming sender yields (QuerySamplesApiResult or QueryBucketsApiResult).
+_StreamResultT = TypeVar("_StreamResultT", bound=ApiResultBase)
 
 
 class PvQuery:
@@ -353,8 +356,9 @@ class SampleStatusFilter:
 class QueryParams:
     """
     Encapsulates client parameters for a v2 time-series query.  This is the kind-neutral representation of the shared
-    QuerySpec: it is used to build both the sample-oriented querySamples()/querySamplesStream() requests (in scope for
-    this release) and, in a future release, the bucket-oriented queryBuckets() requests.
+    QuerySpec: it builds both the sample-oriented querySamples()/querySamplesStream() requests and the bucket-oriented
+    queryBuckets()/queryBucketsStream() requests (see QueryClient), so a caller switching kinds changes only the
+    method name.
 
     A query selects data over a half-open time range [begin_time, end_time) for a set of PVs.  The PV set is chosen
     by exactly one pv_selector form (see PvQuery: name-list, pattern, or metadata), optionally restricted by a list
@@ -382,13 +386,18 @@ class QueryParams:
             form set -- the PvQuery helpers each produce exactly one form.  For every PV, use PvQuery.pattern(".*").
         :param config_criteria: List of AND-combined configuration criteria (see ConfigQuery) restricting results to
             intervals when matching configurations were active.  Optional.
-        :param limit: Maximum number of rows to return per page (optional).  This is a per-page size, NOT a total
-            cap.  0 is meaningful and means "let the server pick a default"; a negative value raises.
+        :param limit: Maximum number of results per page (optional).  This is a per-page size, NOT a total cap,
+            and what it counts depends on the query kind: ROWS for querySamples(), BUCKETS for queryBuckets().  A
+            bucket page can also end early, with a page token, when it reaches the server's outbound byte budget, so
+            it may hold fewer than limit buckets while more remain; and the server silently clamps a bucket limit
+            to its configured maximum (100,000 by default).  0 is meaningful and means "let the server pick a
+            default"; a negative value raises.
         :param exclude_column_metadata: If True, omit per-column ColumnMetadata from the results.  Defaults to False
             (metadata included).
         :param sample_status_filter: Optional SampleStatusSelector (see SampleStatusFilter.include()/exclude())
             restricting results to, or away from, samples carrying matching sample statuses.  Supported by
-            querySamples()/querySamplesStream() only -- see the note in _build_query_spec().
+            querySamples()/querySamplesStream() only: the bucket methods refuse a QueryParams carrying one with a
+            ValueError, since the server rejects it on a bucket query.
         :raises ValueError: if both begin_time and end_time are not supplied, if pv_selector is None or sets no
             selector form, if begin_time is not strictly before end_time, if limit is negative, or if
             sample_status_filter is present but carries an empty domain or MODE_UNSPECIFIED.
@@ -520,12 +529,90 @@ class QuerySamplesApiResult(ApiResultBase):
         return query_conversions.column_table_to_numpy(self.column_table)
 
 
+class QueryBucketsApiResult(ApiResultBase):
+    """
+    Wraps a single page (unary) or a single streamed message (streaming) of a queryBuckets()/queryBucketsStream()
+    response, with a status object including an error flag and message.
+
+    The raw protobuf DataBuckets are available via .data_buckets.  Each is one stored unit of the archive, returned
+    WHOLE: the server selects every bucket overlapping [begin, end) and never trims it, so a boundary bucket carries
+    samples outside the query range.  See bucket_conversions for reading, trimming, and assembling them.
+
+    There is deliberately no .to_dataframe(): a page of buckets is not one table.  .to_dataframes() returns one
+    pandas DataFrame per PV instead, and requires the optional [analysis] extra.
+    """
+
+    def __init__(
+        self,
+        is_error: bool,
+        message: str,
+        response: query_pb2.QueryBucketsResponse | None = None,
+    ) -> None:
+        """
+        :param is_error: Boolean flag indicating if an error occurred in the API call.
+        :param message: Error message describing the error condition.
+        :param response: The QueryBucketsResponse for this page/message, or None.
+        """
+        super().__init__(is_error, message)
+        self.response = response
+
+    @property
+    def data_buckets(self) -> list[common_pb2.DataBucket]:
+        """The DataBuckets in this page/message, in server order; an empty list on error or for an empty result."""
+        if self.response is not None and self.response.HasField("bucketQueryResult"):
+            return list(self.response.bucketQueryResult.dataBuckets)
+        return []
+
+    @property
+    def next_page_token(self) -> str:
+        """
+        Token for retrieving the next page (unary queryBuckets() only), or empty string if there are no more pages.
+        Always empty for streamed messages (queryBucketsStream() is fire-and-consume).
+        """
+        if self.response is not None and self.response.HasField("bucketQueryResult"):
+            return self.response.bucketQueryResult.nextPageToken
+        return ""
+
+    def to_dataframes(
+        self,
+        time_range: tuple[TimestampInput, TimestampInput] | None = None,
+        exclude_column_metadata: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Converts this page's buckets into one pandas DataFrame per PV.  Requires the optional [analysis] extra.
+        Delegates to bucket_conversions.buckets_to_dataframes() (imported lazily so the core client carries no
+        pandas dependency); see it for the frame shape and attrs.
+
+        A PV's buckets can span pages, so converting page by page yields that PV's buckets in pieces.  Collect the
+        buckets of every page and convert once, or use bucket_conversions.query_buckets_to_dataframes().
+
+        :param time_range: Optional (begin, end) to trim each bucket to [begin, end) exactly; None (the default)
+            leaves the buckets whole, as the server returned them.
+        :param exclude_column_metadata: If True, do not attach per-bucket ColumnMetadata to the DataFrames.  When
+            the query itself excluded metadata, leaving this False reports each bucket's metadata as None (absent),
+            not as an empty summary.
+        :return: A dict of PV name to pandas.DataFrame.
+        """
+        from dp_python_lib.client import bucket_conversions
+
+        return bucket_conversions.buckets_to_dataframes(
+            self.data_buckets, time_range=time_range, exclude_column_metadata=exclude_column_metadata
+        )
+
+
 class QueryClient(ServiceApiClientBase):
     """
-    User-facing client for the sample-oriented v2 query methods of the MLDP Query Service: querySamples() (unary, one
-    resumable page) and querySamplesStream() (server-streaming, fire-and-consume).  Provides low-level wrappers around
-    the raw protobuf ColumnTable plus transparent-paging iterators.  Higher-level pandas/NumPy/Excel conversions live in
-    query_conversions and are reached via QuerySamplesApiResult.to_dataframe()/.to_numpy().
+    User-facing client for the v2 query methods of the MLDP Query Service, in two kinds:
+
+      - sample-oriented: querySamples() (unary, one resumable page) and querySamplesStream() (server-streaming,
+        fire-and-consume), returning an aligned, trimmed, scalar-only ColumnTable.  Pandas/NumPy/Excel conversions
+        live in query_conversions and are reached via QuerySamplesApiResult.to_dataframe()/.to_numpy().
+      - bucket-oriented: queryBuckets() and queryBucketsStream(), returning the archive's stored DataBuckets whole,
+        each with its original typed column (any kind, arrays and images included) and time axis.  Conversions live
+        in bucket_conversions and are reached via QueryBucketsApiResult.to_dataframes().
+
+    Each kind has the same three methods with the same contracts: query_*() for one page, iter_query_*() to page
+    transparently, and iter_query_*_stream() for the server stream.
 
     Queries are described by a kind-neutral QueryParams built from the PvQuery (PV) and ConfigQuery (CFG) helpers.
     """
@@ -545,14 +632,12 @@ class QueryClient(ServiceApiClientBase):
     def _build_query_spec(self, request_params: QueryParams) -> query_pb2.QuerySpec:
         """
         Builds the shared QuerySpec (time range + PV selector + configuration selector + optional sample status
-        selector) from the supplied QueryParams.  Factored out so both _build_query_samples_request() and a future
-        _build_query_buckets_request() reuse it.
+        selector) from the supplied QueryParams.  Shared by _build_query_samples_request() and
+        _build_query_buckets_request().
 
-        NOTE for the future bucket-oriented client (issue #16): sampleStatusSelector is supported by
-        querySamples()/querySamplesStream() ONLY -- the server rejects it on a bucket query, because a bucket is a
-        stored unit that cannot be partially filtered without rewriting it.  A bucket request builder reusing this
-        method must therefore refuse a QueryParams carrying sample_status_filter rather than copying it through,
-        which would silently produce a request the server rejects.
+        This copies sample_status_filter through whenever it is set.  That is right for samples only: the server
+        rejects a sampleStatusSelector on a bucket query, so _build_query_buckets_request() refuses such params
+        before calling here.  Any other caller added later must make the same choice.
 
         :param request_params: User parameters for the query.
         :return: A QuerySpec for the specified params.
@@ -598,6 +683,102 @@ class QueryClient(ServiceApiClientBase):
         request.resultRepresentation.excludeColumnMetadata = request_params.exclude_column_metadata
 
         return request
+
+    def _build_query_buckets_request(
+        self, request_params: QueryParams, page_token: str | None = None
+    ) -> query_pb2.QueryBucketsRequest:
+        """
+        Builds a QueryBucketsRequest from the supplied QueryParams and optional page token.  Used by both the unary and
+        streaming RPCs (they share the request type); the streaming path must never supply a page_token.
+
+        :param request_params: User parameters for the query.
+        :param page_token: Token for retrieving a subsequent page (unary paging only).
+        :return: A QueryBucketsRequest for the specified params.
+        :raises ValueError: if request_params carries a sample_status_filter, which the server rejects on a bucket
+            query.
+        """
+        # Refused rather than dropped: dropping it would hand back unfiltered data to a caller who believes it was
+        # filtered.  A bucket is a stored unit that cannot be partially filtered without rewriting it, and the
+        # server rejects the selector's mere presence (dp-service QueryV2Resolver).
+        if request_params.sample_status_filter is not None:
+            raise ValueError(
+                "bucket-oriented queries do not support per-sample status filtering; remove sample_status_filter "
+                "or use query_samples()/iter_query_samples()/iter_query_samples_stream()"
+            )
+
+        self.logger.debug("Building QueryBucketsRequest")
+        request = query_pb2.QueryBucketsRequest()
+        request.querySpec.CopyFrom(self._build_query_spec(request_params))
+
+        if request_params.limit is not None:
+            request.executionOptions.limit = request_params.limit
+        if page_token:
+            request.executionOptions.pageToken = page_token
+
+        # useSerializedColumns is inert on buckets (dp-service passes it in and never reads it): a column comes back
+        # serialized only if it was stored that way.  Forced False so the request never asks for something the server
+        # does not do.  excludeColumnMetadata, unlike on the samples path, is honored here.
+        request.resultRepresentation.useSerializedColumns = False
+        request.resultRepresentation.excludeColumnMetadata = request_params.exclude_column_metadata
+
+        return request
+
+    # ------------------------------------------------------------------
+    # server-streaming (shared by both query kinds)
+    # ------------------------------------------------------------------
+
+    def _iter_stream(
+        self,
+        stub_call: Callable[[Any], Iterable[Any]],
+        request: Any,
+        result_cls: Callable[..., _StreamResultT],
+        success_field: str,
+        op_name: str,
+    ) -> Iterator[_StreamResultT]:
+        """
+        Invokes a server-streaming query method, yielding one result per streamed message.
+
+        Errors are yielded, not raised: a business error on a message, an unrecognized response, or a gRPC/unexpected
+        error while iterating the stream each yield an is_error result, and a transport error terminates the
+        generator after that final error item.  This is the internal contract -- the public iter_*_stream() wrappers
+        consume these and convert the first error result into a RuntimeError, so callers of the public methods never
+        see an error result yielded.
+
+        Deliberately not routed through _dispatch(), which returns a single result rather than yielding many.
+
+        :param stub_call: The bound stub method (e.g. self._stub.querySamplesStream).
+        :param request: The request for the call (must carry no page token).
+        :param result_cls: The result class; called as result_cls(is_error=, message=, response=).
+        :param success_field: The success oneof field of each response (e.g. "sampleQueryResult").
+        :param op_name: The camelCase method name, for log and error messages.
+        :return: An iterator over the streamed result messages, possibly ending in an error result.
+        """
+        display_name = op_name[0].upper() + op_name[1:]
+        self.logger.info("Calling %s API", op_name)
+
+        try:
+            self.logger.debug("Invoking stub.%s with request", op_name)
+            stream = stub_call(request)
+            for response in stream:
+                if response.HasField("exceptionalResult"):
+                    error_msg = response.exceptionalResult.message
+                    self.logger.warning("%s returned business error: %s", display_name, error_msg)
+                    yield result_cls(is_error=True, message=error_msg)
+                elif response.HasField(success_field):
+                    yield result_cls(is_error=False, message="", response=response)
+                else:
+                    error_msg = f"Unexpected response format: neither exceptionalResult nor {success_field} found"
+                    self.logger.error(error_msg)
+                    yield result_cls(is_error=True, message=error_msg)
+
+        except grpc.RpcError as e:
+            error_msg = f"gRPC error: {e.details()}"
+            self.logger.error("gRPC error during %s: %s", op_name, e.details())
+            yield result_cls(is_error=True, message=error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error: {e!s}"
+            self.logger.exception("Unexpected error during %s: %s", op_name, str(e))
+            yield result_cls(is_error=True, message=error_msg)
 
     # ------------------------------------------------------------------
     # querySamples (unary)
@@ -668,42 +849,18 @@ class QueryClient(ServiceApiClientBase):
     def _send_query_samples_stream(self, request: query_pb2.QuerySamplesRequest) -> Iterator[QuerySamplesApiResult]:
         """
         Invokes the querySamplesStream() server-streaming API method with the supplied request, yielding one
-        QuerySamplesApiResult per streamed message.
-
-        Errors are yielded, not raised: a business error on a message, an unrecognized response, or a gRPC/unexpected
-        error while iterating the stream each yield an is_error result, and a transport error terminates the
-        generator after that final error item.  This is the internal contract -- the public
-        iter_query_samples_stream() wrapper consumes these and converts the first error result into a RuntimeError,
-        so callers of the public method never see an error result yielded.
+        QuerySamplesApiResult per streamed message.  Errors are yielded, not raised; see _iter_stream().
 
         :param request: QuerySamplesRequest with parameters for the call (must carry no page token).
         :return: An iterator over the streamed result messages, possibly ending in an error result.
         """
-        self.logger.info("Calling querySamplesStream API")
-
-        try:
-            self.logger.debug("Invoking stub.querySamplesStream with request")
-            stream = self._stub.querySamplesStream(request)
-            for response in stream:
-                if response.HasField("exceptionalResult"):
-                    error_msg = response.exceptionalResult.message
-                    self.logger.warning("QuerySamplesStream returned business error: %s", error_msg)
-                    yield QuerySamplesApiResult(is_error=True, message=error_msg)
-                elif response.HasField("sampleQueryResult"):
-                    yield QuerySamplesApiResult(is_error=False, message="", response=response)
-                else:
-                    error_msg = "Unexpected response format: neither exceptionalResult nor sampleQueryResult found"
-                    self.logger.error(error_msg)
-                    yield QuerySamplesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during querySamplesStream: %s", e.details())
-            yield QuerySamplesApiResult(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during querySamplesStream: %s", str(e))
-            yield QuerySamplesApiResult(is_error=True, message=error_msg)
+        return self._iter_stream(
+            self._stub.querySamplesStream,
+            request,
+            QuerySamplesApiResult,
+            "sampleQueryResult",
+            "querySamplesStream",
+        )
 
     def iter_query_samples_stream(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
         """
@@ -727,4 +884,121 @@ class QueryClient(ServiceApiClientBase):
         for result in self._send_query_samples_stream(request):
             if result.result_status.is_error:
                 raise RuntimeError(f"querySamplesStream failed during streaming: {result.result_status.message}")
+            yield result
+
+    # ------------------------------------------------------------------
+    # queryBuckets (unary)
+    # ------------------------------------------------------------------
+
+    def _send_query_buckets(self, request: query_pb2.QueryBucketsRequest) -> QueryBucketsApiResult:
+        """
+        Invokes the queryBuckets() unary API method with the supplied request.
+        :param request: QueryBucketsRequest with parameters for the call.
+        :return: A QueryBucketsApiResult with the method response and status information.
+        """
+        return self._dispatch(
+            self._stub.queryBuckets,
+            request,
+            QueryBucketsApiResult,
+            "bucketQueryResult",
+            "queryBuckets",
+            success_log=lambda response: self.logger.info(
+                "QueryBuckets returned %d buckets", len(response.bucketQueryResult.dataBuckets)
+            ),
+        )
+
+    def query_buckets(self, request_params: QueryParams, page_token: str | None = None) -> QueryBucketsApiResult:
+        """
+        User-facing method for invoking the unary queryBuckets() API method.  Returns a single page of whole buckets;
+        use iter_query_buckets() to page through all results transparently.
+
+        params.limit counts BUCKETS here, not rows, and a page may also end early (with a page token) at the server's
+        outbound byte budget.  An empty result is a success with no buckets.
+
+        :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
+            carry a sample_status_filter.
+        :param page_token: Token for retrieving a subsequent page (optional).
+        :return: A QueryBucketsApiResult with a single page of results and status information.
+        :raises ValueError: if request_params carries a sample_status_filter.
+        """
+        self.logger.info("Starting queryBuckets operation")
+
+        request = self._build_query_buckets_request(request_params, page_token=page_token)
+        result = self._send_query_buckets(request)
+
+        if result.result_status.is_error:
+            self.logger.error("QueryBuckets operation failed: %s", result.result_status.message)
+        else:
+            self.logger.info("QueryBuckets operation completed successfully")
+
+        return result
+
+    def iter_query_buckets(self, request_params: QueryParams) -> Iterator[QueryBucketsApiResult]:
+        """
+        Convenience generator that transparently pages through all unary queryBuckets() results, following the
+        nextPageToken until the results are exhausted.  Yields one QueryBucketsApiResult per page.
+
+        Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
+
+        :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
+            carry a sample_status_filter.
+        :return: An iterator over the result pages.
+        :raises ValueError: if request_params carries a sample_status_filter (on the first next()).
+        """
+        page_token: str | None = None
+        while True:
+            result = self.query_buckets(request_params, page_token=page_token)
+            if result.result_status.is_error:
+                raise RuntimeError(f"queryBuckets failed during paging: {result.result_status.message}")
+
+            yield result
+
+            page_token = result.next_page_token
+            if not page_token:
+                break
+
+    # ------------------------------------------------------------------
+    # queryBucketsStream (server-streaming)
+    # ------------------------------------------------------------------
+
+    def _send_query_buckets_stream(self, request: query_pb2.QueryBucketsRequest) -> Iterator[QueryBucketsApiResult]:
+        """
+        Invokes the queryBucketsStream() server-streaming API method with the supplied request, yielding one
+        QueryBucketsApiResult per streamed message.  Errors are yielded, not raised; see _iter_stream().
+
+        :param request: QueryBucketsRequest with parameters for the call (must carry no page token).
+        :return: An iterator over the streamed result messages, possibly ending in an error result.
+        """
+        return self._iter_stream(
+            self._stub.queryBucketsStream,
+            request,
+            QueryBucketsApiResult,
+            "bucketQueryResult",
+            "queryBucketsStream",
+        )
+
+    def iter_query_buckets_stream(self, request_params: QueryParams) -> Iterator[QueryBucketsApiResult]:
+        """
+        User-facing lazy generator for the server-streaming queryBucketsStream() API method.  Yields one
+        QueryBucketsApiResult per streamed message, symmetric with iter_query_buckets() but fire-and-consume: the
+        server reads the whole result and pushes it in messages cut by params.limit (in buckets) and by its byte
+        budget, with no page tokens.  An empty result is one message with no buckets.
+
+        A PV's buckets can span messages, so per-message conversion yields PV fragments; collect the buckets and
+        call bucket_conversions.buckets_to_dataframes() once to get whole PVs.
+
+        Raises RuntimeError on a mid-stream error, matching the iter_* page-error behavior, so callers can distinguish
+        failure from an empty stream.
+
+        :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
+            carry a sample_status_filter.
+        :return: A lazy iterator over the streamed result messages.
+        :raises ValueError: if request_params carries a sample_status_filter (on the first next()).
+        """
+        self.logger.info("Starting queryBucketsStream operation")
+
+        request = self._build_query_buckets_request(request_params, page_token=None)
+        for result in self._send_query_buckets_stream(request):
+            if result.result_status.is_error:
+                raise RuntimeError(f"queryBucketsStream failed during streaming: {result.result_status.message}")
             yield result

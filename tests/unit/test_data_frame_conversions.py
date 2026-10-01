@@ -59,7 +59,7 @@ class TestDataFrameTimestamps(unittest.TestCase):
 
 
 class TestColumnValues(unittest.TestCase):
-    """column_values() is a standalone per-column converter, reusable by the bucket query (#16)."""
+    """column_values() is a standalone per-column converter, reused by bucket_conversions for the bucket query (#16)."""
 
     def test_each_scalar_column_type(self):
         cases = [
@@ -827,8 +827,8 @@ class TestStructuralColumnFields(unittest.TestCase):
 class TestBuilderReadBackSymmetry(unittest.TestCase):
     """
     Each non-scalar builder (#17, D7) round-trips through data_frame() and the read side: values, one entry per
-    sample, plus the structural field the payload needs.  Live read-back waits for the bucket query (#16), so this
-    is the check that the write and read halves agree on layout -- above all, row-major array flattening.
+    sample, plus the structural field the payload needs.  This is the offline check that the write and read halves
+    agree on layout -- above all, row-major array flattening; live read-back goes through the bucket query (#16).
     """
 
     def test_array_builders_round_trip_values_and_dims(self):

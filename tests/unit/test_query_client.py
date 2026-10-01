@@ -14,12 +14,13 @@ from assignment_spy import watch_assignments
 from dp_python_lib.client.query_client import (
     ConfigQuery,
     PvQuery,
+    QueryBucketsApiResult,
     QueryClient,
     QueryParams,
     QuerySamplesApiResult,
     SampleStatusFilter,
 )
-from dp_python_lib.grpc import query_pb2
+from dp_python_lib.grpc import common_pb2, query_pb2
 
 BEGIN = datetime(2024, 1, 1, tzinfo=timezone.utc)
 END = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -597,3 +598,265 @@ class TestBuildRequestSampleStatusSelector(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ----------------------------------------------------------------------
+# queryBuckets / queryBucketsStream (#16)
+# ----------------------------------------------------------------------
+
+
+def _bucket_response(pv_names=(), next_page_token=""):
+    """Build a real QueryBucketsResponse carrying one empty-bodied DataBucket per PV name and a nextPageToken."""
+    response = query_pb2.QueryBucketsResponse()
+    for pv_name in pv_names:
+        response.bucketQueryResult.dataBuckets.add(pvName=pv_name)
+    response.bucketQueryResult.nextPageToken = next_page_token
+    return response
+
+
+def _bucket_exceptional_response(message):
+    """Build a real QueryBucketsResponse carrying an exceptionalResult with the given message."""
+    response = query_pb2.QueryBucketsResponse()
+    response.exceptionalResult.message = message
+    return response
+
+
+class TestBuildQueryBucketsRequest(unittest.TestCase):
+    def setUp(self):
+        self.client = QueryClient(Mock())
+
+    def test_spec_matches_the_samples_builder(self):
+        params = QueryParams(
+            BEGIN,
+            END,
+            pv_selector=PvQuery.name_list(["A", "B"]),
+            config_criteria=[ConfigQuery.configuration_name(["cfg"])],
+            limit=50,
+        )
+        buckets = self.client._build_query_buckets_request(params, page_token="tok")
+        samples = self.client._build_query_samples_request(params, page_token="tok")
+        self.assertIsInstance(buckets, query_pb2.QueryBucketsRequest)
+        self.assertEqual(buckets.querySpec, samples.querySpec)
+        self.assertEqual(buckets.executionOptions.limit, 50)
+        self.assertEqual(buckets.executionOptions.pageToken, "tok")
+
+    def test_use_serialized_columns_is_forced_false(self):
+        params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+        request = self.client._build_query_buckets_request(params)
+        self.assertFalse(request.resultRepresentation.useSerializedColumns)
+
+    def test_exclude_column_metadata_is_passed_through(self):
+        for exclude in (False, True):
+            with self.subTest(exclude=exclude):
+                params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), exclude_column_metadata=exclude)
+                request = self.client._build_query_buckets_request(params)
+                self.assertEqual(request.resultRepresentation.excludeColumnMetadata, exclude)
+
+    def test_no_limit_no_token(self):
+        request = self.client._build_query_buckets_request(QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x")))
+        self.assertEqual(request.executionOptions.limit, 0)
+        self.assertEqual(request.executionOptions.pageToken, "")
+
+    def test_sample_status_filter_is_refused(self):
+        params = QueryParams(
+            BEGIN, END, pv_selector=PvQuery.pattern("x"), sample_status_filter=SampleStatusFilter.exclude("dq")
+        )
+        with self.assertRaises(ValueError) as ctx:
+            self.client._build_query_buckets_request(params)
+        self.assertIn("sample_status_filter", str(ctx.exception))
+        self.assertIn("query_samples()", str(ctx.exception))
+
+    def test_refusal_happens_before_any_rpc(self):
+        stub = Mock()
+        self.client._stub = stub
+        params = QueryParams(
+            BEGIN, END, pv_selector=PvQuery.pattern("x"), sample_status_filter=SampleStatusFilter.include("dq")
+        )
+        with self.assertRaises(ValueError):
+            self.client.query_buckets(params)
+        with self.assertRaises(ValueError):
+            list(self.client.iter_query_buckets(params))
+        with self.assertRaises(ValueError):
+            list(self.client.iter_query_buckets_stream(params))
+        stub.queryBuckets.assert_not_called()
+        stub.queryBucketsStream.assert_not_called()
+
+
+class TestQueryBucketsUnary(unittest.TestCase):
+    def setUp(self):
+        self.client = QueryClient(Mock())
+        self.mock_stub = Mock()
+        self.client._stub = self.mock_stub
+        self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"), limit=7)
+
+    def test_success(self):
+        self.mock_stub.queryBuckets.return_value = _bucket_response(["A", "B"], next_page_token="tok")
+        result = self.client.query_buckets(self.params, page_token="prev")
+        self.assertFalse(result.result_status.is_error)
+        self.assertEqual([b.pvName for b in result.data_buckets], ["A", "B"])
+        self.assertIsInstance(result.data_buckets[0], common_pb2.DataBucket)
+        self.assertEqual(result.next_page_token, "tok")
+        sent = self.mock_stub.queryBuckets.call_args[0][0]
+        self.assertEqual(sent.executionOptions.pageToken, "prev")
+        self.assertEqual(sent.executionOptions.limit, 7)
+
+    def test_empty_result_is_success(self):
+        self.mock_stub.queryBuckets.return_value = _bucket_response([])
+        result = self.client.query_buckets(self.params)
+        self.assertFalse(result.result_status.is_error)
+        self.assertEqual(result.data_buckets, [])
+        self.assertEqual(result.next_page_token, "")
+
+    def test_business_error(self):
+        self.mock_stub.queryBuckets.return_value = _bucket_exceptional_response("bad query")
+        result = self.client.query_buckets(self.params)
+        self.assertTrue(result.result_status.is_error)
+        self.assertEqual(result.result_status.message, "bad query")
+        self.assertEqual(result.data_buckets, [])
+        self.assertEqual(result.next_page_token, "")
+
+    def test_unexpected_response_format(self):
+        self.mock_stub.queryBuckets.return_value = _response_with_field("somethingElse")
+        result = self.client.query_buckets(self.params)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("neither exceptionalResult nor bucketQueryResult", result.result_status.message)
+
+    def test_grpc_error(self):
+        err = grpc.RpcError()
+        err.details = lambda: "connection refused"
+        self.mock_stub.queryBuckets.side_effect = err
+        result = self.client.query_buckets(self.params)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("gRPC error: connection refused", result.result_status.message)
+
+    def test_unexpected_exception(self):
+        self.mock_stub.queryBuckets.side_effect = ValueError("boom")
+        result = self.client.query_buckets(self.params)
+        self.assertTrue(result.result_status.is_error)
+        self.assertIn("Unexpected error: boom", result.result_status.message)
+
+
+class TestIterQueryBuckets(unittest.TestCase):
+    def setUp(self):
+        self.client = QueryClient(Mock())
+        self.mock_stub = Mock()
+        self.client._stub = self.mock_stub
+        self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+
+    def test_paging_follows_tokens_and_stops_on_empty(self):
+        self.mock_stub.queryBuckets.side_effect = [
+            _bucket_response(["A"], next_page_token="t1"),
+            _bucket_response(["A"], next_page_token="t2"),
+            _bucket_response(["B"], next_page_token=""),
+        ]
+        pages = list(self.client.iter_query_buckets(self.params))
+        self.assertEqual([[b.pvName for b in p.data_buckets] for p in pages], [["A"], ["A"], ["B"]])
+        sent_tokens = [c[0][0].executionOptions.pageToken for c in self.mock_stub.queryBuckets.call_args_list]
+        self.assertEqual(sent_tokens, ["", "t1", "t2"])
+
+    def test_error_page_raises_runtime_error(self):
+        self.mock_stub.queryBuckets.side_effect = [
+            _bucket_response(["A"], next_page_token="t1"),
+            _bucket_exceptional_response("page boom"),
+        ]
+        collected = []
+        with self.assertRaises(RuntimeError) as ctx:
+            for page in self.client.iter_query_buckets(self.params):
+                collected.append(page)
+        self.assertEqual(len(collected), 1)
+        self.assertIn("queryBuckets failed during paging: page boom", str(ctx.exception))
+
+
+class TestQueryBucketsStream(unittest.TestCase):
+    def setUp(self):
+        self.client = QueryClient(Mock())
+        self.mock_stub = Mock()
+        self.client._stub = self.mock_stub
+        self.params = QueryParams(BEGIN, END, pv_selector=PvQuery.pattern("x"))
+
+    def test_stream_yields_messages(self):
+        self.mock_stub.queryBucketsStream.return_value = iter([_bucket_response(["A"]), _bucket_response(["B"])])
+        results = list(self.client.iter_query_buckets_stream(self.params))
+        self.assertTrue(all(isinstance(r, QueryBucketsApiResult) for r in results))
+        self.assertEqual([[b.pvName for b in r.data_buckets] for r in results], [["A"], ["B"]])
+
+    def test_stream_never_sends_page_token(self):
+        self.mock_stub.queryBucketsStream.return_value = iter([_bucket_response()])
+        list(self.client.iter_query_buckets_stream(self.params))
+        sent = self.mock_stub.queryBucketsStream.call_args[0][0]
+        self.assertIsInstance(sent, query_pb2.QueryBucketsRequest)
+        self.assertEqual(sent.executionOptions.pageToken, "")
+
+    def test_empty_result_is_one_empty_message(self):
+        self.mock_stub.queryBucketsStream.return_value = iter([_bucket_response([])])
+        results = list(self.client.iter_query_buckets_stream(self.params))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].data_buckets, [])
+
+    def test_business_error_mid_stream_raises(self):
+        self.mock_stub.queryBucketsStream.return_value = iter(
+            [_bucket_response(["A"]), _bucket_exceptional_response("single bucket for pv A exceeds the limit")]
+        )
+        collected = []
+        with self.assertRaises(RuntimeError) as ctx:
+            for r in self.client.iter_query_buckets_stream(self.params):
+                collected.append(r)
+        self.assertEqual(len(collected), 1)
+        self.assertIn("queryBucketsStream failed during streaming", str(ctx.exception))
+        self.assertIn("exceeds the limit", str(ctx.exception))
+
+    def test_grpc_error_mid_stream_raises(self):
+        err = grpc.RpcError()
+        err.details = lambda: "stream reset"
+
+        def exploding_stream():
+            yield _bucket_response(["A"])
+            raise err
+
+        self.mock_stub.queryBucketsStream.return_value = exploding_stream()
+        with self.assertRaises(RuntimeError) as ctx:
+            list(self.client.iter_query_buckets_stream(self.params))
+        self.assertIn("gRPC error: stream reset", str(ctx.exception))
+
+    def test_unrecognized_message_raises(self):
+        self.mock_stub.queryBucketsStream.return_value = iter([_response_with_field("somethingElse")])
+        with self.assertRaises(RuntimeError) as ctx:
+            list(self.client.iter_query_buckets_stream(self.params))
+        self.assertIn("neither exceptionalResult nor bucketQueryResult", str(ctx.exception))
+
+
+class TestSharedStreamSender(unittest.TestCase):
+    """The samples stream sender now goes through _iter_stream(); its yielded error messages are unchanged."""
+
+    def setUp(self):
+        self.client = QueryClient(Mock())
+        self.mock_stub = Mock()
+        self.client._stub = self.mock_stub
+        self.request = query_pb2.QuerySamplesRequest()
+
+    def test_samples_error_texts(self):
+        err = grpc.RpcError()
+        err.details = lambda: "reset"
+
+        def stream():
+            yield _exceptional_response("biz")
+            yield _response_with_field("somethingElse")
+            raise err
+
+        self.mock_stub.querySamplesStream.return_value = stream()
+        messages = [r.result_status.message for r in self.client._send_query_samples_stream(self.request)]
+        self.assertEqual(
+            messages,
+            [
+                "biz",
+                "Unexpected response format: neither exceptionalResult nor sampleQueryResult found",
+                "gRPC error: reset",
+            ],
+        )
+
+    def test_unexpected_exception_text(self):
+        self.mock_stub.querySamplesStream.side_effect = ValueError("boom")
+        results = list(self.client._send_query_samples_stream(self.request))
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], QuerySamplesApiResult)
+        self.assertEqual(results[0].result_status.message, "Unexpected error: boom")

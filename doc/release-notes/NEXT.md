@@ -31,6 +31,7 @@ person cutting the release has any reason to re-read.
 - [Environment variables override the config file (#19)](#environment-variables-override-the-config-file-issue-19)
 - [Detecting open-ended activations (#26)](#detecting-open-ended-activations-issue-26)
 - [Ingesting data (#17)](#ingesting-data-issue-17)
+- [Querying whole buckets (#16)](#querying-whole-buckets-issue-16)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -216,6 +217,49 @@ Re-running the older recipes against real data also corrected two things they cl
 
 See [#17](https://github.com/osprey-dcs/dp-python-lib/issues/17) and the Ingestion API section of
 [`CLAUDE.md`](https://github.com/osprey-dcs/dp-python-lib/blob/main/CLAUDE.md).
+
+## Querying whole buckets (Issue #16)
+
+`client.query` now wraps the bucket-oriented v2 query, `queryBuckets` / `queryBucketsStream`.  Where
+`query_samples()` returns an aligned, trimmed table of scalar columns, a bucket query returns the
+archive's stored units: each `DataBucket` holds one PV's column, in the type it was ingested as, over
+that bucket's own time axis.  It is the way to read back array, image, struct, and serialized columns,
+and the first query path that returns the column metadata (provenance included) stored with the data.
+
+- **`query_buckets()`, `iter_query_buckets()`, and `iter_query_buckets_stream()`** take the same
+  `QueryParams` as the sample methods and behave the same way: one page, every page (raising
+  `RuntimeError` on a page error), or the server stream (raising on a mid-stream error).
+  `QueryBucketsApiResult` exposes `data_buckets` and `next_page_token`.
+- **A new module, `bucket_conversions`**, reads them.  In plain Python: `bucket_column()`,
+  `bucket_values()`, `bucket_timestamps()` (integer nanoseconds), `bucket_to_data_frame()` (a bucket
+  as a one-column `common.DataFrame`, so the existing `data_frame_conversions` readers apply), and
+  `buckets_by_pv()`.  With the `[analysis]` extra: `buckets_to_dataframes()`, which returns one pandas
+  DataFrame per PV, and `query_buckets_to_dataframes()`, which runs the whole query first (with a
+  `max_buckets` cap).  `QueryBucketsApiResult.to_dataframes()` converts one page.
+
+Behaviors worth knowing:
+
+- **Buckets come back whole.**  The server returns every bucket that overlaps `[begin, end)`
+  without trimming it, so a bucket at either edge carries samples outside the range.  Trimming is
+  opt-in: `trim_bucket()`, `time_range=` on the conversions, or `trim=True` on
+  `query_buckets_to_dataframes()`.  It is exact and half-open, like `query_samples()`.  It does not
+  remove samples that fall in a gap between configuration intervals when `config_criteria` is used;
+  use `query_samples()` when that matters.
+- **`limit` counts buckets on this path, not rows**, and a page can also end early, with a page
+  token, once it reaches the server's message-size budget.  The server silently caps the limit at its
+  configured maximum (100,000 by default).
+- **A `QueryParams` with a `sample_status_filter` is refused** with a `ValueError` before any call
+  is made.  The server rejects status filtering on bucket queries, and dropping the filter silently
+  would return data the caller believed was filtered.
+- **A serialized column is passed through, not decoded.**  It comes back only if it was ingested
+  that way.  `bucket_column()` returns it with its `encoding` and `payload`; the value readers and
+  pandas conversions raise rather than drop it.
+- **A PV's buckets are kept as stored.**  Overlapping buckets from separate ingests are all kept,
+  so a per-PV frame's index can repeat instants.  A PV whose buckets differ in column type or
+  structure (say, ingested as double and later as int32) raises, naming both buckets.  Per-bucket
+  provider and column metadata is in `df.attrs["buckets"]`.
+
+See [#16](https://github.com/osprey-dcs/dp-python-lib/issues/16) and `plan/tickets/16/plan.md`.
 
 ## Installing
 
