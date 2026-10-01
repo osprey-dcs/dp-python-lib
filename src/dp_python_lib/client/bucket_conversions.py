@@ -187,6 +187,11 @@ def _first_out_of_order(epoch_nanos: list[int]) -> int | None:
     return None
 
 
+def _has_samples_in(bucket: common_pb2.DataBucket, begin_nanos: int, end_nanos: int) -> bool:
+    """Whether any of a bucket's timestamps falls in [begin, end).  Reads only the axis, so any column kind works."""
+    return any(begin_nanos <= nanos < end_nanos for nanos in bucket_timestamps(bucket))
+
+
 def _trim_nanos(bucket: common_pb2.DataBucket, begin_nanos: int, end_nanos: int) -> common_pb2.DataBucket | None:
     """trim_bucket() over an already-validated range in epoch nanoseconds."""
     column = bucket_column(bucket)
@@ -301,6 +306,7 @@ def _structure(column: Any) -> tuple:
 def _check_consistent(pv_name: str, buckets: list[common_pb2.DataBucket]) -> None:
     """
     Rejects a PV whose buckets differ in column kind or structure, which cannot be concatenated into one column.
+    A legacy DataColumn carries no column-level type, so its buckets always pass (see buckets_to_dataframes()).
 
     Concatenating anyway would silently widen dtypes (double then int32) or mix payloads that mean different things
     (two enumerations, two array shapes).
@@ -397,6 +403,12 @@ def buckets_to_dataframes(
         them.  These are structural -- the values cannot be interpreted without them -- so they are present even
         under exclude_column_metadata.
 
+    A legacy DataColumn is the exception to the consistency check: it has no column-level type, so its buckets are
+    always treated as one structure even when their DataValues use different arms.  Their parts then concatenate
+    with pandas' own widening -- integers with gaps, or ints in one bucket and doubles in another, become float64,
+    and a mix with strings becomes object -- rather than raising.  Read such buckets with bucket_values() when the
+    per-sample arm matters.
+
     :param buckets: The buckets, in any order (e.g. the data_buckets of every page or stream message).
     :param time_range: Optional (begin, end) to trim each bucket to [begin, end) exactly (see trim_bucket()); None
         (the default) keeps every bucket whole, as the server returned it.  A PV with no sample left in the range is
@@ -406,7 +418,8 @@ def buckets_to_dataframes(
     :raises ImportError: if the [analysis] extra is not installed.
     :raises ValueError: if time_range's begin is not before its end; if a PV's buckets differ in column kind or
         structure; or if a bucket is malformed, holds a SerializedDataColumn, or (when trimming) has a decreasing
-        time axis.
+        time axis.  With time_range, only buckets holding a sample in the range are checked: one lying wholly
+        outside it is dropped, a serialized one included.
     """
     pd = _require_pandas()
 
@@ -414,12 +427,17 @@ def buckets_to_dataframes(
 
     frames: dict[str, Any] = {}
     for pv_name, group in buckets_by_pv(buckets).items():
+        if range_nanos is not None:
+            # A serialized bucket with no sample in the range would be dropped by the trim like any other, so it is
+            # refused only when it overlaps.  Refusing it up front made one serialized PV anywhere in a result --
+            # even entirely outside the range -- block the conversion of every PV.
+            group = [bucket for bucket in group if _has_samples_in(bucket, *range_nanos)]
+            if not group:
+                continue
         for bucket in group:
             _refuse_serialized(bucket, bucket_column(bucket), "converted to a pandas DataFrame")
         if range_nanos is not None:
             group = [trimmed for bucket in group if (trimmed := _trim_nanos(bucket, *range_nanos)) is not None]
-            if not group:
-                continue
         _check_consistent(pv_name, group)
         frames[pv_name] = _pv_dataframe(pd, pv_name, group, exclude_column_metadata)
     return frames

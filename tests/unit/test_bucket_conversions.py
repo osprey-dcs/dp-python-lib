@@ -463,6 +463,40 @@ class TestBucketsToDataFrames(unittest.TestCase):
             bc.buckets_to_dataframes([bucket])
         self.assertIn("my-codec", str(ctx.exception))
 
+    def test_serialized_bucket_outside_time_range_does_not_block_other_pvs(self):
+        a = _double_bucket("PV:A", count=5)
+        s = _bucket("PV:S", _clock(2, start_nanos=T0_NANOS + 100 * PERIOD), dfb.serialized_column("PV:S", b"xy", "c"))
+        frames = bc.buckets_to_dataframes(
+            [a, s], time_range=(from_epoch_nanos(T0_NANOS), from_epoch_nanos(T0_NANOS + 5 * PERIOD))
+        )
+        self.assertEqual(list(frames), ["PV:A"])
+
+    def test_serialized_bucket_outside_time_range_dropped_from_its_own_pv(self):
+        whole = _double_bucket("PV:S", count=2)
+        s = _bucket("PV:S", _clock(2, start_nanos=T0_NANOS + 100 * PERIOD), dfb.serialized_column("PV:S", b"xy", "c"))
+        frames = bc.buckets_to_dataframes(
+            [whole, s], time_range=(from_epoch_nanos(T0_NANOS), from_epoch_nanos(T0_NANOS + 5 * PERIOD))
+        )
+        self.assertEqual(list(frames["PV:S"]["PV:S"]), [0.0, 1.0])
+
+    def test_serialized_bucket_overlapping_time_range_still_refused(self):
+        a = _double_bucket("PV:A", count=5)
+        s = _bucket("PV:S", _clock(2), dfb.serialized_column("PV:S", b"xy", "my-codec"))
+        with self.assertRaises(ValueError) as ctx:
+            bc.buckets_to_dataframes(
+                [a, s], time_range=(from_epoch_nanos(T0_NANOS), from_epoch_nanos(T0_NANOS + 5 * PERIOD))
+            )
+        self.assertIn("my-codec", str(ctx.exception))
+
+    def test_legacy_data_column_buckets_widen_rather_than_raise(self):
+        # Documented exception to the consistency check: a DataColumn has no column-level type.
+        ints = _bucket("PV:L", _clock(2), dfb.data_column("PV:L", [1, None]))
+        doubles = _bucket("PV:L", _clock(2, start_nanos=T0_NANOS + 10 * PERIOD), dfb.data_column("PV:L", [2.5, 3.5]))
+        df = bc.buckets_to_dataframes([ints, doubles])["PV:L"]
+        self.assertEqual(str(df["PV:L"].dtype), "float64")
+        self.assertEqual(df["PV:L"].tolist()[0], 1.0)
+        self.assertEqual(df["PV:L"].tolist()[2:], [2.5, 3.5])
+
     def test_time_range_trims_and_drops_empty_pvs(self):
         a = _double_bucket("PV:A", count=5)
         b = _double_bucket("PV:B", count=2, start_nanos=T0_NANOS + 100 * PERIOD)
