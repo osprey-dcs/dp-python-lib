@@ -13,11 +13,16 @@ filename or in its prose.  `release.yml` resolves the notes path strictly from t
 (`doc/release-notes/${GITHUB_REF_NAME}.md`), so a file committed under a guessed version is both
 stranded and a failed release-notes check on the tag that does ship.  Past versions are named
 freely where they are the point — "since 1.16.0" is a durable fact about what shipped, not a guess
-about what is about to.  `.dev/tools/check-release-notes.py` enforces the parts that would carry the
+about what is about to.  `.github/scripts/check-release-notes.py` enforces the parts that would carry the
 new tag: this file may not contain a verification section, a `sigstore verify identity` command, a
 signing identity, or a Full Changelog line.  Those are written at the cut.  Naming them in prose
 is fine, as the checklist below does, but put the name in backticks: the checker treats an unquoted
 `--cert-identity` followed by a word, or a line beginning with the verify command, as the real thing.
+
+Links here are absolute `https://github.com/osprey-dcs/<repo>/blob/main/...` URLs: never relative,
+and never a `rel-*` tag, which would guess the version.  The same checker confirms that each link
+into this repo names a file and heading that exist, so a PR that renames a heading linked from here
+fails CI until the link is fixed.  The links move to the release tag at the cut (step 6 below).
 
 Nothing here should assert what *else* the release contains, either: that is knowable only once
 the release is cut, and a stale claim in a file that already looks finished is not something the
@@ -291,16 +296,19 @@ When the version is known and the release is being cut:
    the pointer to `README.env`.
 5. **End with the Full Changelog line**, after `## Installing`:
    `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<previous>...rel-<version>`.
-6. **Repoint `blob/main/...` links to `blob/rel-<version>/...`.**  This file is published as the
-   release body via `body_path`, and relative links do not survive that lift — they resolve against
-   the repo root, not `doc/release-notes/`, and 404.  Links here are already absolute for that
-   reason, but one pinned to `main` drifts as the repo moves on; pinned to the tag it keeps
-   describing the content this release actually shipped.  (`README.env` did not exist at 1.16.0,
-   so a link to it from older notes stays on `main`.)
+6. **Repoint every `blob/main/...` link to `blob/rel-<version>/...`**, including links into the
+   other osprey-dcs repos, which release in lockstep.  This file is published as the release body
+   via `body_path`, where a relative link 404s and a `main` link drifts as the repo moves on; pinned
+   to the tag it keeps describing the content this release actually shipped.  Don't hunt for them
+   by eye: step 8 lists every one you missed, and any stale `rel-*` tag copied from older notes.
 7. **Delete this "Cutting the release" section** and update Contents.
-8. **Run `python .dev/tools/check-release-notes.py`**, which CI also runs on the PR.  It fails on a
-   missing verification section, a stale tag in the identity or the changelog link, or a verify
-   command that skips a file.
+8. **Run `python .github/scripts/check-release-notes.py`** and fix everything it lists; CI runs
+   it on the PR too.  For the new file it fails on a relative link; a link into any osprey-dcs repo
+   not pinned to `rel-<version>`; a path or `#anchor` into this repo that is missing from the tree
+   being tagged, or that points at a duplicated heading; a leftover `rel-<version>` or `<previous>`
+   (a bare `<version>` is allowed); a missing verification section; a stale tag in the identity or
+   the changelog link; or a verify command that skips a file.  The rules are in the script's
+   docstring (osprey-dcs/data-platform#98).
 9. **Start a fresh `NEXT.md`** for the following cycle.  Steps 1, 2, and 7 have moved, rewritten, and
    deleted the text it needs, so recover it from `main`:
    `git show main:doc/release-notes/NEXT.md > doc/release-notes/NEXT.md`, then delete every ticket

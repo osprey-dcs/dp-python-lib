@@ -407,7 +407,7 @@ in fact been a no-op since before `rel-1.15.0`.
 [plan-40]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/40/plan.md
 [plan-41]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/tickets/41/plan.md
 [plan-readme]: https://github.com/osprey-dcs/dp-python-lib/blob/rel-1.16.0/plan/README.md
-[readme-env]: https://github.com/osprey-dcs/dp-python-lib/blob/main/README.env
+[readme-env]: https://github.com/osprey-dcs/dp-python-lib/blob/700d2edf44776ad86ee220836db1facf340d4629/README.env
 
 ## Verifying these artifacts
 
