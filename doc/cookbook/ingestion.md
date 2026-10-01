@@ -28,7 +28,10 @@ from dp_python_lib.client import (
     IngestionRequestStatus,
     RequestStatusQuery as RS,
     chunked_request_params,
+    QueryParams,
+    PvQuery as PV,
 )
+from dp_python_lib.client import bucket_conversions as bc
 from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client import data_frame_conversions as dfc
 ```
@@ -323,9 +326,28 @@ frame = dfb.data_frame(axis, [
 
 Array samples may be nested lists or NumPy arrays, one to three dimensions, all the same shape;
 they are stored flat in row-major order.  The image descriptor and the struct's `schema_id` are
-per column.  These ingest and confirm like any other frame, but **cannot be queried back yet**:
-`query_samples()` returns scalar columns only, and the bucket query that returns the rest is
-[issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
+per column.  These ingest and confirm like any other frame.  `query_samples()` returns scalar
+columns only, so read them back with a bucket query, which returns each column in its stored form:
+
+```python
+# cookbook:partial
+params = QueryParams(
+    begin_time=datetime(2026, 2, 2, 18, 7, tzinfo=timezone.utc),
+    end_time=datetime(2026, 2, 2, 18, 8, tzinfo=timezone.utc),
+    pv_selector=PV.name_list(["BPMS:GUNB:314:WAVEFORM", "CAMR:GUNB:100:IMAGE", "BPMS:GUNB:314:STATE"]),
+)
+for page in client.query.iter_query_buckets(params):
+    for bucket in page.data_buckets:
+        print(bucket.pvName, bc.bucket_values(bucket))
+        # BPMS:GUNB:314:STATE [b'\x08\x01', b'\x08\x02']
+        # BPMS:GUNB:314:WAVEFORM [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+        # CAMR:GUNB:100:IMAGE [b'...png bytes...', b'...png bytes...']
+```
+
+The dims, image descriptor, and `schema_id` come back on the column; see
+[Whole buckets](query.md#whole-buckets-arrays-images-and-stored-metadata).  A column ingested with
+`dfb.serialized_column()` comes back serialized, payload and encoding intact, and is never decoded
+for you.
 
 ## Reading failures
 

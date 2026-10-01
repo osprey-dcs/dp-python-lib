@@ -1,7 +1,8 @@
 # Querying Time-Series Data
 
 Retrieving archived PV samples over a time range — by name, by what the PVs *are*, or by what the
-machine was *doing* — and getting the results into pandas or NumPy.
+machine was *doing* — and getting the results into pandas or NumPy, either as one aligned table of
+scalars or as the archive's [whole stored buckets](#whole-buckets-arrays-images-and-stored-metadata).
 
 See [API conventions](conventions.md) for result checking and paging.  The samples queried here
 are the ones [Ingesting data](ingestion.md) stores, and the metadata- and configuration-driven
@@ -36,6 +37,7 @@ from dp_python_lib.client import query_conversions as qc
 - [Scoping a query to a machine configuration](#scoping-a-query-to-a-machine-configuration)
 - [Getting results into pandas and NumPy](#getting-results-into-pandas-and-numpy)
 - [Large queries: paging and streaming](#large-queries-paging-and-streaming)
+- [Whole buckets: arrays, images, and stored metadata](#whole-buckets-arrays-images-and-stored-metadata)
 - [Also worth knowing](#also-worth-knowing)
 
 ## Model
@@ -384,13 +386,145 @@ for frame in qc.stream_query_samples_to_dataframes(client.query, params):
 Remember that **`limit` is the page size**, not a total cap.  To stop early, break out of the loop
 or use `itertools.islice`.
 
+## Whole buckets: arrays, images, and stored metadata
+
+Everything above is the **sample-oriented** query: one aligned table of scalar columns, trimmed to
+the range.  The **bucket-oriented** query returns the archive's stored units instead.  Each
+`DataBucket` holds one PV's column, in the type it was ingested as, over that bucket's own time
+axis.  Reach for it when you need:
+
+- **Array, image, struct, or serialized columns.**  `query_samples()` returns scalars only, so
+  this is the way to read back what the [ingestion recipe](ingestion.md#arrays-images-and-structures)
+  stores.
+- **The column metadata stored with the data**, provenance included.  The sample path returns
+  none; a bucket carries its column's `ColumnMetadata`.
+- **The stored time axis** — a `SamplingClock` comes back as a clock, not expanded.
+
+The methods take the same `QueryParams` and mirror the sample methods:
+`query_buckets()` (one page), `iter_query_buckets()` (every page), and
+`iter_query_buckets_stream()`.  The `bucket_conversions` module reads the results; its plain-Python
+half needs no extras.
+
+```python
+# cookbook:partial
+from dp_python_lib.client import bucket_conversions as bc
+
+params = QueryParams(
+    begin_time=datetime(2026, 2, 2, 18, 7, tzinfo=timezone.utc),
+    end_time=datetime(2026, 2, 2, 18, 8, tzinfo=timezone.utc),
+    pv_selector=PV.name_list(["BPMS:GUNB:314:WAVEFORM", "CAMR:GUNB:100:IMAGE"]),
+)
+for page in client.query.iter_query_buckets(params):
+    for bucket in page.data_buckets:
+        column = bc.bucket_column(bucket)           # the stored column message, whatever its type
+        print(bucket.pvName, type(column).__name__, bucket.providerName)
+        print("  at", bc.bucket_timestamps(bucket))  # epoch nanoseconds, exact
+        print("  values", bc.bucket_values(bucket))  # one entry per sample
+```
+
+`bucket_values()` gives one entry per sample: a native scalar, an enum's integer code, a flat list
+per array sample, or one `bytes` payload per image or struct sample.  The fields those samples
+cannot be read without stay on the column, through the `data_frame_conversions` accessors:
+
+```python
+# cookbook:partial
+for page in client.query.iter_query_buckets(params):
+    for bucket in page.data_buckets:
+        column = bc.bucket_column(bucket)
+        print(dfc.column_dimensions(column))      # [3] for the waveform; None for an image
+        print(dfc.image_descriptor_dict(column))  # width, height, channels, encoding; None otherwise
+        print(dfc.column_schema_id(column))       # a struct's schemaId; None otherwise
+        print(dfc.column_metadata_dict(column))   # tags, attributes, provenance
+```
+
+`bc.bucket_to_data_frame(bucket)` views a bucket as a one-column `common.DataFrame`, so any of the
+[calculations readers](datasets-and-annotations.md) work on it too.
+
+### Buckets come back whole
+
+The server returns **every bucket that overlaps `[begin_time, end_time)`, untrimmed**.  A query
+for a quarter of a second inside a one-second bucket returns the whole second.  Trimming is
+opt-in, exact, and half-open like `query_samples()`:
+
+```python
+# cookbook:partial
+begin = datetime(2026, 2, 2, 18, 4, 12, 250_000, tzinfo=timezone.utc)
+end = datetime(2026, 2, 2, 18, 4, 12, 500_000, tzinfo=timezone.utc)
+params = QueryParams(begin_time=begin, end_time=end, pv_selector=PV.name_list(["BPMS:GUNB:314:X"]))
+
+for page in client.query.iter_query_buckets(params):
+    for bucket in page.data_buckets:
+        trimmed = bc.trim_bucket(bucket, begin, end)   # None if no sample falls in the range
+        if trimmed is not None:
+            print(len(bc.bucket_timestamps(bucket)), "->", len(bc.bucket_timestamps(trimmed)))
+            # 10000 -> 2500
+```
+
+A trimmed `SamplingClock` bucket stays a clock, with its start moved to the first sample kept.
+
+**Trimming cannot remove configuration gaps.**  With `config_criteria`, a bucket spanning a gap
+between [two activations](#the-result-covers-several-disjoint-intervals) is returned once, whole,
+with the samples in the gap still in it, and trimming to `[begin_time, end_time)` leaves them
+there.  Use `query_samples()` when that matters.
+
+### One DataFrame per PV
+
+With the `[analysis]` extra, `query_buckets_to_dataframes()` runs the whole query and returns a
+`dict` of PV name to DataFrame.  A bucket result is not one table — each PV has its own axis and
+possibly its own column type — so there is no single-frame form.
+
+```python
+# cookbook:partial
+frames = bc.query_buckets_to_dataframes(client.query, params, trim=True, max_buckets=10_000)
+x = frames["BPMS:GUNB:314:X"]
+print(len(x), x.attrs["buckets"][0]["provider_name"])
+```
+
+Each frame has a UTC index and one column, named for the PV, with the dtype its stored type
+implies.  `df.attrs["buckets"]` describes every bucket in the frame (time span, sample count,
+provider, column metadata); `df.attrs["column_metadata"]` is present only when every bucket agrees.
+Array dims, image descriptors, struct schema ids, and enum ids are in `df.attrs` too.
+
+A PV's buckets are kept as stored: two ingests that overlap in time both appear, so the index can
+repeat instants.  A PV whose buckets differ in column type or structure — ingested as doubles one
+day and int32 the next, say — raises `ValueError` naming both, rather than being coerced.
+
+### Paging, streaming, and what `limit` counts
+
+On this path **`limit` counts buckets, not rows**.  A page can also end early, with a page token,
+once it reaches the server's message-size budget, and the server silently caps `limit` at its
+configured maximum (100,000 by default).  `iter_query_buckets()` follows the tokens for you.
+
+The stream has no tokens.  A PV's buckets can arrive across several messages, so collect them all
+and convert once:
+
+```python
+# cookbook:partial
+buckets = []
+for message in client.query.iter_query_buckets_stream(params):
+    buckets.extend(message.data_buckets)
+frames = bc.buckets_to_dataframes(buckets, time_range=(params.begin_timestamp, params.end_timestamp))
+```
+
+### Two refusals
+
+- **A `sample_status_filter` is refused** with a `ValueError` before any call is made.  The server
+  rejects status filtering on bucket queries, and dropping the filter would hand back data you
+  believed was filtered.  Filter with `query_samples()`, or drop the filter yourself.
+- **A serialized column is passed through, never decoded.**  It comes back only if it was ingested
+  as one (`dfb.serialized_column()`).  `bc.bucket_column(bucket)` returns it with its `encoding`
+  and `payload`; `bucket_values()` and the DataFrame conversions raise `ValueError` rather than
+  drop it.
+
 ## Also worth knowing
 
 - **Half-open range.**  `[begin_time, end_time)` — a sample exactly at `end_time` is excluded.
-  Sample-oriented queries trim to the exact range, unlike bucket-oriented ones.
-- **Serialized columns are deferred.**  The client always requests dense columns
+  Sample-oriented queries trim to the exact range; bucket-oriented ones return
+  [whole buckets](#buckets-come-back-whole).
+- **Serialized sample results are deferred.**  The client always requests dense columns
   (`useSerializedColumns = False`).  A `ColumnTable` carrying `serializedDataColumns` raises
-  `NotImplementedError` in the conversion layer.
+  `NotImplementedError` in the conversion layer.  (A column *ingested* serialized is a different
+  thing; read it back with a [bucket query](#two-refusals).)
 - **Duplicate column names raise.**  Both conversions key columns by `DataColumn.name`, so a table
   with two identically-named columns raises `ValueError` rather than silently dropping one.
 - **`valueStatus` is gone.**  `DataValue.valueStatus` was removed in dp-grpc 1.16.0 (field 15 is
@@ -398,8 +532,6 @@ or use `itertools.islice`.
   flagged samples outright.  It was never populated in `querySamples()` results before that.
 - **An empty result is not an error** — success with an empty table means nothing matched the
   range and selector.
-- **Bucket-oriented queries (`queryBuckets`) are not yet wrapped** by this library; see
-  [issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
 
 ### How far these examples have been verified
 
@@ -414,3 +546,10 @@ real output; and paging, streaming, `query_samples_to_dataframe()`, and
 `tests/integration/test_query_client_integration.py` pins the data path itself: values and
 timestamps round-trip exactly, the range is half-open at both bounds, columns on different clocks
 align with gaps rather than zeros, and pages at a small `limit` concatenate in order.
+
+The [whole buckets](#whole-buckets-arrays-images-and-stored-metadata) examples were run the same
+way, straight after the ingestion recipe's frames: the array, image, and struct read-back printed
+what the ingestion recipe shows, and the quarter-second trim cut a 10,000-sample bucket to 2,500.
+`tests/integration/test_query_buckets_integration.py` pins the rest: a clock axis returned
+verbatim, whole boundary buckets, `limit` counting buckets across pages, the stream matching the
+unary pages, and column metadata read back and excluded.

@@ -190,9 +190,8 @@ dimensions, an `ImageColumn` without a complete image descriptor, a `StructColum
 anyway, so nothing that used to be accepted end to end is lost.  `enum_column()` likewise now
 rejects a whitespace-only `enum_id`.
 
-Non-scalar columns (arrays, images, structs) can be ingested, but not yet read back through the
-query API, which returns scalar columns only; reading them back is
-[#16](https://github.com/osprey-dcs/dp-python-lib/issues/16).
+Non-scalar columns (arrays, images, structs) are read back with the bucket query, since the sample
+query returns scalar columns only; see [Querying whole buckets](#querying-whole-buckets-issue-16).
 
 A new cookbook recipe, [Ingesting data](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md), walks through registering,
 ingesting, confirming, chunking, and streaming.  It was run end to end against a live MLDP stack, as
@@ -258,6 +257,12 @@ Behaviors worth knowing:
   so a per-PV frame's index can repeat instants.  A PV whose buckets differ in column type or
   structure (say, ingested as double and later as int32) raises, naming both buckets.  Per-bucket
   provider and column metadata is in `df.attrs["buckets"]`.
+
+The [query recipe](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/query.md#whole-buckets-arrays-images-and-stored-metadata)
+has a new section on bucket queries, and the [ingestion recipe](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md#arrays-images-and-structures)
+now reads its array, image, and struct columns back.  Both were run against a live MLDP stack, and
+new integration tests read array, image, struct, and serialized columns back exactly, along with
+the column metadata stored with a column.
 
 See [#16](https://github.com/osprey-dcs/dp-python-lib/issues/16) and `plan/tickets/16/plan.md`.
 

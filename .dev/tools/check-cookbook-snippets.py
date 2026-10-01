@@ -132,6 +132,7 @@ from dp_python_lib.client import query_conversions as qc
 from dp_python_lib.client import sample_status_conversions as ssc
 from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client import data_frame_conversions as dfc
+from dp_python_lib.client import bucket_conversions as bc
 
 client: MldpClient = MldpClient()
 # client.annotation and client.query are typed `X | None`, which is honest: they are None when MldpClient is given

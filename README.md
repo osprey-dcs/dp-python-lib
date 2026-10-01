@@ -76,6 +76,12 @@ for their service.
   transparent paging (`query_samples()` / `iter_query_samples()`) and server-streaming
   (`iter_query_samples_stream()`).  Results convert to pandas DataFrames, NumPy arrays, and Excel
   via the optional `[analysis]` extra.
+- **v2 query API (buckets)** — `client.query`.  The archive's stored buckets, whole, over the same
+  `QueryParams`: `query_buckets()`, `iter_query_buckets()`, and `iter_query_buckets_stream()`.  Each
+  bucket keeps its stored column type, time axis, and column metadata, so this is how array, image,
+  struct, and serialized columns are read back.  `bucket_conversions` reads them in plain Python,
+  trims them exactly to a range on request, and, with the `[analysis]` extra, assembles one pandas
+  DataFrame per PV.  See [whole buckets](doc/cookbook/query.md#whole-buckets-arrays-images-and-stored-metadata).
 - **DataSets** — `client.annotation.datasets`.  Name a region of the archive (time ranges plus the
   PVs covered over them) so it can be found, annotated, and exported later: `save_dataset()`,
   `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, and a
@@ -113,8 +119,6 @@ older than your `dp_python_lib` will not implement everything listed here.  The 
 - **Ingestion Service**
   - `subscribeData()` — receive data for specified PVs from the ingestion stream
 - **Query Service**
-  - `queryBuckets()` / `queryBucketsStream()` — raw data buckets
-    ([issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16))
   - `queryData()` — bucketed PV time-series data
   - `queryTable()` — PV time-series data in tabular format
   - `queryPvStats()` — archive ingestion statistics for PVs
@@ -202,7 +206,7 @@ the recipes share one continuous worked example drawn from an accelerator facili
 | [Cataloguing PVs](doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
 | [Recording machine configuration](doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
 | [Ingesting data](doc/cookbook/ingestion.md) | Registering a provider, sending frames of samples, confirming they landed, and chunking data too big for one message |
-| [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel |
+| [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel; reading whole stored buckets, including array, image, and struct columns |
 | [Labeling samples](doc/cookbook/sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
 | [DataSets and annotations](doc/cookbook/datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, and exporting |
 
