@@ -158,6 +158,23 @@ so, in the draft, guesses it.  Only real ones count -- a heading or command at t
 identity with a value, a changelog line at the start of a line -- because the draft's own checklist
 names all four in prose, and the self-test holds that prose to passing.
 
+**Links in the notes are checked too** (#70; the rules, R1–R5 and N1–N3, are osprey-dcs/data-platform#98
+and the script's docstring).  A `rel-*.md` may have no relative links (they 404 in a release body),
+and every `github.com/osprey-dcs/<repo>/blob|tree/<ref>` or `raw.githubusercontent.com` link, into
+any of the five repos, must be pinned to the file's own tag: `main` drifts, and a tag copied from the
+previous notes is stale.  The one exception is a full 40-character commit SHA, for a target that did
+not exist at the tag; rel-1.16.0's `README.env` link is pinned that way, because the verification
+section was added after the release and `blob/rel-1.16.0/README.env` is a 404.  Paths and `#anchors`
+into this repo must exist in the working tree, and an anchor may not point at a duplicated heading.
+No `rel-<version>`, `<version>`, or `<previous>` placeholder may be left.  `NEXT.md` is the other way
+round: links stay on `main`, and their paths and anchors are checked, so renaming a heading it links
+to fails the renaming PR.  **Which notes count as already released:** every `rel-*.md` except the
+highest version.  Those get only the form rules (relative links, pinning, placeholders), since
+checking an immutable file against today's tree would fail it the first time a heading is renamed.
+The script is copied verbatim into dp-grpc, dp-service, dp-desktop-app, and data-platform, which
+differ only in the configuration block at its top (repository name and which signing-identity rules
+apply); it already carries their cosign rules, self-tested, so a fix here is ported by copying the file.
+
 **Never edit a release page by hand.**  Fix the notes file by PR, then republish with
 `gh release edit rel-X.Y.Z --notes-file doc/release-notes/rel-X.Y.Z.md`.  With the file as the
 whole body that is lossless; when the workflow appended a verification section, exactly this
