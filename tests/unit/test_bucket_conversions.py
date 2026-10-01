@@ -264,6 +264,8 @@ class TestTrimBucket(unittest.TestCase):
             with self.subTest(begin=begin, end=end), self.assertRaises(ValueError) as ctx:
                 bc.trim_bucket(bucket, self._ns(begin), self._ns(end))
             self.assertIn("strictly before", str(ctx.exception))
+            # Names trim_bucket()'s own parameters, not a time_range it was never passed.
+            self.assertTrue(str(ctx.exception).startswith("trim_bucket() requires"), str(ctx.exception))
 
     def test_array_bucket_trims_in_whole_samples(self):
         column = dfb.double_array_column("PV:W", [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]], [[9.0] * 2] * 2])
@@ -407,6 +409,30 @@ class TestBucketsToDataFrames(unittest.TestCase):
         self.assertNotIn("column_metadata", attrs)
         self.assertEqual([e["column_metadata"]["tags"] for e in attrs["buckets"]], [["run-0"], ["run-1"]])
 
+    def test_absent_metadata_is_none_not_an_empty_summary(self):
+        # What a bucket looks like after the query set excludeColumnMetadata: no metadata field at all.
+        buckets = [_double_bucket("PV:A", count=2), _double_bucket("PV:A", count=2, start_nanos=T0_NANOS + 10 * PERIOD)]
+        self.assertFalse(bc.bucket_column(buckets[0]).HasField("metadata"))
+        attrs = bc.buckets_to_dataframes(buckets)["PV:A"].attrs
+        self.assertNotIn("column_metadata", attrs)
+        self.assertEqual([entry["column_metadata"] for entry in attrs["buckets"]], [None, None])
+
+    def test_mixed_present_and_absent_metadata_is_kept_per_bucket_only(self):
+        with_metadata = _bucket(
+            "PV:A", _clock(2), dfb.double_column("PV:A", [1.0, 2.0], metadata=dfb.column_metadata(tags=["t"]))
+        )
+        without = _double_bucket("PV:A", count=2, start_nanos=T0_NANOS + 10 * PERIOD)
+        attrs = bc.buckets_to_dataframes([with_metadata, without])["PV:A"].attrs
+        self.assertNotIn("column_metadata", attrs)
+        self.assertEqual(attrs["buckets"][0]["column_metadata"]["tags"], ["t"])
+        self.assertIsNone(attrs["buckets"][1]["column_metadata"])
+
+    def test_stored_column_name_is_recorded(self):
+        bucket = _bucket("PV:A", _clock(2), dfb.double_column("stored-name", [1.0, 2.0]))
+        df = bc.buckets_to_dataframes([bucket])["PV:A"]
+        self.assertEqual(list(df.columns), ["PV:A"])
+        self.assertEqual(df.attrs["buckets"][0]["column_name"], "stored-name")
+
     def test_exclude_column_metadata_keeps_structural_attrs(self):
         bucket = _bucket(
             "PV:E", _clock(3), dfb.enum_column("PV:E", [0, 1, 2], "mode:v1", metadata=dfb.column_metadata(tags=["t"]))
@@ -434,6 +460,17 @@ class TestBucketsToDataFrames(unittest.TestCase):
         self.assertIn("PV:A", message)
         self.assertIn(str(T0_NANOS), message)
         self.assertIn(str(T0_NANOS + 10 * PERIOD), message)
+        self.assertIn("has DoubleColumn,", message)
+        self.assertIn("has Int32Column)", message)
+        self.assertNotIn("None", message)
+
+    def test_structure_mismatch_message_names_the_field(self):
+        a1 = _bucket("PV:A", _clock(2), dfb.enum_column("PV:A", [0, 1], "a:v1"))
+        a2 = _bucket("PV:A", _clock(2, start_nanos=T0_NANOS + 10 * PERIOD), dfb.enum_column("PV:A", [0, 1], "b:v1"))
+        with self.assertRaises(ValueError) as ctx:
+            bc.buckets_to_dataframes([a1, a2])
+        self.assertIn("EnumColumn (enumId 'a:v1')", str(ctx.exception))
+        self.assertIn("EnumColumn (enumId 'b:v1')", str(ctx.exception))
 
     def test_structure_mismatch_raises(self):
         cases = {
@@ -512,6 +549,7 @@ class TestBucketsToDataFrames(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             bc.buckets_to_dataframes([_double_bucket()], time_range=(same, same))
         self.assertIn("strictly before", str(ctx.exception))
+        self.assertTrue(str(ctx.exception).startswith("time_range requires"), str(ctx.exception))
 
     def test_repeated_timestamps_convert(self):
         nanos = [T0_NANOS, T0_NANOS, T0_NANOS + 1]

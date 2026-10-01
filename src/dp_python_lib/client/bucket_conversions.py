@@ -28,12 +28,11 @@ from typing import Any
 
 from dp_python_lib.client import data_frame_conversions as dfc
 
-# _slice_frame() and _time_range() are private to data_frame.py, which is the shared, kind-neutral home of the
-# DataFrame builders rather than a feature module.  Reusing them keeps one implementation of the integer-nanosecond
-# SamplingClock shift and of the "begin strictly before end" rule and its message.
-from dp_python_lib.client.data_frame import _COLUMN_FIELD_BY_TYPE, _slice_frame, _time_range
+# _slice_frame() is private to data_frame.py, which is the shared, kind-neutral home of the DataFrame builders rather
+# than a feature module.  Reusing it keeps one implementation of the integer-nanosecond SamplingClock shift.
+from dp_python_lib.client.data_frame import _COLUMN_FIELD_BY_TYPE, _slice_frame
 from dp_python_lib.client.sample_status_conversions import expand_data_timestamps
-from dp_python_lib.client.time_conversions import TimestampInput, to_epoch_nanos
+from dp_python_lib.client.time_conversions import TimestampInput, to_epoch_nanos, to_timestamp
 from dp_python_lib.grpc import common_pb2
 
 
@@ -166,17 +165,23 @@ def bucket_values(bucket: common_pb2.DataBucket) -> list:
     return _aligned_values(bucket, column, len(bucket_timestamps(bucket)))
 
 
-def _range_nanos(begin: TimestampInput, end: TimestampInput) -> tuple[int, int]:
+def _range_nanos(begin: TimestampInput, end: TimestampInput, caller: str) -> tuple[int, int]:
     """
     Converts a (begin, end) pair to epoch nanoseconds, requiring begin strictly before end.
 
     A reversed or empty range is rejected rather than trimming to nothing, which would be indistinguishable from a
-    valid range that simply holds no samples.
+    valid range that simply holds no samples.  The rule and the message's shape are data_frame._time_range()'s, but
+    the message names the caller's own parameter (trim_bucket()'s begin/end, or time_range=).
 
+    :param caller: How the range was passed, e.g. "trim_bucket()" or "time_range"; starts the error message.
     :raises ValueError: if begin is not strictly before end, or either bound is not a supported time input.
     """
-    time_range = _time_range((begin, end))
-    return to_epoch_nanos(time_range.beginTime), to_epoch_nanos(time_range.endTime)
+    begin_nanos, end_nanos = to_epoch_nanos(to_timestamp(begin)), to_epoch_nanos(to_timestamp(end))
+    if begin_nanos >= end_nanos:
+        raise ValueError(
+            f"{caller} requires begin strictly before end; got begin {begin_nanos} ns and end {end_nanos} ns"
+        )
+    return begin_nanos, end_nanos
 
 
 def _first_out_of_order(epoch_nanos: list[int]) -> int | None:
@@ -247,7 +252,7 @@ def trim_bucket(
     :raises ValueError: if begin is not strictly before end; if the bucket is malformed, holds a SerializedDataColumn
         (an opaque payload cannot be sliced), is not aligned with its axis, or has a decreasing time axis.
     """
-    begin_nanos, end_nanos = _range_nanos(begin, end)
+    begin_nanos, end_nanos = _range_nanos(begin, end, "trim_bucket()")
     return _trim_nanos(bucket, begin_nanos, end_nanos)
 
 
@@ -303,6 +308,21 @@ def _structure(column: Any) -> tuple:
     )
 
 
+def _describe_structure(structure: tuple) -> str:
+    """Renders a _structure() tuple for an error message, e.g. "EnumColumn (enumId 'mode:v1')"."""
+    kind, enum_id, dims, descriptor, schema_id = structure
+    details = []
+    if enum_id is not None:
+        details.append(f"enumId {enum_id!r}")
+    if dims is not None:
+        details.append(f"dims {list(dims)}")
+    if descriptor is not None:
+        details.append("image " + ", ".join(f"{key}={value!r}" for key, value in descriptor))
+    if schema_id is not None:
+        details.append(f"schemaId {schema_id!r}")
+    return f"{kind} ({'; '.join(details)})" if details else kind
+
+
 def _check_consistent(pv_name: str, buckets: list[common_pb2.DataBucket]) -> None:
     """
     Rejects a PV whose buckets differ in column kind or structure, which cannot be concatenated into one column.
@@ -320,23 +340,29 @@ def _check_consistent(pv_name: str, buckets: list[common_pb2.DataBucket]) -> Non
         if actual != expected:
             raise ValueError(
                 f"PV '{pv_name}' has buckets with different column kinds or structure (the bucket starting at "
-                f"{_first_nanos(first)} ns has {expected}, the one starting at {_first_nanos(bucket)} ns has "
-                f"{actual}), so they cannot form one column; read them separately with bucket_to_data_frame() or "
-                f"bucket_values()"
+                f"{_first_nanos(first)} ns has {_describe_structure(expected)}, the one starting at "
+                f"{_first_nanos(bucket)} ns has {_describe_structure(actual)}), so they cannot form one column; "
+                f"read them separately with bucket_to_data_frame() or bucket_values()"
             )
 
 
 def _bucket_descriptor(bucket: common_pb2.DataBucket, epoch_nanos: list[int], exclude_column_metadata: bool) -> dict:
     """The per-bucket entry of df.attrs["buckets"]."""
+    column = bucket_column(bucket)
     descriptor: dict[str, Any] = {
         "first_nanos": epoch_nanos[0],
         "last_nanos": epoch_nanos[-1],
         "sample_count": len(epoch_nanos),
         "provider_id": bucket.providerId,
         "provider_name": bucket.providerName,
+        # The frame's column is named for the PV; this is the name the column was actually stored under.
+        "column_name": column.name,
     }
     if not exclude_column_metadata:
-        descriptor["column_metadata"] = dfc.column_metadata_dict(bucket_column(bucket))
+        # None, not column_metadata_dict()'s empty containers, when the bucket carries no metadata at all -- as
+        # when the query itself set excludeColumnMetadata, which a page's to_dataframes() cannot know.  An empty
+        # summary would read as metadata the server returned.
+        descriptor["column_metadata"] = dfc.column_metadata_dict(column) if column.HasField("metadata") else None
     return descriptor
 
 
@@ -347,8 +373,9 @@ def _pv_dataframe(pd: Any, pv_name: str, buckets: list[common_pb2.DataBucket], e
     for bucket in buckets:
         frame = bucket_to_data_frame(bucket)
         part = dfc.data_frame_to_pandas(frame, exclude_column_metadata=True)
-        # The column is named for the ingested column, which ingestion makes the PV name; name it for the PV
-        # regardless, so every part concatenates into the one column.
+        # Ingestion names a bucket's column for its PV, but the stored name is not guaranteed to match; name it for
+        # the PV regardless, so every part concatenates into the one column.  The stored name stays in
+        # attrs["buckets"][i]["column_name"].
         part.columns = [pv_name]
         parts.append(part)
         descriptors.append(_bucket_descriptor(bucket, dfc.data_frame_timestamps(frame), exclude_column_metadata))
@@ -374,7 +401,7 @@ def _pv_dataframe(pd: Any, pv_name: str, buckets: list[common_pb2.DataBucket], e
         # Each ingest carries its own metadata, so a PV's buckets can legitimately differ.  The per-PV summary is set
         # only when they agree; the per-bucket copies in attrs["buckets"] are always there.
         first_metadata = descriptors[0]["column_metadata"]
-        if all(entry["column_metadata"] == first_metadata for entry in descriptors[1:]):
+        if first_metadata is not None and all(entry["column_metadata"] == first_metadata for entry in descriptors[1:]):
             attrs["column_metadata"] = {pv_name: first_metadata}
     df.attrs = attrs
     return df
@@ -397,8 +424,11 @@ def buckets_to_dataframes(
 
     df.attrs carries:
       - "buckets": one dict per bucket in the frame, with 'first_nanos', 'last_nanos', 'sample_count',
-        'provider_id', 'provider_name', and (unless exclude_column_metadata) 'column_metadata'.
-      - "column_metadata": {pv: dict}, only when every bucket's metadata is identical and not excluded.
+        'provider_id', 'provider_name', 'column_name' (the name the column was stored under; the frame's column is
+        always named for the PV), and (unless exclude_column_metadata) 'column_metadata': a dict, or None when the
+        bucket carries no metadata -- e.g. because the query set exclude_column_metadata.
+      - "column_metadata": {pv: dict}, only when every bucket carries metadata, all identical, and it is not
+        excluded.
       - "enum_ids", "dimensions", "image_descriptors", "schema_ids": {pv: value} for the column kinds that carry
         them.  These are structural -- the values cannot be interpreted without them -- so they are present even
         under exclude_column_metadata.
@@ -423,7 +453,7 @@ def buckets_to_dataframes(
     """
     pd = _require_pandas()
 
-    range_nanos = _range_nanos(*time_range) if time_range is not None else None
+    range_nanos = _range_nanos(*time_range, "time_range") if time_range is not None else None
 
     frames: dict[str, Any] = {}
     for pv_name, group in buckets_by_pv(buckets).items():

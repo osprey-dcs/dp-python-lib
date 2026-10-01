@@ -588,7 +588,9 @@ class QueryBucketsApiResult(ApiResultBase):
 
         :param time_range: Optional (begin, end) to trim each bucket to [begin, end) exactly; None (the default)
             leaves the buckets whole, as the server returned them.
-        :param exclude_column_metadata: If True, do not attach per-bucket ColumnMetadata to the DataFrames.
+        :param exclude_column_metadata: If True, do not attach per-bucket ColumnMetadata to the DataFrames.  When
+            the query itself excluded metadata, leaving this False reports each bucket's metadata as None (absent),
+            not as an empty summary.
         :return: A dict of PV name to pandas.DataFrame.
         """
         from dp_python_lib.client import bucket_conversions
