@@ -105,6 +105,11 @@ Abbreviations: `RES` = `query/handler/QueryV2Resolver.java`, `MQC` =
     ingest comes back as `dataColumn`.  A column ingested as a `SerializedDataColumn` comes back as one, with
     its `encoding` and `payload`.
   - The axis is the **ingested `DataTimestamps` verbatim**, so a `SamplingClock` stays a `SamplingClock`.
+  - A stored `TimestampList` is **non-decreasing, with duplicates allowed**: ingestion rejects a decreasing
+    list (`ingest/handler/IngestionValidationUtility.java` L172-177, `"... is not non-decreasing"`, enforced
+    since rel-1.13.0).  That is looser than this library's write path, which requires *strictly* increasing
+    timestamps (`timestamp_list()`, `timestamp_count()`), so a bucket another client ingested can carry
+    duplicate timestamps that the client would refuse to write.
   - The column's `name` is the ingested column name.  Ingestion keys the bucket by that name, so it equals
     `pvName`.
   - `providerId` / `providerName` are the ingesting provider *of that bucket*.  The proto's "most recent
@@ -192,15 +197,28 @@ Abbreviations: `RES` = `query/handler/QueryV2Resolver.java`, `MQC` =
 - **D5 — Trimming is exact, opt-in, and done at the proto level** (Q2).  `trim_bucket(bucket, begin, end) ->
   DataBucket | None` keeps rows with `begin <= t < end`, compared as integer epoch nanoseconds, and returns
   `None` when nothing is left.  It reuses `data_frame._slice_frame()`, so a `SamplingClock` bucket stays a
-  `SamplingClock` with a shifted start.  The row bounds come from a bisect on the expanded axis, or
-  arithmetically for a clock.  Rows are selected by the half-open rule `querySamples` uses, but never
-  re-ordered, so a `TimestampList` that is not sorted is scanned rather than bisected.  The pandas conversions
-  take `time_range=(begin, end)`, default `None`, meaning untrimmed.  The whole-query convenience takes
-  `trim=False` and uses the params' own range when set.  The docs state the limit from T4: trimming removes
-  samples outside `[begin, end)` but not samples in gaps between configuration intervals, and a caller who
-  needs either exactly should use `querySamples`.  A serialized bucket cannot be trimmed (its payload is
-  opaque), so `trim_bucket()` raises on one rather than returning it whole.  Rejected: trimming by default,
-  which hides what the server returned.
+  `SamplingClock` with a shifted start.  `_slice_frame()` takes one contiguous row span, which is exact here
+  because a stored axis is non-decreasing (T6): the row bounds come from `bisect_left` for both `begin` and
+  `end` on the expanded axis (correct with duplicate timestamps under the half-open rule), or arithmetically
+  for a clock.  An axis that *is* decreasing -- corrupt, or written before rel-1.13.0 -- raises `ValueError`
+  naming the PV and the first out-of-order position rather than being scanned, since no contiguous span can
+  trim it exactly.  The pandas conversions take `time_range=(begin, end)`, default `None`, meaning untrimmed.
+  The whole-query convenience takes `trim=False` and uses the params' own range when set.  The docs state the
+  limit from T4: trimming removes samples outside `[begin, end)` but not samples in gaps between
+  configuration intervals, and a caller who needs either exactly should use `querySamples`.  A serialized
+  bucket cannot be trimmed (its payload is opaque), so `trim_bucket()` raises on one rather than returning it
+  whole.  Rejected: trimming by default, which hides what the server returned.
+  - **`begin` must be strictly before `end`**, on `trim_bucket()` and on every `time_range=`, raising
+    `ValueError` otherwise.  A reversed or empty range would otherwise return `None`, indistinguishable from a
+    valid range with no samples.  This reuses the check (and message) `data_frame.py` already applies to a
+    provenance `time_range`, as `QueryParams` and `data_block()` do for theirs.
+  - **Read-side checks only.**  A bucket is server data, not something the client is about to write, so
+    `bucket_to_data_frame()`, `trim_bucket()`, and the pandas path never call `validate_data_frame()` or
+    `timestamp_count()`: their strictly-increasing rule would make a bucket with duplicate timestamps (T6)
+    unreadable.  Instead, `trim_bucket()` first runs the read-side alignment check `data_frame_conversions`
+    uses (one sample per timestamp by the column kind's count rule, raising on absent array dims).
+    `_slice_frame()` documents its input as already validated, and on an array column with no `dims` it falls
+    back to a block of 1 and slices silently wrong, so this check is what makes reusing it safe.
 
 - **D6 — Serialized buckets are passed through in pure Python and refused in pandas.**
   `bucket_column(bucket)` returns whichever column arm is set, a `SerializedDataColumn` included, so the
@@ -214,6 +232,10 @@ Abbreviations: `RES` = `query/handler/QueryV2Resolver.java`, `MQC` =
   UTC `DatetimeIndex` built from int64 nanoseconds, and one column named for the PV, with the narrow dtype its
   column type implies.  It is produced by running `data_frame_to_pandas()` on each wrapped bucket and
   concatenating, so dtypes, `enum_ids`, and array/image handling are the calculations path's, unchanged.
+  **The combined frame's `attrs` are rebuilt from scratch after concatenation**, never inherited from it:
+  how `pd.concat` propagates `attrs` has varied across pandas versions.  `enum_ids` is carried even under
+  `exclude_column_metadata=True`, as `data_frame_to_pandas()` does, since without it the column cannot be
+  rebuilt as an enum.
   - **Consistency across a PV's buckets is checked, fail-loud.**  A PV whose buckets differ in column kind
     (ingested as double, later as int32), or in a structural field (`enumId`, array dims, image descriptor,
     `schemaId`), raises `ValueError` naming the PV and both first timestamps, and points at the per-bucket
@@ -298,11 +320,15 @@ Abbreviations: `RES` = `query/handler/QueryV2Resolver.java`, `MQC` =
   - every one of the 16 arms through `bucket_to_data_frame()` and `bucket_values()`;
   - both axis forms, with nanosecond exactness at a present-day epoch;
   - trimming at both bounds (a sample exactly at `end` excluded, one exactly at `begin` kept), a
-    `SamplingClock` start shift, trim-to-nothing returning `None`, an unsorted `TimestampList`, and a
-    serialized bucket raising;
+    `SamplingClock` start shift, trim-to-nothing returning `None`, duplicate timestamps sitting exactly at
+    each bound, a decreasing `TimestampList` raising, `begin >= end` raising (on `trim_bucket()` and on
+    `time_range=`), an array bucket with absent dims raising rather than slicing, and a serialized bucket
+    raising;
+  - a bucket with duplicate timestamps converting and trimming without error (no write-side validation);
   - grouping with interleaved PVs and out-of-order buckets;
   - the kind- and structure-mismatch errors;
-  - uniform versus differing metadata in `attrs`, and `exclude_column_metadata`;
+  - uniform versus differing metadata in `attrs`, and `exclude_column_metadata` (with `enum_ids` still
+    present on an enum PV);
   - a legacy `DataColumn` gap becoming `None`;
   - a serialized bucket reachable through `bucket_column()` and refused by the pandas path;
   - `max_buckets`.
@@ -333,7 +359,8 @@ entries.
     status filter is samples-only);
   - `README.md`'s TODO and feature list;
   - the `NEXT.md` paragraph at L192-194.
-- `CLAUDE.md`: a "Bucket Query API" section recording T4–T6 and D2/D5–D7 as invariants, plus the
+- `CLAUDE.md`: a "Bucket Query API" section recording T4–T6 and D2/D5–D7 as invariants (including the
+  read-side-checks-only rule and why the stored axis can carry duplicates), plus the
   `_build_query_spec()` and "until #16" lines.
 - Run the cookbook snippet checker, and run the new and changed recipes as one continuous script against a
   live stack (the #6 lesson).
