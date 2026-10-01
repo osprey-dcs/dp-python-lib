@@ -579,9 +579,10 @@ def check_cosign(name: str, tag: str, text: str, cfg: Config) -> list[str]:
                 )
     if cfg.cosign_image:
         for m in re.finditer(rf"{re.escape(cfg.cosign_image)}:(rel-[^\s'\"`)]*)", text):
-            if m.group(1) != tag:
+            image_tag = m.group(1).rstrip(".,;:!?")  # sentence punctuation after an unquoted image in prose
+            if image_tag != tag:
                 problems.append(
-                    f"{name}:{line_of(text, m.start())}: image {cfg.cosign_image}:{m.group(1)}, expected :{tag}"
+                    f"{name}:{line_of(text, m.start())}: image {cfg.cosign_image}:{image_tag}, expected :{tag}"
                 )
     if cfg.cosign_identity_regexp:
         for pos, regexp in option_values("--certificate-identity-regexp", text):
@@ -919,6 +920,7 @@ def _self_test_cosign() -> list[str]:
         f"cosign verify-blob --certificate-identity '{service_blob}' {issuer} SHA256SUMS\n"
         f"cosign verify --certificate-identity '{service_image}' \\\n  {issuer} \\\n"
         f"  ghcr.io/osprey-dcs/dp-service:{_TAG}\n"
+        f"Pull ghcr.io/osprey-dcs/dp-service:{_TAG}. Or run ghcr.io/osprey-dcs/dp-service:{_TAG}, then verify.\n"
         "Prose naming `--certificate-identity` is not an identity.\n"
     )
 
@@ -960,6 +962,11 @@ def _self_test_cosign() -> list[str]:
             "dp-service: a stale image identity",
             service,
             service_good.replace(service_image, ident("dp-service", "release-image.yml", stale)),
+        ),
+        (
+            "dp-service: a pre-release image tag before a period",
+            service,
+            service_good.replace(f"dp-service:{_TAG}.", f"dp-service:{_TAG}-rc1."),
         ),
         ("dp-service: a stale image tag", service, service_good.replace(f"dp-service:{_TAG}", f"dp-service:{stale}")),
         ("dp-service: an identity for another workflow", service, service_good.replace("release-image.yml", "ci.yml")),
