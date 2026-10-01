@@ -1,8 +1,8 @@
 """
 Pythonic conversions for common.DataFrame (issue #6, Phase 2 and 3).
 
-Reads a DataFrame -- an annotation's calculations, and in future a bucket query's typed columns -- back into plain
-Python, and, behind the optional [analysis] extra, into pandas.
+Reads a DataFrame -- an annotation's calculations, or a bucket query's bucket viewed as a one-column frame (see
+bucket_conversions, #16) -- back into plain Python, and, behind the optional [analysis] extra, into pandas.
 
 The pure-Python half has no third-party dependencies.  pandas is imported lazily inside each entry point that needs
 it, so importing this module never requires the extra.
@@ -11,8 +11,8 @@ Design decisions (see plan/tickets/6/plan.md, D7):
   - Timestamps are computed in INTEGER NANOSECONDS via expand_data_timestamps(), never in float seconds.  A float64
     carries 53 bits of mantissa and present-day epoch nanoseconds need ~61, so a float round-trip would silently
     move every timestamp.  The pandas index is built from those int64 nanoseconds directly for the same reason.
-  - column_values() is written as a standalone per-column converter because the bucket query (#16) reuses these
-    same 14 typed column messages; it takes one column and needs to know nothing about the frame.
+  - column_values() is written as a standalone per-column converter because the bucket query (#16) carries these
+    same typed column messages one per bucket; it takes one column and needs to know nothing about the frame.
   - Array columns are reshaped into one list per sample using their declared dims, rather than returned flat: a
     flat list would silently lose the sample boundaries.
   - Dense typed columns cannot express a gap, so the pandas->DataFrame direction rejects NaN/None fail-loud with a
@@ -235,8 +235,8 @@ def column_values(column: Any) -> list:
     """
     Extracts one Python value per sample from any supported column message.
 
-    Written as a standalone converter because the bucket query (#16) carries the same 14 typed column messages and
-    can reuse this without going through a DataFrame.
+    Written as a standalone converter because a bucket query result (#16) carries the same typed column messages,
+    one per bucket; bucket_conversions.bucket_values() reuses it without going through a DataFrame.
 
     Mapping: typed scalar columns yield their native values; an EnumColumn yields its integer codes (the enumeration
     naming them is `enumId` on the column); an array column yields one list per sample; an ImageColumn yields one
