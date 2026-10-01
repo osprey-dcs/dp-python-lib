@@ -29,7 +29,8 @@ fail; R5 runs on the raw text, because the placeholders it catches live in code 
     R4  For tag-pinned links into this repo's .md files with a `#anchor`, and for same-document `#anchor` links,
         the anchor is a heading slug (or an `<a name>`/`id`) in the target, and that heading is not duplicated
         there.  A duplicated heading is what silently moves an anchor to `-1`.  A duplicate no link points at is
-        left alone, since there is nothing for it to move.
+        left alone, since there is nothing for it to move.  A `#L<n>` line anchor is accepted on a blob link and
+        rejected on a same-document link, since a release body has no line anchors.
     R5  No template placeholder left: `rel-<version>` or `<previous>`.  A bare `<version>` is allowed: it is
         used deliberately in prose that survives the cut, such as a `<name>-<version>.jar.sha256` file pattern.
 
@@ -241,9 +242,9 @@ def strip_code(text: str) -> str:
 
 
 # Inline link or image: `](target`, optionally <wrapped>.  Reference definition: `[label]: target` at the start of
-# a line (a footnote definition, `[^1]:`, is not a link).
+# a line, the target on the same line or the next (a footnote definition, `[^1]:`, is not a link).
 INLINE_TARGET_RE = re.compile(r"\]\(\s*(<[^>\n]*>|[^\s)]+)")
-REFDEF_TARGET_RE = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^>\n]*>|\S+)", re.MULTILINE)
+REFDEF_TARGET_RE = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(?:\n[ \t]*)?(<[^>\n]*>|\S+)", re.MULTILINE)
 # Any absolute URL, wherever it appears: GitHub links bare URLs too, so R2 must see them.
 URL_RE = re.compile(r"https?://[^\s<>()\[\]\"'`]+")
 ALLOWED_TARGET_RE = re.compile(r"^(?:https?:|mailto:|#)", re.IGNORECASE)
@@ -310,10 +311,10 @@ class RepoLink:
 
 
 BLOB_RE = re.compile(
-    rf"^https://(?:www\.)?github\.com/{OWNER}/([\w.-]+)/(blob|tree)/([^/?#]+)(/[^?#]*)?(\?[^#]*)?(#.*)?$"
+    rf"^https?://(?:www\.)?github\.com/{OWNER}/([\w.-]+)/(blob|tree)/([^/?#]+)(/[^?#]*)?(\?[^#]*)?(#.*)?$"
 )
 RAW_RE = re.compile(
-    rf"^https://raw\.githubusercontent\.com/{OWNER}/([\w.-]+)/(?:refs/(?:heads|tags)/)?([^/?#]+)(/[^?#]*)?"
+    rf"^https?://raw\.githubusercontent\.com/{OWNER}/([\w.-]+)/(?:refs/(?:heads|tags)/)?([^/?#]+)(/[^?#]*)?"
     r"(\?[^#]*)?(#.*)?$"
 )
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -374,7 +375,8 @@ def check_links(name: str, text: str, *, tag: str | None, full: bool, root: Path
         return f"{name}:{line_of(stripped, pos)}"
 
     def check_anchor(pos: int, anchor: str, anchors: tuple[set[str], set[str]], target: str, rule: str) -> None:
-        if LINE_ANCHOR_RE.match(anchor):
+        # GitHub's #L<n> line anchors exist on a blob page, not in a release body, so `target` "this file" gets none.
+        if target != "this file" and LINE_ANCHOR_RE.match(anchor):
             return
         known, duplicated = anchors
         if anchor not in known:
@@ -676,6 +678,7 @@ _GOOD_LINKS = f"""# Notes
 - [config]({_PY}/blob/{_TAG}/README.md#configuration-priority) and [guide][guide]
 - [dispatch]({_PY}/blob/{_TAG}/doc/guide.md#internal-the-_dispatch-refactor-issue-14)
 - [html anchor]({_PY}/blob/{_TAG}/README.md#pinned), [env]({_PY}/blob/{_TAG}/README.env)
+- [lines]({_PY}/blob/{_TAG}/README.md?plain=1#L3-L5), [guide on the next line][guide-next-line]
 - [doc dir]({_PY}/tree/{_TAG}/doc), raw: https://raw.githubusercontent.com/osprey-dcs/dp-python-lib/{_TAG}/README.env
 - [dp-grpc notes](https://github.com/osprey-dcs/dp-grpc/blob/{_TAG}/doc/release-notes/{_TAG}.md#anything)
 - [added later]({_PY}/blob/0123456789abcdef0123456789abcdef01234567/not/in/this/tree.md)
@@ -690,6 +693,8 @@ See [the README](../../README.md#x) or [on main]({_PY}/blob/main/README.md).
 ```
 
 [guide]: {_PY}/blob/{_TAG}/doc/guide.md
+[guide-next-line]:
+  {_PY}/blob/{_TAG}/doc/guide.md
 """
 
 # A NEXT.md that must pass: links on main, and a checklist quoting everything the release rules forbid.
@@ -738,6 +743,7 @@ def _self_test_links(root: Path) -> list[str]:
         "R1 a ../ relative link": "[r](../../README.md#x)",
         "R1 a bare relative path": "[r](doc/guide.md)",
         "R1 a relative reference definition": "[r]: doc/guide.md",
+        "R1 a relative reference definition on the next line": "[r]:\n  ../../README.md",
         "R1 a relative image": "![i](img/x.png)",
         "R2 a link left on main": f"[m]({_PY}/blob/main/README.md)",
         "R2 a main-pinned reference definition": f"[readme-env]: {_PY}/blob/main/README.env",
@@ -746,6 +752,7 @@ def _self_test_links(root: Path) -> list[str]:
         "R2 a tree link on main": f"[t]({_PY}/tree/main/doc)",
         "R2 a raw link on main": "https://raw.githubusercontent.com/osprey-dcs/dp-service/main/README.md",
         "R2 a bare URL on main": f"See {_PY}/blob/main/README.md.",
+        "R2 an http:// link on main": "[h](http://github.com/osprey-dcs/dp-python-lib/blob/main/README.md)",
         "R2 a short SHA": f"[s]({_PY}/blob/0123456/README.md)",
         "R5 a leftover rel-<version>": "```\n--certificate-identity '...@refs/tags/rel-<version>'\n```",
         "R5 a leftover <previous>": f"`{_PY}/compare/<previous>...rel-2.1.0`",
@@ -760,6 +767,7 @@ def _self_test_links(root: Path) -> list[str]:
         "R4 an anchor to a duplicated heading": f"[d]({_PY}/blob/{_TAG}/README.md#methods)",
         "R4 an anchor to a duplicate's -1": f"[d]({_PY}/blob/{_TAG}/README.md#methods-1)",
         "R4 a missing same-document anchor": "[c](#contents)",
+        "R4 a same-document line anchor": "[l](#L12)",
     }
     for description, extra in {**form_rules, **tree_rules}.items():
         if not release(f"{_GOOD_LINKS}\n{extra}\n"):
@@ -774,6 +782,7 @@ def _self_test_links(root: Path) -> list[str]:
     for description, extra in {
         "N1 a relative link": "[r](../README.md)",
         "N1 a relative reference definition": "[r]: ./doc/guide.md",
+        "N1 a relative reference definition on the next line": "[r]:\n./doc/guide.md",
         "N2 a rel- tag": f"[t]({_PY}/blob/rel-2.1.0/README.md)",
         "N2 a rel- reference definition into another repo": "[g]: https://github.com/osprey-dcs/dp-grpc/blob/rel-2.1.0/x",
         "N2 a commit SHA": f"[s]({_PY}/blob/0123456789abcdef0123456789abcdef01234567/README.md)",
