@@ -27,6 +27,8 @@ from dp_python_lib.client import (
     ConfigQuery as CFG,
 )
 from dp_python_lib.client import query_conversions as qc
+from dp_python_lib.client import bucket_conversions as bc
+from dp_python_lib.client import data_frame_conversions as dfc
 ```
 
 ## Contents
@@ -407,8 +409,6 @@ half needs no extras.
 
 ```python
 # cookbook:partial
-from dp_python_lib.client import bucket_conversions as bc
-
 params = QueryParams(
     begin_time=datetime(2026, 2, 2, 18, 7, tzinfo=timezone.utc),
     end_time=datetime(2026, 2, 2, 18, 8, tzinfo=timezone.utc),
