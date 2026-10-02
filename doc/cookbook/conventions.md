@@ -296,7 +296,9 @@ continuous.
 
 Note that *bucket selection* in data queries is an overlap test rather than containment: a bucket
 is returned when it overlaps the requested window at all, so boundary buckets may extend past the
-range you asked for.  Sample-oriented queries (`query_samples()`) trim to the exact range.
+range you asked for.  Sample-oriented queries (`query_samples()`) trim to the exact range; a
+[bucket query](query.md#buckets-come-back-whole) returns those boundary buckets whole, and trimming
+them is opt-in.
 
 ## Optional dependencies
 

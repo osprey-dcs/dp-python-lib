@@ -30,7 +30,9 @@ from dp_python_lib.client import (
     RegisterProviderRequestParams,
     chunked_request_params,
 )
+from dp_python_lib.client import bucket_conversions as bc
 from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client import data_frame_conversions as dfc
 
 from .ingest_support import INGESTION_ADDRESS, QUERY_ADDRESS, ingest_confirmed, register_provider, require_services
 
@@ -251,23 +253,59 @@ class TestIngestionClientIntegration(unittest.TestCase):
         self.assertIsNone(summary.response, "the call failed as a whole, so there is no summary response")
 
     # ------------------------------------------------------------------
-    # non-scalar columns (verifiable only as far as SUCCESS until #16 wraps queryBuckets)
+    # non-scalar columns, read back through the bucket query (#16)
     # ------------------------------------------------------------------
 
-    def test_non_scalar_columns_reach_success(self):
+    def test_non_scalar_columns_read_back_exactly(self):
+        # querySamples is scalar-only, so the bucket query is the one way to read these back.  Each column is its
+        # own PV and so its own bucket, returned in its stored form with every structural field intact.
+        names = {kind: self._pv(kind) for kind in ("waveform", "map", "camera", "struct", "serialized")}
         frame = dfb.data_frame(
             dfb.sampling_clock(self.t0, period_nanos=1_000_000, count=2),
             [
-                dfb.double_array_column(self._pv("waveform"), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
-                dfb.int32_array_column(self._pv("map"), [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]),
+                dfb.double_array_column(names["waveform"], [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+                dfb.int32_array_column(names["map"], [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]),
                 dfb.image_column(
-                    self._pv("camera"), [b"\x00\x01", b"\x02\x03"], width=1, height=2, channels=1, encoding="raw-u8"
+                    names["camera"], [b"\x00\x01", b"\x02\x03"], width=1, height=2, channels=1, encoding="raw-u8"
                 ),
-                dfb.struct_column(self._pv("struct"), [b"\x0a\x01", b"\x0a\x02"], schema_id="itest:v1"),
-                dfb.serialized_column(self._pv("serialized"), b"opaque", encoding="itest-bytes"),
+                dfb.struct_column(names["struct"], [b"\x0a\x01", b"\x0a\x02"], schema_id="itest:v1"),
+                dfb.serialized_column(names["serialized"], b"opaque", encoding="itest-bytes"),
             ],
         )
         ingest_confirmed(self.ingestion, self.provider_id, frame)
+
+        params = QueryParams(
+            begin_time=self.t0,
+            end_time=self.t0 + timedelta(milliseconds=2),
+            pv_selector=PvQuery.name_list(list(names.values())),
+        )
+        buckets = {b.pvName: b for page in self.client.query.iter_query_buckets(params) for b in page.data_buckets}
+        self.assertEqual(set(buckets), set(names.values()))
+
+        waveform = bc.bucket_column(buckets[names["waveform"]])
+        self.assertEqual(bc.bucket_values(buckets[names["waveform"]]), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        self.assertEqual(dfc.column_dimensions(waveform), [3])
+
+        grid = bc.bucket_column(buckets[names["map"]])
+        self.assertEqual(bc.bucket_values(buckets[names["map"]]), [[1, 2, 3, 4], [5, 6, 7, 8]])  # flat per sample
+        self.assertEqual(dfc.column_dimensions(grid), [2, 2])
+
+        camera = bc.bucket_column(buckets[names["camera"]])
+        self.assertEqual(bc.bucket_values(buckets[names["camera"]]), [b"\x00\x01", b"\x02\x03"])
+        self.assertEqual(
+            dfc.image_descriptor_dict(camera), {"width": 1, "height": 2, "channels": 1, "encoding": "raw-u8"}
+        )
+
+        struct = bc.bucket_column(buckets[names["struct"]])
+        self.assertEqual(bc.bucket_values(buckets[names["struct"]]), [b"\x0a\x01", b"\x0a\x02"])
+        self.assertEqual(dfc.column_schema_id(struct), "itest:v1")
+
+        # Stored serialized, so returned serialized -- whatever useSerializedColumns says (T6).  The payload is
+        # opaque: reachable through bucket_column(), refused by the value readers.
+        serialized = bc.bucket_column(buckets[names["serialized"]])
+        self.assertEqual((serialized.payload, serialized.encoding), (b"opaque", "itest-bytes"))
+        with self.assertRaisesRegex(ValueError, "SerializedDataColumn"):
+            bc.bucket_values(buckets[names["serialized"]])
 
 
 if __name__ == "__main__":

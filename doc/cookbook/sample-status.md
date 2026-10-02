@@ -368,9 +368,10 @@ delete would remove, run the same range and `(domain, layer)` through
   `querySampleStatusDomains` are reserved placeholders in the API that return a "not implemented"
   error, so this client does not wrap them.  Domains are for now a convention between producer and
   consumer, not a registry.
-- **Sample status filtering is sample-query only.**  `sampleStatusSelector` is rejected on
-  bucket-oriented queries, which are not yet wrapped by this library
-  ([issue #16](https://github.com/osprey-dcs/dp-python-lib/issues/16)).
+- **Sample status filtering is sample-query only.**  The server rejects a status filter on a
+  [bucket query](query.md#whole-buckets-arrays-images-and-stored-metadata), so `query_buckets()`
+  and its siblings refuse a `QueryParams` carrying `sample_status_filter` with a `ValueError`
+  before calling the server, rather than silently returning unfiltered buckets.
 - **A pandas view of statuses is not built yet.**  `sample_status_conversions` returns plain Python
   objects and needs no optional extras; a DataFrame conversion is a follow-up.
 
