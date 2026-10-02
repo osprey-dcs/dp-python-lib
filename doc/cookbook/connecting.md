@@ -174,6 +174,8 @@ a key present in the YAML file silently ignored its `MLDP_*` variable.
 
 ```python
 # cookbook:partial
+from dp_python_lib.client import QueryParams, PvQuery as PV
+
 if client.query is None:
     raise RuntimeError("no query channel configured")
 

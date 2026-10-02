@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Verify the Python snippets in doc/cookbook/*.md against the installed dp_python_lib.
 
-Two passes, because they have different blind spots:
+Three passes, because they have different blind spots:
 
   1. ast.parse()  -- syntax errors.
   2. mypy         -- wrong attribute names, wrong method names, wrong keyword arguments,
                      wrong arity.  This is the class of error that matters most here: a
                      recipe that writes `result.pv_metadata_list` when the attribute is
                      `result.pv_metadata` is valid Python and sails through pass 1.
+  3. imports      -- every name a `# cookbook:partial` snippet uses that the preamble
+                     *imports* must also be bound somewhere in the snippet's own recipe
+                     (#75).  The preamble supplies those names to pass 2, so without this a
+                     recipe that never imports `dfc` type-checks cleanly and still raises
+                     NameError for a reader who copies it; #74 shipped that twice.
 
 Background: on the dp-grpc side, extracting and compiling the Java snippets found four real
 defects that a careful multi-agent proto-verification pass had missed entirely.  Name-checking
@@ -35,6 +40,7 @@ Snippet directives (in a comment on the block's first line):
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import os
 import re
@@ -246,8 +252,6 @@ def extract(path: Path) -> list[Snippet]:
 
 def check_syntax(snippet: Snippet) -> list[str]:
     """Pass 1: does it parse at all?"""
-    import ast
-
     try:
         ast.parse(snippet.code)
     except SyntaxError as exc:
@@ -354,6 +358,100 @@ def check_types(snippets: list[Snippet], verbose: bool) -> list[str]:
     return errors
 
 
+def preamble_imports() -> set[str]:
+    """The names PREAMBLE binds by import -- the names pass 3 holds each recipe to importing itself.
+
+    Parsed from the preamble rather than listed, so there is no second list to keep in step.  Its
+    fixtures (`client`, `params`, the carried-forward ids, `acquire()`) are assignments and defs, not
+    imports, so they are excluded by construction: recipes legitimately carry those between snippets.
+    """
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(PREAMBLE)):
+        if isinstance(node, ast.Import):
+            names.update(a.asname or a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(a.asname or a.name for a in node.names)
+    return names
+
+
+def bound_names(tree: ast.AST) -> set[str]:
+    """Every name a snippet binds, anywhere in it.
+
+    Deliberately looser than Python: scope and order are ignored, so a name imported inside a
+    function or in a later block still counts.  Recipes are flat scripts, and the question is
+    whether the recipe imports the name at all -- which is what #74 got wrong.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.asname or a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+    return names
+
+
+def check_recipe_imports(snippets: list[Snippet]) -> list[str]:
+    """Pass 3: does each recipe import the preamble-imported names its partial snippets use?
+
+    Bindings come from every checked snippet in the file (the imports block, inline imports,
+    standalone and no-mypy blocks); uses only from partial ones, since a standalone snippet is
+    type-checked without the preamble and mypy already reports a missing import there.  Skipped
+    snippets contribute neither.  One error per name per file, at its first use.  Expects
+    snippets that parse; pass 1 has already reported any that do not.
+    """
+    imported = preamble_imports()
+    by_file: dict[Path, list[Snippet]] = {}
+    for snippet in snippets:
+        if not snippet.skip:
+            by_file.setdefault(snippet.path, []).append(snippet)
+
+    errors: list[str] = []
+    for path, file_snippets in by_file.items():
+        bound: set[str] = set()
+        uses: dict[str, list[int]] = {}
+        for snippet in file_snippets:
+            tree = ast.parse(snippet.code)
+            bound |= bound_names(tree)
+            if not snippet.partial:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in imported:
+                    uses.setdefault(node.id, []).append(snippet.start_line + node.lineno - 1)
+
+        for name, lines in uses.items():
+            if name in bound:
+                continue
+            lines.sort()
+            more = f" [+{len(lines) - 1} more use{'s' if len(lines) > 2 else ''}]" if len(lines) > 1 else ""
+            errors.append(
+                f"{display_path(path)}:{lines[0]}: '{name}' is used but never imported by this recipe "
+                f"(the checker preamble supplies it; add it to the recipe's imports){more}"
+            )
+    return errors
+
+
+# Pass 3's self-test recipe: a partial snippet using a preamble import the recipe never imports.
+# Checked alone it must be reported; with IMPORTS_CANARY_FIX alongside it, it must not be.  The
+# first catches a rule that stops matching; the second, one that ignores bindings and would then
+# fail the real cookbook for a confusing reason.
+IMPORTS_CANARY = """\
+# cookbook:partial
+columns = dfc.data_frame_columns(frame)
+"""
+
+IMPORTS_CANARY_FIX = """\
+from dp_python_lib.client import data_frame_conversions as dfc
+"""
+
+
 # A snippet that MUST fail.  If mypy stops resolving dp_python_lib -- a moved src layout, a
 # missing MYPYPATH, an uninstalled package -- it reports success on everything and the checker
 # becomes a rubber stamp that looks exactly like clean docs.  This canary makes that loud.
@@ -365,7 +463,7 @@ print(result.definitely_not_a_real_attribute_canary)
 
 
 def self_test(verbose: bool) -> list[str]:
-    """Confirm the mypy pass can still detect a known-bad attribute."""
+    """Confirm pass 2 still flags a known-bad attribute, and pass 3 a missing import (and only that)."""
     canary = Snippet(
         path=REPO_ROOT / "<canary>",
         start_line=1,
@@ -384,7 +482,38 @@ def self_test(verbose: bool) -> list[str]:
             "    Verify with:  MYPYPATH=$PWD/src .venv/bin/mypy --ignore-missing-imports "
             "--follow-imports=silent <a file using the client>"
         ]
-    return []
+
+    errors: list[str] = []
+    imported = preamble_imports()
+    if "dfc" not in imported:
+        errors.append(
+            "SELF-TEST FAILED: the preamble's imports were not found (expected 'dfc' among "
+            f"{sorted(imported)}), so the recipe import check would check nothing."
+        )
+
+    def canary_snippet(code: str, start_line: int, partial: bool) -> Snippet:
+        return Snippet(
+            path=REPO_ROOT / "<imports-canary>",
+            start_line=start_line,
+            code=code,
+            partial=partial,
+            skip=False,
+            no_mypy=False,
+        )
+
+    if not check_recipe_imports([canary_snippet(IMPORTS_CANARY, 1, True)]):
+        errors.append(
+            "SELF-TEST FAILED: the recipe import check did not flag 'dfc' used without an import, "
+            "so a recipe missing its imports would pass."
+        )
+    fixed = [canary_snippet(IMPORTS_CANARY_FIX, 1, False), canary_snippet(IMPORTS_CANARY, 5, True)]
+    found = check_recipe_imports(fixed)
+    if found:
+        errors.append(
+            "SELF-TEST FAILED: the recipe import check flagged a name the recipe does import, "
+            f"so it is ignoring bindings: {found}"
+        )
+    return errors
 
 
 def main() -> int:
@@ -394,7 +523,7 @@ def main() -> int:
     parser.add_argument(
         "--no-self-test",
         action="store_true",
-        help="skip the canary that verifies name checking still works",
+        help="skip the canaries that verify name and import checking still work",
     )
     args = parser.parse_args()
 
@@ -433,7 +562,7 @@ def main() -> int:
     # Verify the checker itself works before trusting a clean result from it.
     if not args.no_self_test:
         if args.verbose:
-            print("  running self-test (canary)...", file=sys.stderr)
+            print("  running self-test (canaries)...", file=sys.stderr)
         canary_errors = self_test(args.verbose)
         if canary_errors:
             print("\nFAIL: checker self-test failed\n")
@@ -450,8 +579,13 @@ def main() -> int:
             errors.extend(found)
             syntax_failed.add(id(snippet))
 
+    parsed = [s for s in checked if id(s) not in syntax_failed]
+
+    # Pass 3 needs only the AST, so run it before the slow mypy pass; its errors are sorted in below.
+    errors.extend(check_recipe_imports(parsed))
+
     # Pass 2, excluding anything that already failed to parse.
-    errors.extend(check_types([s for s in checked if id(s) not in syntax_failed], args.verbose))
+    errors.extend(check_types(parsed, args.verbose))
 
     files_desc = f"{len(paths)} file{'s' if len(paths) != 1 else ''}"
     counts = f"{len(checked)} snippet{'s' if len(checked) != 1 else ''} in {files_desc}"

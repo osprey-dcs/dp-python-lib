@@ -12,7 +12,6 @@ unless an annotation channel is configured, so guard on `client.annotation` befo
 ### Imports used by the examples
 
 ```python
-# cookbook:skip
 from dp_python_lib.client import (
     MldpClient,
     SavePvMetadataRequestParams,

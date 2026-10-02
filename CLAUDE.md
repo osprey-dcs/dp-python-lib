@@ -43,6 +43,11 @@ ruff format --check .     # verify formatting without writing (what CI runs)
 Two paths are excluded deliberately: `src/dp_python_lib/grpc/` (generated, regenerated
 wholesale) and `*.md` (ruff would reformat the hand-wrapped Python snippets in this file
 and `doc/cookbook/`; those are verified instead by `.dev/tools/check-cookbook-snippets.py`).
+That checker also holds each recipe to its own imports (#75): its shared preamble supplies the
+library's imports to every partial snippet, which hid a missing import from mypy twice in #74, so
+every name a partial snippet uses that the preamble imports must be bound somewhere in the same
+recipe.  It still cannot check values carried *between* snippets (`dataset_id`, `provider_id`);
+running a recipe as one script with only its own imports remains the way to verify those.
 
 When a rule fires on something intentional, suppress it with a per-line `# noqa: RULE` plus
 a comment saying why, rather than reshaping correct code to satisfy the linter.  Existing
