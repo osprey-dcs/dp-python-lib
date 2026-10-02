@@ -17,7 +17,6 @@ All examples use `client.query`, which is `None` unless a query channel is confi
 ### Imports used by the examples
 
 ```python
-# cookbook:skip
 from datetime import datetime, timezone
 
 from dp_python_lib.client import (

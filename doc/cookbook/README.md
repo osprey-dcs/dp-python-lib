@@ -66,7 +66,8 @@ Attribute names and values are the facility's; tag values are illustrative place
 ## Verifying the examples
 
 Every Python snippet in this directory is mechanically checked — parsed for syntax, then
-type-checked against the installed package to catch wrong attribute and method names:
+type-checked against the installed package to catch wrong attribute and method names — and each
+recipe is checked for importing every library name its fragments use:
 
 ```bash
 pip install -e .[dev]
@@ -75,7 +76,12 @@ pip install -e .[dev]
 
 The checker self-tests before each run: if mypy ever stops resolving `dp_python_lib`, it would
 report success on every snippet regardless of correctness, so a canary asserts that a known-bad
-attribute is still flagged.
+attribute is still flagged.  A second canary does the same for the import check.
 
 Snippets carry `# cookbook:partial` when they are fragments that assume a client, and
-`# cookbook:skip` or `# cookbook:no-mypy` where checking does not apply.
+`# cookbook:skip` or `# cookbook:no-mypy` where checking does not apply.  A partial snippet is
+type-checked with a shared preamble that supplies `client` and the library's imports, so the
+import check is what holds a recipe to its own imports: every name a partial snippet uses that the
+preamble imports must be bound somewhere in the same recipe — usually its "Imports used by the
+examples" block, which is checked like any other snippet.  Do not mark that block
+`# cookbook:skip`; a skipped block binds nothing.
