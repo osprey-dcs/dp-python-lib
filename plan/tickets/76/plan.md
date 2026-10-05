@@ -78,7 +78,7 @@ as long as the `release-dist` artifact, which `publish-pypi` downloads and which
 therefore goes to 30 days to match the approval window.  A full workflow re-run is no substitute once
 the artifact has expired: it rebuilds and re-signs, so the files would no longer match the
 `SHA256SUMS` and bundles already on the GitHub Release, and it re-runs the release step against a
-release that already exists.  *(Decided 2026-10-05; the retention window was added in review of #78.)*
+release that already exists.  *(Decided 2026-10-05; the retention window was added in review of PR #78.)*
 
 **D3. A permanent TestPyPI rehearsal behind an opt-in dispatch input.**  `workflow_dispatch` gains a
 boolean input `testpypi` (default `false`).  When it is set, a `publish-testpypi` job uploads the
@@ -99,7 +99,7 @@ skipped file is the same file; D5's digest check then compares every file on the
 included, against `SHA256SUMS`.  A genuine conflict (a rebuilt sdist at a version already on the index,
 from a fresh dispatch at the same commit, say) still fails, at the digest check, with both digests
 printed.  Rejected: leaving `skip-existing` off so the upload itself fails loudly, which makes a partial
-upload unrecoverable without a new version.  *(Added in review of #78.)*
+upload unrecoverable without a new version.  *(Added in review of PR #78.)*
 
 **D4. PyPI publishes after the GitHub Release, not beside it.**  `publish-pypi` gets
 `needs: [build, publish-github-release]`.  The GitHub Release can be edited or deleted; a PyPI file
@@ -161,7 +161,7 @@ documented for development.
 
 - Header comment: state the revised dispatch invariant (D3).
 - `workflow_dispatch.inputs.testpypi`: boolean, default `false`, description naming test.pypi.org.
-- Build step: set `SETUPTOOLS_SCM_OVERRIDES_FOR_DP_PYTHON_LIB: '{local_scheme = "no-local-version"}'`
+- Build step: set `SETUPTOOLS_SCM_OVERRIDES_FOR_DP_PYTHON_LIB: '{local_scheme="no-local-version"}'`
   only when `github.event_name == 'workflow_dispatch'`, with a comment explaining why (PyPI rejects
   local versions).
 - `publish-pypi`: `if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')`,
@@ -216,9 +216,12 @@ documented for development.
 - `actionlint` (if available) over `release.yml`.
 - Run the workflow by dispatch from the PR branch with `testpypi=true`: the build has no local version,
   the upload succeeds, the digest check passes, and the test.pypi.org page renders the README with
-  working links.  Then `pip install --index-url https://test.pypi.org/simple/
-  --extra-index-url https://pypi.org/simple/ dp-python-lib==<dev version>` in a clean venv and import
-  `MldpClient`.  If GitHub rejects the input because `main`'s `release.yml` lacks it, run the rehearsal
+  working links.  Then, in a clean venv, install the rehearsal build and import `MldpClient`:
+  ```bash
+  pip install --index-url https://test.pypi.org/simple/ \
+      --extra-index-url https://pypi.org/simple/ "dp-python-lib==<dev version>"
+  ```
+  If GitHub rejects the input because `main`'s `release.yml` lacks it, run the rehearsal
   immediately after merge instead.
 - A dispatch with `testpypi=false` still stops after build/sign, and `publish-pypi` shows as skipped.
 
