@@ -72,7 +72,13 @@ rule allowing only `rel-*` tags, as a second gate besides the job's `if:`.  Sinc
 the tag and approves the deployment, GitHub's "prevent self-review" option must stay **off**.  The
 approval is a deliberate pause before an upload that can never be replaced, not a second pair of eyes.
 That bus-factor-of-one is accepted: if the approver is unavailable, the GitHub Release still ships and
-PyPI follows later by re-running the job.  *(Decided 2026-10-05.)*
+PyPI follows later by approving the pending deployment or re-running the job.  That fallback lasts only
+as long as the `release-dist` artifact, which `publish-pypi` downloads and which is uploaded with
+`retention-days: 7`, while GitHub holds a deployment for approval for up to 30 days.  Retention
+therefore goes to 30 days to match the approval window.  A full workflow re-run is no substitute once
+the artifact has expired: it rebuilds and re-signs, so the files would no longer match the
+`SHA256SUMS` and bundles already on the GitHub Release, and it re-runs the release step against a
+release that already exists.  *(Decided 2026-10-05; the retention window was added in review of #78.)*
 
 **D3. A permanent TestPyPI rehearsal behind an opt-in dispatch input.**  `workflow_dispatch` gains a
 boolean input `testpypi` (default `false`).  When it is set, a `publish-testpypi` job uploads the
@@ -83,9 +89,17 @@ the workflow's stated invariant from "a dispatch never publishes" to "a dispatch
 or a GitHub Release", and the header comment says so.  Rejected: a one-off twine upload with an API
 token, which checks rendering but not the OIDC/trusted-publisher configuration that is the actual risk;
 and skipping TestPyPI, which makes the first real release the first test.  TestPyPI is a sandbox, but
-its versions cannot be re-uploaded either, so a re-run at the same commit fails with "File already
-exists".  That is left loud rather than masked with `skip-existing`, since D5's hash check would fail on
-a rebuilt sdist anyway.  *(Decided 2026-10-05.)*
+its versions cannot be re-uploaded either.  *(Decided 2026-10-05.)*
+
+**D3a. Both upload steps set `skip-existing: true`, and D5 is what keeps a conflict loud.**  The upload
+sends files one at a time, so a wheel can land and the sdist fail.  Without `skip-existing`, every
+"Re-run failed jobs" after that fails on the wheel with "File already exists", and the release can never
+be completed on PyPI.  A re-run downloads the same `release-dist` artifact rather than rebuilding, so a
+skipped file is the same file; D5's digest check then compares every file on the index, skipped ones
+included, against `SHA256SUMS`.  A genuine conflict (a rebuilt sdist at a version already on the index,
+from a fresh dispatch at the same commit, say) still fails, at the digest check, with both digests
+printed.  Rejected: leaving `skip-existing` off so the upload itself fails loudly, which makes a partial
+upload unrecoverable without a new version.  *(Added in review of #78.)*
 
 **D4. PyPI publishes after the GitHub Release, not beside it.**  `publish-pypi` gets
 `needs: [build, publish-github-release]`.  The GitHub Release can be edited or deleted; a PyPI file
@@ -99,8 +113,16 @@ CDN catches up) and compares each file's `digests.sha256` with `SHA256SUMS`.  Th
 deletes `SHA256SUMS` from `dist/` before upload therefore moves a copy aside first.  The same step runs
 after the TestPyPI upload against test.pypi.org.  This closes the loop the same way the body check does
 for the GitHub Release, and it is what makes "the PyPI files are the signed files" a checked statement,
-so `README.env` can tell a user to verify a `pip download` with `sha256sum -c SHA256SUMS` from the
-GitHub Release.  Rejected: a post-publish `pip install` smoke test, which the build job already does
+so `README.env` can tell a user to verify a `pip download` against `SHA256SUMS` from the GitHub
+Release.  That recipe must be spelled out, because the obvious one fails: `SHA256SUMS` lists both the
+wheel and the sdist, so a bare `sha256sum -c` over a directory holding only the wheel reports the sdist
+missing and exits non-zero, and `pip download` without `--no-deps` also fetches every dependency.  The
+documented form is:
+```bash
+pip download --no-deps "dp-python-lib==X.Y.Z"
+sha256sum --ignore-missing -c SHA256SUMS
+```
+Rejected: a post-publish `pip install` smoke test, which the build job already does
 against the same wheel; it would add resolver and CDN flakiness without checking anything new.
 
 **D6. Only the next release goes to PyPI.**  rel-1.16.0 and earlier are not backfilled: that would be a
@@ -108,7 +130,10 @@ hand upload with an API token and no PEP 740 attestations, of a release carrying
 config-precedence bug.  The first PyPI version is whatever the next tag is.  *(Decided 2026-10-05.)*
 
 **D7. README links become absolute `blob/main` URLs.**  They then work on GitHub, on pypi.org, and in
-the sdist alike.  A version's PyPI page will link to the docs as they are on `main`, not as they were
+the sdist alike.  This includes the fragment-only links (`[current state](#current-state)`,
+`[TODO](#todo)`), which become `blob/main/README.md#...`: whether PyPI's renderer gives headings `id`s
+was not confirmed, and an absolute link works either way.  The TestPyPI rehearsal's link check covers
+them.  A version's PyPI page will link to the docs as they are on `main`, not as they were
 at that release; that drift is accepted, because the alternative (rewriting links at build time) adds
 moving parts to the release build for a landing page.  `[project.urls]` gains `Documentation`
 (`doc/cookbook/README.md` on `main`) and `Changelog` (the GitHub Releases page) for the PyPI sidebar.
@@ -148,6 +173,9 @@ documented for development.
   `https://test.pypi.org/p/dp-python-lib`), `repository-url: https://test.pypi.org/legacy/`, otherwise
   the same steps as `publish-pypi`.  The shared steps may stay duplicated; two copies of three steps is
   clearer than a composite action.
+- `build`: raise the `release-dist` upload's `retention-days` from 7 to 30, with a comment tying it to
+  the approval window (D2).
+- Both jobs: `skip-existing: true` on the upload step, with a comment pointing at D3a.
 - Both jobs: move `SHA256SUMS` aside before cleaning `dist/`, then the D5 digest check after upload.
   The version comes from the wheel filename, which covers both tag and dispatch builds.  Retry the JSON
   fetch for about five minutes; fail on a missing file, an extra file, or any digest mismatch, and
@@ -162,14 +190,17 @@ documented for development.
 
 - `README.md`: Installation leads with `pip install dp-python-lib` / `pip install "dp-python-lib[analysis]"`,
   then the editable and `[dev]` installs for development, then the GitHub Release / `README.env` path for
-  verified downloads.  Remove the roadmap bullet "Publishing to PyPI".  Make every relative link absolute
-  (D7).
+  verified downloads.  Remove the roadmap bullet "Publishing to PyPI".  Make every relative link absolute,
+  fragment-only ones included (D7).  Quote the editable installs' extras too (`pip install -e ".[analysis]"`,
+  `pip install -e ".[dev]"`): unquoted, they fail in zsh just as the PyPI form does.
 - `README.env`: replace the Notes line about PyPI not being enabled.  Add a short section explaining that
   the PyPI files are byte-identical to the release's (checked by the workflow), how to verify a
-  `pip download` against the release's `SHA256SUMS` and Sigstore bundles, and that PyPI's PEP 740
-  attestations are a second, independent provenance record.
-- `doc/cookbook/conventions.md`, `doc/cookbook/query.md`: quote the extra.  Check the cookbook README's
-  setup section for anything that assumes a source checkout for ordinary use.
+  `pip download` against the release's `SHA256SUMS` and Sigstore bundles using exactly D5's commands
+  (`--no-deps`, `--ignore-missing`), and that PyPI's PEP 740 attestations are a second, independent
+  provenance record.
+- `doc/cookbook/conventions.md`, `doc/cookbook/query.md`: quote the extra.  `doc/cookbook/README.md`: quote
+  `pip install -e ".[dev]"` in its setup section, and check that section for anything that assumes a source
+  checkout for ordinary use.
 - `doc/release-notes/NEXT.md`: a new section, "Install from PyPI (#76)", plus a Contents entry.  Update
   `## Installing` to lead with `pip install dp-python-lib`, keeping the wheel form.  No version may be
   named (the checker enforces this).  Add a step to "Cutting the release" after the tag push: approve
