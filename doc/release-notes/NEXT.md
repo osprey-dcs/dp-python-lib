@@ -37,6 +37,7 @@ person cutting the release has any reason to re-read.
 - [Detecting open-ended activations (#26)](#detecting-open-ended-activations-issue-26)
 - [Ingesting data (#17)](#ingesting-data-issue-17)
 - [Querying whole buckets (#16)](#querying-whole-buckets-issue-16)
+- [Install from PyPI (#76)](#install-from-pypi-issue-76)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -271,7 +272,34 @@ the column metadata stored with a column.
 
 See [#16](https://github.com/osprey-dcs/dp-python-lib/issues/16) and `plan/tickets/16/plan.md`.
 
+## Install from PyPI (Issue #76)
+
+This is the first release published to [PyPI](https://pypi.org/p/dp-python-lib), so a download
+from the release page is no longer needed:
+
+```bash
+pip install dp-python-lib
+pip install "dp-python-lib[analysis]"    # with the pandas / NumPy / Excel conversions
+```
+
+Quote the extra in zsh, the macOS default shell, which otherwise reads the brackets as a glob.
+
+The files on PyPI are the files attached to this release, byte for byte.  The release workflow
+uploads them through PyPI's Trusted Publishing only after this page is published, then fails
+unless the digests PyPI reports match `SHA256SUMS`.  So a PyPI download can be checked against this
+release's `SHA256SUMS` and Sigstore bundles; [`README.env`](https://github.com/osprey-dcs/dp-python-lib/blob/main/README.env)
+gives the commands.  PyPI also shows PEP 740 attestations for each file, a second record of the
+same provenance.  Earlier releases are not on PyPI and will not be added.
+
+See [#76](https://github.com/osprey-dcs/dp-python-lib/issues/76) and `plan/tickets/76/plan.md`.
+
 ## Installing
+
+```bash
+pip install dp-python-lib
+```
+
+or, from the files attached to this release:
 
 ```bash
 pip install dp_python_lib-*.whl
@@ -320,3 +348,7 @@ When the version is known and the release is being cut:
    section and empty Contents down to the "Cutting the release" entry.  Keep the preamble,
    `## Installing`, and this checklist.
 10. **Merge, then push the `rel-<version>` tag.**  The notes must be on the tagged commit.
+11. **Approve the `pypi` deployment** once the "Publish GitHub Release" job is green: the run
+    waits on it in the Actions UI.  Then confirm the "Verify PyPI serves the signed files" step
+    passed.  If the PyPI job fails, use "Re-run failed jobs", not a full re-run, which would
+    rebuild and re-sign files that no longer match the release; the build artifact is kept 30 days.

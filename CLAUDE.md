@@ -95,8 +95,20 @@ GitHub Actions workflows live in `.github/workflows/`:
   signs everything with keyless Sigstore, and publishes a GitHub Release.  A
   `workflow_dispatch` trigger allows rehearsing the whole path without cutting a
   tag: publishing is gated on a `rel-` tag push, so a manual run always stops after
-  build/verify/sign.  A PyPI publish job is wired up but disabled (`if: false`); the
-  comment block above it lists the steps to enable it.
+  build/verify/sign.  On a tag, `publish-pypi` then uploads the same signed files to PyPI
+  (#76; `plan/tickets/76/plan.md`): Trusted Publishing (OIDC, no token), in the `pypi`
+  environment, which requires an approval and admits only `rel-*` tags.  It runs **after**
+  `publish-github-release`, because a PyPI file can never be replaced, sets `skip-existing`
+  so a partial upload can be finished by "Re-run failed jobs", and ends with
+  `.github/scripts/check-index-digests.py`, which fails unless the index serves exactly the
+  files in `SHA256SUMS`, byte for byte (skipped files included, so a real conflict is still
+  loud).  The `release-dist` artifact is kept 30 days, GitHub's approval window, because a
+  full re-run rebuilds and re-signs files that no longer match the release.  A dispatch with
+  the `testpypi` input set rehearses the same path against test.pypi.org (`publish-testpypi`,
+  an unprotected `testpypi` environment); a dispatch build drops setuptools-scm's local
+  version segment (`+g<sha>`), which both indexes reject, so a rehearsal is `X.Y.Z.devN`.
+  **A job that names a missing environment creates it, with no protection rules**: `pypi`
+  must exist, with its reviewer and tag rule, before any workflow change that names it merges.
 
 **Action pinning**: every `uses:` reference in both workflows is pinned to a full commit
 SHA with a trailing `# vX.Y.Z` comment naming the version — a tag is mutable, so whoever
@@ -113,7 +125,10 @@ grep -rnE 'uses: *[^ ]+@' .github/workflows/ | grep -vE '@[0-9a-f]{40} # v'   # 
 ```
 
 **Cutting a release**: the version comes from the git tag alone (setuptools-scm),
-so there is no version to bump in a file.  Tag `rel-X.Y.Z` and push the tag.
+so there is no version to bump in a file.  Tag `rel-X.Y.Z` and push the tag, then approve
+the `pypi` deployment once the GitHub Release job is green, and confirm the digest check
+passed.  The approver also pushes the tag, so the environment's "prevent self-review" stays
+off: the approval is a deliberate pause before an irreversible upload, not a second reviewer.
 The tag must be exactly `rel-X.Y.Z` with no suffix — prerelease shapes like
 `rel-1.15.0-rc1` are rejected up front, because setuptools-scm would normalize them
 (`1.15.0rc1`) and fail the tag-vs-built version assertion with a confusing error.
@@ -720,7 +735,7 @@ for page in q.iter_query_samples(params):      # raises RuntimeError on a page e
 for page in q.iter_query_samples_stream(params):
     table = page.column_table
 
-# Pythonic conversions (require the optional [analysis] extra: pip install dp-python-lib[analysis])
+# Pythonic conversions (require the optional [analysis] extra: pip install "dp-python-lib[analysis]")
 df = q.query_samples(params).to_dataframe()      # one page -> pandas.DataFrame (UTC datetime index)
 arrays = q.query_samples(params).to_numpy()      # one page -> {"timestamps": ndarray, "<col>": ndarray, ...}
 

@@ -1,6 +1,7 @@
 # Issue #76 — Publish releases to PyPI
 
-**Status:** triaged 2026-10-05; open questions resolved the same day.  Implementation has not started.
+**Status:** triaged 2026-10-05; open questions resolved the same day.  Implementation in progress on
+`feat/76-pypi-publish`.
 
 ## Overview
 
@@ -124,6 +125,11 @@ sha256sum --ignore-missing -c SHA256SUMS
 ```
 Rejected: a post-publish `pip install` smoke test, which the build job already does
 against the same wheel; it would add resolver and CDN flakiness without checking anything new.
+
+*Implementation note:* the check is a script, `.github/scripts/check-index-digests.py`, rather than
+inline shell in both jobs, so it is linted, self-tested on each run, and runnable locally against any
+project on PyPI.  The publish jobs fetch it with a sparse checkout of `.github/scripts` at the run's
+ref, which adds `contents: read` to their permissions.
 
 **D6. Only the next release goes to PyPI.**  rel-1.16.0 and earlier are not backfilled: that would be a
 hand upload with an API token and no PEP 740 attestations, of a release carrying the #19

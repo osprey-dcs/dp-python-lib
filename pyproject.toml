@@ -44,6 +44,8 @@ dependencies = [
 Homepage = "https://github.com/osprey-dcs/dp-python-lib"
 Repository = "https://github.com/osprey-dcs/dp-python-lib"
 Issues = "https://github.com/osprey-dcs/dp-python-lib/issues"
+Documentation = "https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/README.md"
+Changelog = "https://github.com/osprey-dcs/dp-python-lib/releases"
 
 [project.optional-dependencies]
 # Pythonic query-result conversions (query_conversions): DataFrame / NumPy / Excel.  Kept out of the core
