@@ -15,7 +15,6 @@ channel is configured, so guard on it before reaching through.
 ### Imports used by the examples
 
 ```python
-# cookbook:skip
 from datetime import datetime, timezone
 
 from dp_python_lib.client import (

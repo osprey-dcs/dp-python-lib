@@ -11,6 +11,17 @@ For the wire-level view of these same conventions — the protobuf messages and 
 pattern this library wraps — see the
 [dp-grpc cookbook](https://github.com/osprey-dcs/dp-grpc/blob/main/doc/cookbook/conventions.md).
 
+### Imports used by the examples
+
+```python
+from dp_python_lib.client import (
+    MldpClient,
+    SavePvMetadataRequestParams,
+    PvMetadataQuery as Q,
+    to_timestamp,
+)
+```
+
 ## Contents
 
 - [Checking results](#checking-results) — the one pattern every call shares

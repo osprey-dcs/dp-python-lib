@@ -17,7 +17,6 @@ All examples use `client.ingestion_client`.
 ### Imports used by the examples
 
 ```python
-# cookbook:skip
 import contextlib
 from datetime import datetime, timedelta, timezone
 
