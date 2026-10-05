@@ -18,7 +18,7 @@ learning workflows — can use that platform without writing gRPC code.  It prov
    data science workflow actually wants — retrieving a labelled dataset, exporting to common
    formats, feeding a training pipeline.
 
-The generated gRPC stubs live in [src/dp_python_lib/grpc](src/dp_python_lib/grpc).  They are
+The generated gRPC stubs live in [src/dp_python_lib/grpc](https://github.com/osprey-dcs/dp-python-lib/tree/main/src/dp_python_lib/grpc).  They are
 produced by an Actions workflow in the dp-grpc repo (`generate-python-stubs.yml`), which can be
 run manually and fires automatically on a release tag; it opens a pull request against this repo.
 **These files are generated and must not be edited by hand** — fix the generator instead.
@@ -43,8 +43,8 @@ offers: dataset assembly and reuse, Pythonic data structures (pandas, NumPy, and
 confirmation — PyTorch tensors), export to common file formats, and end-to-end
 ingest → annotate → query → train workflows.
 
-The [current state](#current-state) below is the part of this that exists today; the
-[TODO](#todo) is what remains.
+The [current state](https://github.com/osprey-dcs/dp-python-lib/blob/main/README.md#current-state) below is the part of this that exists today; the
+[TODO](https://github.com/osprey-dcs/dp-python-lib/blob/main/README.md#todo) is what remains.
 
 ## Current state
 
@@ -81,7 +81,7 @@ for their service.
   bucket keeps its stored column type, time axis, and column metadata, so this is how array, image,
   struct, and serialized columns are read back.  `bucket_conversions` reads them in plain Python,
   trims them exactly to a range on request, and, with the `[analysis]` extra, assembles one pandas
-  DataFrame per PV.  See [whole buckets](doc/cookbook/query.md#whole-buckets-arrays-images-and-stored-metadata).
+  DataFrame per PV.  See [whole buckets](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/query.md#whole-buckets-arrays-images-and-stored-metadata).
 - **DataSets** — `client.annotation.datasets`.  Name a region of the archive (time ranges plus the
   PVs covered over them) so it can be found, annotated, and exported later: `save_dataset()`,
   `get_dataset()`, `query_datasets()`, `iter_datasets()`, `delete_dataset()`, and a
@@ -101,7 +101,7 @@ for their service.
   `query_request_status()`.  `data_frame.split_data_frame()` cuts a large frame into chunks under
   the server's message-size and time-span limits, and the `data_frame` builders now cover array,
   image, struct, and serialized columns as well as scalars.  See the
-  [ingestion recipe](doc/cookbook/ingestion.md).
+  [ingestion recipe](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md).
 
 **Supporting framework:** YAML + environment-variable configuration (`MLDP_*`, via
 pydantic-settings), TLS-capable channel creation, hierarchical logging, three-tier error handling
@@ -132,29 +132,30 @@ older than your `dp_python_lib` will not implement everything listed here.  The 
 - Data science conveniences beyond the current DataFrame / NumPy conversions — PyTorch tensor
   support is the likely next step, additive on top of the existing NumPy path
 
-**Project infrastructure**
-
-- Publishing to PyPI.  The release workflow has the job wired up but disabled; everything else —
-  unit tests across Python 3.10-3.13, lint, format, and type checks, the cookbook snippet checker,
-  and signed release artifacts — runs in CI today.
-
 ## Installation
 
-Python 3.10 or later.
+Python 3.10 or later.  Releases are published to [PyPI](https://pypi.org/p/dp-python-lib):
 
 ```bash
 # core client
-pip install -e .
+pip install dp-python-lib
 
 # with pandas / NumPy / Excel conversions for query results
-pip install -e .[analysis]
-
-# development tooling (pytest, ruff, mypy)
-pip install -e .[dev]
+pip install "dp-python-lib[analysis]"
 ```
 
-Released wheels are also attached to each [GitHub release](https://github.com/osprey-dcs/dp-python-lib/releases),
-with checksums and Sigstore signatures; [`README.env`](README.env) says how to verify them.
+The quotes matter in zsh (the macOS default shell), which otherwise treats the brackets as a glob.
+
+For development, install from a checkout instead:
+
+```bash
+pip install -e ".[analysis,dev]"    # dev adds pytest, ruff, mypy
+```
+
+Each [GitHub release](https://github.com/osprey-dcs/dp-python-lib/releases) carries the same wheel and
+sdist, byte for byte, with checksums and Sigstore signatures;
+[`README.env`](https://github.com/osprey-dcs/dp-python-lib/blob/main/README.env) says how to verify
+them, including a download from PyPI.
 
 **Upgrading from 1.15.0 or earlier:** 1.16.0 raises the `grpcio` floor to 1.84.0, because the
 regenerated stubs require it.  `pip install` picks that up, but an existing editable install will
@@ -162,7 +163,7 @@ not upgrade it on its own — the stubs then fail at import with a version misma
 required release.  `pip install -e . --upgrade` resolves it.
 
 Point the client at your MLDP services with an `mldp-config.yaml` file or `MLDP_*` environment
-variables — see [Creating and connecting a client](doc/cookbook/connecting.md).
+variables — see [Creating and connecting a client](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/connecting.md).
 
 ## Hello, MLDP
 
@@ -196,23 +197,23 @@ failure, so skipping the check turns an error into silently missing data.
 
 ## How to use it
 
-The **[cookbook](doc/cookbook/)** is the guide.  Each recipe walks through a complete task, and
+The **[cookbook](https://github.com/osprey-dcs/dp-python-lib/tree/main/doc/cookbook)** is the guide.  Each recipe walks through a complete task, and
 the recipes share one continuous worked example drawn from an accelerator facility.
 
 | Recipe | Covers |
 |---|---|
-| [API conventions](doc/cookbook/conventions.md) | Patterns every call shares: checking results, paging, criteria AND/OR rules, full-replace saves, time handling |
-| [Creating and connecting a client](doc/cookbook/connecting.md) | Building an `MldpClient`, config files and environment variables, TLS, logging |
-| [Cataloguing PVs](doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
-| [Recording machine configuration](doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
-| [Ingesting data](doc/cookbook/ingestion.md) | Registering a provider, sending frames of samples, confirming they landed, and chunking data too big for one message |
-| [Querying time-series data](doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel; reading whole stored buckets, including array, image, and struct columns |
-| [Labeling samples](doc/cookbook/sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
-| [DataSets and annotations](doc/cookbook/datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, and exporting |
+| [API conventions](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/conventions.md) | Patterns every call shares: checking results, paging, criteria AND/OR rules, full-replace saves, time handling |
+| [Creating and connecting a client](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/connecting.md) | Building an `MldpClient`, config files and environment variables, TLS, logging |
+| [Cataloguing PVs](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/pv-metadata.md) | Recording what a PV is, then finding PVs by property instead of by name |
+| [Recording machine configuration](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/machine-configuration.md) | Defining configurations, recording when each was active, and answering "what was the machine doing at 18:04?" |
+| [Ingesting data](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/ingestion.md) | Registering a provider, sending frames of samples, confirming they landed, and chunking data too big for one message |
+| [Querying time-series data](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/query.md) | Retrieving samples by PV, metadata, or machine configuration, and converting to pandas / NumPy / Excel; reading whole stored buckets, including array, image, and struct columns |
+| [Labeling samples](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/sample-status.md) | Recording per-sample status codes, reading them back, and querying data with flagged samples excluded |
+| [DataSets and annotations](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/datasets-and-annotations.md) | Naming a region of the archive, attaching analysis results with column-level provenance, and exporting |
 
 Every Python snippet in the cookbook is mechanically syntax- and type-checked against the
 installed package.
 
-For further examples, see the [integration tests](tests/integration).  For the wire protocol
+For further examples, see the [integration tests](https://github.com/osprey-dcs/dp-python-lib/tree/main/tests/integration).  For the wire protocol
 beneath this library — the protobuf messages and RPC semantics, documented in Java — see the
 [dp-grpc cookbook](https://github.com/osprey-dcs/dp-grpc/tree/main/doc/cookbook).

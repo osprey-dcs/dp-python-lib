@@ -5,10 +5,17 @@ on:
     tags:
       - "rel-*"
   # Manual dispatch is always a rehearsal: it builds, verifies, and signs, but never
-  # publishes.  Publishing is gated on a `rel-` tag push and nothing else, so there is no
-  # path to cutting a release from an arbitrary ref.  Choose the ref to rehearse against
-  # with the branch/tag selector in the Actions UI.
+  # publishes to PyPI or a GitHub Release.  Both are gated on a `rel-` tag push and nothing
+  # else, so there is no path to cutting a release from an arbitrary ref.  Choose the ref to
+  # rehearse against with the branch/tag selector in the Actions UI.  The one thing a
+  # dispatch can publish is the rehearsal build to test.pypi.org, and only when the
+  # `testpypi` input is set (#76).
   workflow_dispatch:
+    inputs:
+      testpypi:
+        description: "Also upload the rehearsal build to test.pypi.org (a sandbox; versions there cannot be re-uploaded either)"
+        type: boolean
+        default: false
 
 # A publish must never be cancelled halfway through, so unlike CI this does not set
 # cancel-in-progress.
@@ -98,6 +105,14 @@ jobs:
 
       - name: Build wheel and sdist
         run: |
+          set -euo pipefail
+          # A rehearsal builds an untagged commit, which setuptools-scm versions with a local
+          # segment (1.16.1.dev61+g496f0e0).  PyPI and TestPyPI both reject local versions, so
+          # a dispatch drops it (1.16.1.dev61) to stay uploadable to TestPyPI.  A tag build has
+          # no local segment and is left alone.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            export SETUPTOOLS_SCM_OVERRIDES_FOR_DP_PYTHON_LIB='{local_scheme="no-local-version"}'
+          fi
           python -m pip install --upgrade pip build twine
           python -m build
 
@@ -168,7 +183,11 @@ jobs:
         with:
           name: release-dist
           path: dist/
-          retention-days: 7
+          # GitHub holds a deployment awaiting approval for up to 30 days, and publish-pypi
+          # needs these exact files: a full re-run would rebuild and re-sign, and the new files
+          # would not match the SHA256SUMS and bundles already on the GitHub Release.  So the
+          # artifact lives as long as the approval can wait (#76, plan D2).
+          retention-days: 30
 
   publish-github-release:
     name: Publish GitHub Release
@@ -229,32 +248,43 @@ jobs:
           echo "Published body matches doc/release-notes/${TAG}.md."
 
   # ---------------------------------------------------------------------------------------
-  # PyPI publishing -- WIRED UP BUT INTENTIONALLY DISABLED.
+  # PyPI publishing (#76; plan/tickets/76/plan.md).
   #
-  # To enable:
-  #   1. Claim the project name on PyPI.
-  #   2. Configure a Trusted Publisher for osprey-dcs/dp-python-lib, workflow release.yml,
-  #      environment `pypi` (PyPI project settings -> Publishing).  Trusted Publishing uses
-  #      OIDC, so no API token is ever stored in repo secrets.
-  #   3. Create a GitHub environment named `pypi`, ideally with required reviewers.
-  #   4. Change the `if:` below to:
-  #        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')
+  # Trusted Publishing (OIDC): no API token is stored anywhere.  The publisher on pypi.org
+  # names this repository, workflow release.yml, and environment `pypi`; the environment
+  # requires an approval and admits only rel-* tags.  The environment must exist BEFORE any
+  # job names it: GitHub creates a missing one on the fly, with no protection rules.
   #
-  # Note: PyPI rejects Sigstore bundles as uploads, hence the cleanup step -- the bundles
-  # still go to the GitHub Release.  attestations: true emits PEP 740 attestations instead.
+  # publish-pypi runs last, after the GitHub Release is published and its body verified,
+  # because a PyPI file can never be replaced.  It uploads the same files the build job
+  # signed, then checks that the index serves them byte for byte (check-index-digests.py).
+  #
+  # PyPI rejects Sigstore bundles as uploads, hence the cleanup step -- the bundles still go
+  # to the GitHub Release.  attestations: true emits PEP 740 attestations instead.
+  #
+  # publish-testpypi is the rehearsal of the same path, run by dispatch with testpypi=true,
+  # through its own publisher and an unprotected `testpypi` environment.  The two jobs'
+  # steps are duplicated on purpose; keep them in step.
   # ---------------------------------------------------------------------------------------
   publish-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: [build, publish-github-release]
     runs-on: ubuntu-latest
-    if: false # <-- flip this to enable; see the comment block above
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/rel-')
     environment:
       name: pypi
       url: https://pypi.org/p/dp-python-lib
     permissions:
+      contents: read
       id-token: write
 
     steps:
+      - name: Check out the digest checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Download build outputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -263,10 +293,64 @@ jobs:
 
       - name: Remove non-distribution files
         # Only sdists and wheels may be uploaded; the checksums file, the release notes, and
-        # the Sigstore bundles would all be rejected.
-        run: rm -f dist/SHA256SUMS dist/RELEASE_NOTES.md dist/*.sigstore.json
+        # the Sigstore bundles would all be rejected.  SHA256SUMS is kept aside for the check.
+        run: |
+          mv dist/SHA256SUMS SHA256SUMS
+          rm -f dist/RELEASE_NOTES.md dist/*.sigstore.json
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
+          # Files go up one at a time, so a wheel can land and the sdist fail; without this,
+          # every re-run would then fail on the wheel.  A re-run uploads the same artifact, and
+          # the digest check below compares skipped files too, so a real conflict still fails
+          # (plan D3a).
+          skip-existing: true
+
+      - name: Verify PyPI serves the signed files
+        run: python3 .github/scripts/check-index-digests.py SHA256SUMS --index-url https://pypi.org --project dp-python-lib
+
+  publish-testpypi:
+    name: Publish rehearsal to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dp-python-lib
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out the digest checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Download build outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Remove non-distribution files
+        # As in publish-pypi.  A dispatch stages no RELEASE_NOTES.md; rm -f covers that.
+        run: |
+          mv dist/SHA256SUMS SHA256SUMS
+          rm -f dist/RELEASE_NOTES.md dist/*.sigstore.json
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
+          # As in publish-pypi.  A .devN version counts commits since the last tag, so two
+          # different commits can share one; the second rehearsal's upload is then skipped,
+          # and the digest check below fails on the mismatch, as it should.
+          skip-existing: true
+
+      - name: Verify TestPyPI serves the signed files
+        run: python3 .github/scripts/check-index-digests.py SHA256SUMS --index-url https://test.pypi.org --project dp-python-lib
