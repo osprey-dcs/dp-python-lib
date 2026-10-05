@@ -14,8 +14,9 @@ cookbook authors and reviewers: the class of miss that #74 hit twice becomes a C
 
 ## Background / triage findings
 
-- **The draft's diagnosis holds.**  The preamble (`PREAMBLE`, checker L70–188) imports 66 names, and
-  every partial snippet is checked with it prepended, so a recipe's own imports are never consulted.
+- **The draft's diagnosis holds.**  The preamble (`PREAMBLE`, checker L70–188 before this change,
+  L76–194 after it) imports 66 names, and every partial snippet is checked with it prepended, so a
+  recipe's own imports are never consulted.
   A prototype of the proposed rule (pure `ast`, below) run against the cookbook as it stood before each
   #74 fix reports exactly the two misses the ticket names: `dfc` in `query.md` (at `eedae6a~1`), and
   `QueryParams` / `PV` / `bc` in `ingestion.md` (reconstructed by deleting those three imports, since
@@ -141,8 +142,9 @@ of the library or its release artifacts behaves differently.  Same call as #70.
 - Against `git show eedae6a~1:doc/cookbook/query.md` and an `ingestion.md` with the three imports
   removed, it reports `dfc` and `QueryParams` / `PV` / `bc` respectively.
 - Misspelling a name in an imports block fails the run.
-- `ruff check` / `ruff format --check` are unaffected (`.dev/` and `*.md` are excluded); CI needs no
-  change, since the quality job already runs the script.
+- `ruff check` / `ruff format --check` stay clean, the checker included: `.gitignore` re-includes
+  `.dev/tools/`, so ruff lints and formats it like other source.  CI needs no change, since the
+  quality job already runs the script.
 
 ## Out of scope
 
