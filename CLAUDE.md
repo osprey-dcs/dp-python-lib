@@ -87,7 +87,8 @@ GitHub Actions workflows live in `.github/workflows/`:
 
 - **`ci.yml`** — runs on PRs targeting `main` and on pushes to `main`.  Three jobs:
   unit tests across Python 3.10–3.13; a single-interpreter quality job (ruff lint,
-  ruff format check, `mypy src/`, cookbook snippet checker, release-notes checker); and a build job that produces the
+  ruff format check, `mypy src/`, cookbook snippet checker, release-notes checker, and the PyPI
+  digest checker's `--self-test`); and a build job that produces the
   wheel/sdist, runs `twine check --strict`, and verifies the wheel imports in a
   clean venv.  Integration tests are deselected with `-m "not integration"`.
 - **`release.yml`** — runs on `rel-X.Y.Z` tag pushes.  Builds the wheel and sdist,
@@ -102,7 +103,7 @@ GitHub Actions workflows live in `.github/workflows/`:
   so a partial upload can be finished by "Re-run failed jobs", and ends with
   `.github/scripts/check-index-digests.py`, which fails unless the index serves exactly the
   files in `SHA256SUMS`, byte for byte (skipped files included, so a real conflict is still
-  loud).  The `release-dist` artifact is kept 30 days, GitHub's approval window, because a
+  loud).  The `release-dist` artifact is kept 35 days, past GitHub's 30-day approval window, because a
   full re-run rebuilds and re-signs files that no longer match the release.  A dispatch with
   the `testpypi` input set rehearses the same path against test.pypi.org (`publish-testpypi`,
   an unprotected `testpypi` environment); a dispatch build drops setuptools-scm's local

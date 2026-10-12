@@ -186,8 +186,11 @@ jobs:
           # GitHub holds a deployment awaiting approval for up to 30 days, and publish-pypi
           # needs these exact files: a full re-run would rebuild and re-sign, and the new files
           # would not match the SHA256SUMS and bundles already on the GitHub Release.  So the
-          # artifact lives as long as the approval can wait (#76, plan D2).
-          retention-days: 30
+          # artifact outlives the approval window (#76, plan D2), with margin: its clock starts
+          # here, the approval's only once publish-github-release finishes, and a late "Re-run
+          # failed jobs" needs it too.  A repository or org retention maximum below this caps it
+          # silently; this repository's maximum was 90 days when this was set.
+          retention-days: 35
 
   publish-github-release:
     name: Publish GitHub Release

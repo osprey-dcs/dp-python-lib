@@ -160,7 +160,8 @@ them, including a download from PyPI.
 **Upgrading from 1.15.0 or earlier:** 1.16.0 raises the `grpcio` floor to 1.84.0, because the
 regenerated stubs require it.  `pip install` picks that up, but an existing editable install will
 not upgrade it on its own — the stubs then fail at import with a version mismatch naming the
-required release.  `pip install -e . --upgrade` resolves it.
+required release.  `pip install -e . --upgrade` resolves it in a checkout; for an install from PyPI,
+`pip install --upgrade dp-python-lib`.
 
 Point the client at your MLDP services with an `mldp-config.yaml` file or `MLDP_*` environment
 variables — see [Creating and connecting a client](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/connecting.md).

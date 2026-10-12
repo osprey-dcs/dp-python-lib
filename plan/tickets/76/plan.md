@@ -79,7 +79,9 @@ as long as the `release-dist` artifact, which `publish-pypi` downloads and which
 therefore goes to 30 days to match the approval window.  A full workflow re-run is no substitute once
 the artifact has expired: it rebuilds and re-signs, so the files would no longer match the
 `SHA256SUMS` and bundles already on the GitHub Release, and it re-runs the release step against a
-release that already exists.  *(Decided 2026-10-05; the retention window was added in review of PR #78.)*
+release that already exists.  *(Decided 2026-10-05; the retention window was added in review of PR #78.
+Raised to 35 days in review of PR #79: the artifact's clock starts at the build, the approval's only
+after the GitHub Release job, so equal windows left no margin.)*
 
 **D3. A permanent TestPyPI rehearsal behind an opt-in dispatch input.**  `workflow_dispatch` gains a
 boolean input `testpypi` (default `false`).  When it is set, a `publish-testpypi` job uploads the
@@ -179,7 +181,7 @@ documented for development.
   `https://test.pypi.org/p/dp-python-lib`), `repository-url: https://test.pypi.org/legacy/`, otherwise
   the same steps as `publish-pypi`.  The shared steps may stay duplicated; two copies of three steps is
   clearer than a composite action.
-- `build`: raise the `release-dist` upload's `retention-days` from 7 to 30, with a comment tying it to
+- `build`: raise the `release-dist` upload's `retention-days` from 7 to 30 (35 after PR #79's review), with a comment tying it to
   the approval window (D2).
 - Both jobs: `skip-existing: true` on the upload step, with a comment pointing at D3a.
 - Both jobs: move `SHA256SUMS` aside before cleaning `dist/`, then the D5 digest check after upload.

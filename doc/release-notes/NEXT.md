@@ -296,7 +296,7 @@ See [#76](https://github.com/osprey-dcs/dp-python-lib/issues/76) and `plan/ticke
 ## Installing
 
 ```bash
-pip install dp-python-lib
+pip install "dp-python-lib==<version>"
 ```
 
 or, from the files attached to this release:
@@ -327,6 +327,9 @@ When the version is known and the release is being cut:
    the tag changed: `sha256sum -c SHA256SUMS`, then `sigstore verify identity` over the wheel,
    sdist, and `SHA256SUMS` with `--cert-identity` ending `release.yml@refs/tags/rel-<version>`, and
    the pointer to `README.env`.
+   In `## Installing` itself, fill in the version in `pip install "dp-python-lib==<version>"`: pinned,
+   the command keeps installing this release after the next one ships.  Step 8 will not catch it,
+   since a bare `<version>` is allowed.
 5. **End with the Full Changelog line**, after `## Installing`:
    `**Full Changelog**: https://github.com/osprey-dcs/dp-python-lib/compare/rel-<previous>...rel-<version>`.
 6. **Repoint every `blob/main/...` link to `blob/rel-<version>/...`**, including links into the
@@ -351,4 +354,5 @@ When the version is known and the release is being cut:
 11. **Approve the `pypi` deployment** once the "Publish GitHub Release" job is green: the run
     waits on it in the Actions UI.  Then confirm the "Verify PyPI serves the signed files" step
     passed.  If the PyPI job fails, use "Re-run failed jobs", not a full re-run, which would
-    rebuild and re-sign files that no longer match the release; the build artifact is kept 30 days.
+    rebuild and re-sign files that no longer match the release.  GitHub holds the approval for 30
+    days; the build artifact is kept 35, so a re-run near the end of the window still finds it.
