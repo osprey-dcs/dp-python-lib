@@ -103,6 +103,12 @@ jobs:
         # of those tag-bearing parts, since any it has guesses a version not yet decided.
         run: python .github/scripts/check-release-notes.py
 
+      - name: Self-test the PyPI digest check
+        # release.yml runs check-index-digests.py only after the PyPI upload, which can never be
+        # undone, so a broken script would first show itself on a real tag.  This runs its
+        # self-test (comparison rules, version parsing, which errors are retried) on every PR.
+        run: python .github/scripts/check-index-digests.py --self-test
+
   build:
     name: Build distributions
     runs-on: ubuntu-latest

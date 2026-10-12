@@ -317,7 +317,7 @@ The core install is deliberately lightweight.  Converting query results to panda
 Excel requires the `analysis` extra:
 
 ```
-pip install dp-python-lib[analysis]
+pip install "dp-python-lib[analysis]"
 ```
 
 Without it, `to_dataframe()` and `to_numpy()` raise `ImportError` at the point of use — the

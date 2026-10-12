@@ -70,7 +70,7 @@ type-checked against the installed package to catch wrong attribute and method n
 recipe is checked for importing every library name its fragments use:
 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 .venv/bin/python .dev/tools/check-cookbook-snippets.py
 ```
 

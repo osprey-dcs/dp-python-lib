@@ -256,7 +256,7 @@ range and a `limit`, and prefer the streaming form below.
 These conversions need the optional extra:
 
 ```
-pip install dp-python-lib[analysis]
+pip install "dp-python-lib[analysis]"
 ```
 
 Without it, the calls below raise `ImportError` — the imports are lazy, so the rest of the
