@@ -1,5 +1,6 @@
+import contextlib
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 
 import grpc
 
@@ -588,8 +589,12 @@ class SampleStatusClient(ServiceApiClientBase):
                 break
 
     def _send_query_sample_statuses_stream(
-        self, request: annotation_pb2.QuerySampleStatusesRequest
-    ) -> Iterator[QuerySampleStatusesApiResult]:
+        self,
+        request: annotation_pb2.QuerySampleStatusesRequest,
+        *,
+        timeout: float | None = None,
+        idle_timeout: float | None = None,
+    ) -> Generator[QuerySampleStatusesApiResult, None, None]:
         """
         Invokes the querySampleStatusesStream() server-streaming API method with the supplied request, yielding one
         QuerySampleStatusesApiResult per streamed message.
@@ -598,42 +603,27 @@ class SampleStatusClient(ServiceApiClientBase):
         error while iterating the stream each yield an is_error result, and a transport error terminates the generator
         after that final error item.  This is the internal contract -- the public iter_sample_statuses_stream() wrapper
         consumes these and converts the first error result into a RuntimeError, so callers of the public method never
-        see an error result yielded.
+        see an error result yielded.  The shared _iter_stream() does the work, idle watchdog included (#81).
 
         :param request: QuerySampleStatusesRequest with parameters for the call (must carry no page token).
         :return: An iterator over the streamed result messages, possibly ending in an error result.
         """
-        self.logger.info("Calling querySampleStatusesStream API")
-
-        try:
-            self.logger.debug("Invoking stub.querySampleStatusesStream with request")
-            stream = self._stub.querySampleStatusesStream(request)
-            for response in stream:
-                if response.HasField("exceptionalResult"):
-                    error_msg = response.exceptionalResult.message
-                    self.logger.warning("QuerySampleStatusesStream returned business error: %s", error_msg)
-                    yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-                elif response.HasField("querySampleStatusesResult"):
-                    yield QuerySampleStatusesApiResult(is_error=False, message="", response=response)
-                else:
-                    error_msg = (
-                        "Unexpected response format: neither exceptionalResult nor querySampleStatusesResult found"
-                    )
-                    self.logger.error(error_msg)
-                    yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during querySampleStatusesStream: %s", e.details())
-            yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during querySampleStatusesStream: %s", str(e))
-            yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
+        return self._iter_stream(
+            self._stub.querySampleStatusesStream,
+            request,
+            QuerySampleStatusesApiResult,
+            "querySampleStatusesResult",
+            "querySampleStatusesStream",
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+        )
 
     def iter_sample_statuses_stream(
-        self, request_params: QuerySampleStatusesRequestParams
+        self,
+        request_params: QuerySampleStatusesRequestParams,
+        *,
+        idle_timeout: TimeoutArg = DEFAULT,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[QuerySampleStatusesApiResult]:
         """
         User-facing lazy generator for the server-streaming querySampleStatusesStream() API method.  Yields one
@@ -647,15 +637,30 @@ class SampleStatusClient(ServiceApiClientBase):
         failure from an empty stream.
 
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
+        :param idle_timeout: Longest wait, in seconds, for the server's next message.  Time spent processing a
+            yielded result does not count.  Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless
+            configured).  None: no idle bound.  On expiry the call is cancelled and this raises RuntimeError.
+        :param timeout: Optional total deadline, in seconds, for the whole stream.  Omitted or None: none --
+            unlike the unary methods, since a healthy stream can run arbitrarily long and idle_timeout is its default
+            bound.
         :return: A lazy iterator over the streamed result messages.
+        :raises ValueError: if timeout or idle_timeout is zero or negative (on the first next()).
         """
         self.logger.info("Starting querySampleStatusesStream operation")
 
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         request = self._build_query_sample_statuses_request(request_params, page_token=None)
-        for result in self._send_query_sample_statuses_stream(request):
-            if result.result_status.is_error:
-                raise RuntimeError(f"querySampleStatusesStream failed during streaming: {result.result_status.message}")
-            yield result
+        # closing(): the sender's finally stops its idle watchdog, and without an explicit close it would wait
+        # for garbage collection whenever this raises (the traceback keeps the sender alive).
+        with contextlib.closing(
+            self._send_query_sample_statuses_stream(request, timeout=total, idle_timeout=idle)
+        ) as results:
+            for result in results:
+                if result.result_status.is_error:
+                    raise RuntimeError(
+                        f"querySampleStatusesStream failed during streaming: {result.result_status.message}"
+                    )
+                yield result
 
     # ------------------------------------------------------------------
     # deleteSampleStatuses

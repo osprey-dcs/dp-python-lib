@@ -229,6 +229,57 @@ class TestCallTimeouts(unittest.TestCase):
                 getattr(client._stub, stub_method).assert_not_called()
 
 
+# (client class, public stream method, positional args, stub method).
+STREAM_CASES = [
+    (QueryClient, "iter_query_samples_stream", lambda: (_query_params(),), "querySamplesStream"),
+    (QueryClient, "iter_query_buckets_stream", lambda: (_query_params(),), "queryBucketsStream"),
+    (
+        SampleStatusClient,
+        "iter_sample_statuses_stream",
+        lambda: (QuerySampleStatusesRequestParams(T0, T1),),
+        "querySampleStatusesStream",
+    ),
+]
+
+
+class TestStreamTimeouts(unittest.TestCase):
+    """Stream methods: idle_timeout plus an optional total timeout that defaults to none (#81 D2/D3)."""
+
+    def _stub_kwargs(self, cls, method, args, stub_method, **kwargs):
+        client = _client(cls)
+        client._stub = Mock()
+        getattr(client._stub, stub_method).return_value = iter([])
+        list(getattr(client, method)(*args(), **kwargs))
+        return getattr(client._stub, stub_method).call_args.kwargs
+
+    def test_both_keywords_are_keyword_only_and_default_to_the_sentinel(self):
+        for cls, method, *_ in STREAM_CASES:
+            for name in ("timeout", "idle_timeout"):
+                with self.subTest(method=method, param=name):
+                    param = inspect.signature(getattr(cls, method)).parameters[name]
+                    self.assertIs(inspect.Parameter.KEYWORD_ONLY, param.kind)
+                    self.assertIs(DEFAULT, param.default)
+
+    def test_omitted_timeout_sets_no_total_deadline(self):
+        for cls, method, args, stub_method in STREAM_CASES:
+            with self.subTest(method=method):
+                self.assertNotIn("timeout", self._stub_kwargs(cls, method, args, stub_method))
+
+    def test_explicit_timeout_is_the_total_deadline(self):
+        for cls, method, args, stub_method in STREAM_CASES:
+            with self.subTest(method=method):
+                self.assertEqual(9, self._stub_kwargs(cls, method, args, stub_method, timeout=9)["timeout"])
+
+    def test_zero_or_negative_raises_on_first_next(self):
+        for cls, method, args, stub_method in STREAM_CASES:
+            for kwargs in ({"timeout": 0}, {"idle_timeout": 0}, {"idle_timeout": -1}):
+                with self.subTest(method=method, kwargs=kwargs):
+                    client = _client(cls)
+                    with self.assertRaisesRegex(ValueError, "=None to disable"):
+                        list(getattr(client, method)(*args(), **kwargs))
+                    getattr(client._stub, stub_method).assert_not_called()
+
+
 class TestExportTimeout(unittest.TestCase):
     def _export(self, client, **kwargs):
         return client.export_data(ExportDataRequestParams(ExportFormat.CSV, dataset_id="ds"), **kwargs)

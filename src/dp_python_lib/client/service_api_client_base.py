@@ -4,7 +4,7 @@ import math
 import threading
 import time
 from abc import ABC
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeAlias, TypeVar
 
@@ -13,6 +13,7 @@ import grpc
 from .result import ApiResultBase
 
 ApiResultT = TypeVar("ApiResultT", bound=ApiResultBase, covariant=True)
+_StreamResultT = TypeVar("_StreamResultT", bound=ApiResultBase)
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 300.0
 """Default deadline for a unary call (#81 D1).  A hang guard, not a performance budget."""
@@ -376,6 +377,88 @@ class ServiceApiClientBase(ABC):
             error_msg = f"Unexpected error: {e!s}"
             self.logger.exception("Unexpected error during %s: %s", op_name, str(e))
             return result_cls(is_error=True, message=error_msg)
+
+    def _iter_stream(
+        self,
+        stub_call: Callable[..., Iterable[Any]],
+        request: Any,
+        result_cls: Callable[..., _StreamResultT],
+        success_field: str,
+        op_name: str,
+        *,
+        timeout: float | None = None,
+        idle_timeout: float | None = None,
+    ) -> Generator[_StreamResultT, None, None]:
+        """
+        Invokes a server-streaming method, yielding one result per streamed message.  Shared by the query and sample
+        status stream senders (#81 moved it here from QueryClient so both get the idle watchdog).
+
+        Errors are yielded, not raised: a business error on a message, an unrecognized response, or a gRPC/unexpected
+        error while iterating the stream each yield an is_error result, and a transport error terminates the
+        generator after that final error item.  This is the internal contract -- the public iter_*_stream() wrappers
+        consume these and convert the first error result into a RuntimeError, so callers of the public methods never
+        see an error result yielded.
+
+        Deliberately not routed through _dispatch(), which returns a single result rather than yielding many.
+
+        The idle watchdog (#81 D3) is armed only while waiting in next() on the stream, so time the caller spends
+        on a yielded result never counts.  On expiry it cancels the call, and the CANCELLED that follows is reported
+        as "gRPC error: stream idle timeout: ..." rather than grpcio's "Locally cancelled by application!".
+
+        :param stub_call: The bound stub method (e.g. self._stub.querySamplesStream).
+        :param request: The request for the call (must carry no page token).
+        :param result_cls: The result class; called as result_cls(is_error=, message=, response=).
+        :param success_field: The success oneof field of each response (e.g. "sampleQueryResult").
+        :param op_name: The camelCase method name, for log and error messages.
+        :param timeout: Resolved total deadline in seconds, or None for none.
+        :param idle_timeout: Resolved idle bound in seconds, or None for none.
+        :return: An iterator over the streamed result messages, possibly ending in an error result.
+        """
+        display_name = op_name[0].upper() + op_name[1:]
+        self.logger.info("Calling %s API", op_name)
+
+        watchdog = _IdleWatchdog(None)
+        try:
+            self.logger.debug("Invoking stub.%s with request", op_name)
+            stream = stub_call(request) if timeout is None else stub_call(request, timeout=timeout)
+            # getattr: a mocked stub may return a plain iterator, which has nothing to cancel.
+            watchdog = _IdleWatchdog(idle_timeout, getattr(stream, "cancel", None), name=op_name)
+            responses = iter(stream)
+            while True:
+                watchdog.arm()
+                try:
+                    response = next(responses)
+                except StopIteration:
+                    break
+                finally:
+                    watchdog.disarm()
+                if response.HasField("exceptionalResult"):
+                    error_msg = response.exceptionalResult.message
+                    self.logger.warning("%s returned business error: %s", display_name, error_msg)
+                    yield result_cls(is_error=True, message=error_msg)
+                elif response.HasField(success_field):
+                    yield result_cls(is_error=False, message="", response=response)
+                else:
+                    error_msg = f"Unexpected response format: neither exceptionalResult nor {success_field} found"
+                    self.logger.error(error_msg)
+                    yield result_cls(is_error=True, message=error_msg)
+
+        except grpc.RpcError as e:
+            if watchdog.expired:
+                error_msg = f"gRPC error: {watchdog.message()}"
+                self.logger.error("%s cancelled: %s", op_name, watchdog.message())
+            else:
+                error_msg = f"gRPC error: {e.details()}"
+                if timeout is not None and _rpc_code(e) == grpc.StatusCode.DEADLINE_EXCEEDED:
+                    error_msg += _AppliedTimeout(timeout, per_call=True).deadline_hint()
+                self.logger.error("gRPC error during %s: %s", op_name, e.details())
+            yield result_cls(is_error=True, message=error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error: {e!s}"
+            self.logger.exception("Unexpected error during %s: %s", op_name, str(e))
+            yield result_cls(is_error=True, message=error_msg)
+        finally:
+            watchdog.stop()
 
     def _resolve_call_timeout(self, timeout: TimeoutArg, default: ClientTimeout | None = None) -> _AppliedTimeout:
         """

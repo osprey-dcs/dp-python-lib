@@ -351,6 +351,22 @@ the stream senders:
 The stream senders get the D3 watchdog.  `_iter_stream()` keeps its yield-errors contract and error texts; only
 the idle case adds a new text.
 
+**Amended during T3:**
+
+- `_iter_stream()` moved from `QueryClient` to `ServiceApiClientBase`, and `_send_query_sample_statuses_stream()`
+  now delegates to it.  That sender was a line-for-line copy (same tiers, same texts; its logs hard-coded the
+  names `_iter_stream()` derives), and wiring the watchdog into two copies was the worse option.  CLAUDE.md's "leave
+  them as they are" note is updated in T7.
+- The three public server-stream wrappers close their sender with `contextlib.closing`, as the bidi ingest wrapper
+  already did.  Without it, a wrapper that raises leaves the sender suspended until garbage collection (the
+  traceback holds it), so its `finally` -- which stops the watchdog thread -- ran late.  The in-process test that
+  counts watchdog threads found this.
+- A stream's total `timeout=` gets the per-call D2 hint on `DEADLINE_EXCEEDED`, like a unary call's.
+- The senders are annotated `Generator[...]`, not `Iterator[...]`, since `closing()` needs `close()`.
+- `test_call_timeouts.py` checks all 40 unary and paging methods (not a sample, since the keyword went in
+  mechanically) and the stream methods; `test_timeouts_grpc.py` holds the in-process unary-deadline and
+  server-stream idle tests T6 lists.
+
 ### T4. `await_request_statuses()` honors its own timeout
 
 The method keeps its signature: its `timeout` stays the total wait (default 30 s), and it gains no per-call
