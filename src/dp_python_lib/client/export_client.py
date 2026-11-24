@@ -4,8 +4,19 @@ from enum import Enum
 import grpc
 
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import (
+    DEFAULT,
+    ServiceApiClientBase,
+    TimeoutArg,
+    _client_timeout,
+)
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
+
+DEFAULT_EXPORT_TIMEOUT_SECONDS = 3600.0
+"""
+Default deadline for export_data() (#81 Q1).  Separate from, and longer than, the unary default, because exportData
+replies only after the server has written the whole file, so its legitimate duration grows with the export.
+"""
 
 
 class ExportFormat(str, Enum):
@@ -169,11 +180,24 @@ class ExportClient(ServiceApiClientBase):
     Provides a low-level wrapper for exportData().
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        export_timeout: TimeoutArg = DEFAULT,
+        export_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Annotation Service.
+        :param export_timeout: Default deadline, in seconds, for export_data().  Omitted:
+            DEFAULT_EXPORT_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param export_timeout_source: How a DEADLINE_EXCEEDED error describes where ``export_timeout`` was set
+            (MldpClient names the config setting).
         """
         super().__init__(channel, annotation_pb2_grpc.DpAnnotationServiceStub)
+        self._export_timeout = _client_timeout(
+            export_timeout, DEFAULT_EXPORT_TIMEOUT_SECONDS, "export_timeout", export_timeout_source
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("ExportClient initialized with channel: %s", channel)
 
@@ -204,7 +228,9 @@ class ExportClient(ServiceApiClientBase):
         self.logger.debug("ExportDataRequest built successfully")
         return request
 
-    def _send_export_data(self, request: annotation_pb2.ExportDataRequest) -> ExportDataApiResult:
+    def _send_export_data(
+        self, request: annotation_pb2.ExportDataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> ExportDataApiResult:
         """
         Invokes the exportData() API method with the supplied request.
         :param request: ExportDataRequest with parameters for the call.
@@ -223,9 +249,13 @@ class ExportClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully exported data to: %s", response.exportDataResult.filePath
             ),
+            timeout=timeout,
+            default_timeout=self._export_timeout,
         )
 
-    def export_data(self, request_params: ExportDataRequestParams) -> ExportDataApiResult:
+    def export_data(
+        self, request_params: ExportDataRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> ExportDataApiResult:
         """
         User-facing method for invoking the exportData() API method.
 
@@ -233,12 +263,15 @@ class ExportClient(ServiceApiClientBase):
         publishes over HTTP, a URL.
 
         :param request_params: Contains user parameters for the call to exportData().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's export default
+            (DEFAULT_EXPORT_TIMEOUT_SECONDS, 3600 s, unless configured), not the shorter one other calls get, since
+            the server replies only once the file is written.  None: no deadline.  Must be positive.
         :return: An ExportDataApiResult with the method response and status information.
         """
         self.logger.info("Starting exportData operation with format: %s", request_params.output_format.value)
 
         request = self._build_export_data_request(request_params)
-        result = self._send_export_data(request)
+        result = self._send_export_data(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("ExportData operation failed: %s", result.result_status.message)

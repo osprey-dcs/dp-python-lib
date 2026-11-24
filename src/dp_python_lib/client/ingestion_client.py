@@ -36,7 +36,7 @@ from dp_python_lib.client.data_frame import (
     validate_data_frame,
 )
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import (
     NANOS_PER_SECOND,
     TimestampInput,
@@ -632,7 +632,9 @@ class IngestionClient(ServiceApiClientBase):
         self.logger.debug("RegisterProviderRequest built successfully")
         return request
 
-    def _send_register_provider(self, request: ingestion_pb2.RegisterProviderRequest) -> RegisterProviderApiResult:
+    def _send_register_provider(
+        self, request: ingestion_pb2.RegisterProviderRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> RegisterProviderApiResult:
         """
         Invokes the registerProvider() API method with the supplied request object.
         :param request: RegisterProviderRequest object with parameters for call to registerProvider().
@@ -648,19 +650,24 @@ class IngestionClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully registered provider: %s", request.providerName
             ),
+            timeout=timeout,
         )
 
-    def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:
+    def register_provider(
+        self, request_params: RegisterProviderRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> RegisterProviderApiResult:
         """
         User facing method for invoking the registerProvider() API method.
         :param request_params: Contains user parameters for call to registerProvider() API method.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: Returns RegisterProviderApiResult with the method response and status information; its
             provider_id is what every ingestion request needs.
         """
         self.logger.info("Starting registerProvider operation for provider: %s", request_params.name)
 
         request = self._build_register_provider_request(request_params)
-        result = self._send_register_provider(request)
+        result = self._send_register_provider(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("RegisterProvider operation failed: %s", result.result_status.message)
@@ -686,7 +693,9 @@ class IngestionClient(ServiceApiClientBase):
         request.ingestionDataFrame.CopyFrom(request_params.frame)
         return request
 
-    def _send_ingest_data(self, request: ingestion_pb2.IngestDataRequest) -> IngestDataApiResult:
+    def _send_ingest_data(
+        self, request: ingestion_pb2.IngestDataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> IngestDataApiResult:
         """
         Invokes the unary ingestData() API method.
         :param request: The IngestDataRequest.
@@ -708,9 +717,12 @@ class IngestionClient(ServiceApiClientBase):
                 response.ackResult.numColumns,
             ),
             rpc_error_hint=_ingest_size_hint,
+            timeout=timeout,
         )
 
-    def ingest_data(self, request_params: IngestDataRequestParams) -> IngestDataApiResult:
+    def ingest_data(
+        self, request_params: IngestDataRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> IngestDataApiResult:
         """
         Sends one ingestion request and returns its ack or reject.
 
@@ -721,10 +733,12 @@ class IngestionClient(ServiceApiClientBase):
         message then says so and points at split_data_frame().
 
         :param request_params: The request (see IngestDataRequestParams).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: An IngestDataApiResult whose provider_id and client_request_id identify the request.
         """
         request = self._build_ingest_data_request(request_params)
-        result = self._send_ingest_data(request)
+        result = self._send_ingest_data(request, timeout=timeout)
         # _dispatch keeps no response on an error, so name the request from what was sent.
         result.provider_id = request_params.provider_id
         result.client_request_id = request_params.client_request_id
@@ -897,7 +911,7 @@ class IngestionClient(ServiceApiClientBase):
     # ---- queryRequestStatus
 
     def _send_query_request_status(
-        self, request: ingestion_pb2.QueryRequestStatusRequest
+        self, request: ingestion_pb2.QueryRequestStatusRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QueryRequestStatusApiResult:
         """
         Invokes the queryRequestStatus() API method.
@@ -917,11 +931,14 @@ class IngestionClient(ServiceApiClientBase):
                 "queryRequestStatus returned %d documents", len(response.requestStatusResult.requestStatus)
             ),
             rpc_error_hint=_status_query_size_hint,
+            timeout=timeout,
         )
 
     def query_request_status(
         self,
         criteria: "Sequence[ingestion_pb2.QueryRequestStatusRequest.QueryRequestStatusCriterion]",
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryRequestStatusApiResult:
         """
         Queries request-status documents: the only record of whether an acked request was actually ingested.
@@ -934,6 +951,8 @@ class IngestionClient(ServiceApiClientBase):
         a time range, not a bare status.
 
         :param criteria: At least one criterion (see RequestStatusQuery); they are ANDed.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryRequestStatusApiResult.
         :raises ValueError: if criteria is empty (the server rejects it).
         """
@@ -941,7 +960,7 @@ class IngestionClient(ServiceApiClientBase):
             raise ValueError("query_request_status() requires at least one criterion")
         request = ingestion_pb2.QueryRequestStatusRequest()
         request.criteria.extend(criteria)
-        return self._send_query_request_status(request)
+        return self._send_query_request_status(request, timeout=timeout)
 
     def await_request_statuses(
         self,

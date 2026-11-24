@@ -6,7 +6,7 @@ from typing import TypeAlias
 import grpc
 
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 
 # The shared time converters moved to time_conversions.py in issue #6.  They were defined here, as the first
 # module to need them, and six others grew imports of them from here -- which read as though datasets, queries,
@@ -701,7 +701,9 @@ class MachineConfigClient(ServiceApiClientBase):
         self.logger.debug("SaveConfigurationRequest built successfully")
         return request
 
-    def _send_save_configuration(self, request: annotation_pb2.SaveConfigurationRequest) -> SaveConfigurationApiResult:
+    def _send_save_configuration(
+        self, request: annotation_pb2.SaveConfigurationRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveConfigurationApiResult:
         """
         Invokes the saveConfiguration() API method with the supplied request.
         :param request: SaveConfigurationRequest with parameters for the call.
@@ -719,12 +721,17 @@ class MachineConfigClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully saved configuration: %s", request.configurationName
             ),
+            timeout=timeout,
         )
 
-    def save_configuration(self, request_params: SaveConfigurationRequestParams) -> SaveConfigurationApiResult:
+    def save_configuration(
+        self, request_params: SaveConfigurationRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveConfigurationApiResult:
         """
         User-facing method for invoking the saveConfiguration() API method.
         :param request_params: Contains user parameters for the call to saveConfiguration().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveConfigurationApiResult with the method response and status information.
         """
         self.logger.info(
@@ -733,7 +740,7 @@ class MachineConfigClient(ServiceApiClientBase):
         )
 
         request = self._build_save_configuration_request(request_params)
-        result = self._send_save_configuration(request)
+        result = self._send_save_configuration(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveConfiguration operation failed: %s", result.result_status.message)
@@ -760,7 +767,9 @@ class MachineConfigClient(ServiceApiClientBase):
         request.configurationName = configuration_name
         return request
 
-    def _send_get_configuration(self, request: annotation_pb2.GetConfigurationRequest) -> GetConfigurationApiResult:
+    def _send_get_configuration(
+        self, request: annotation_pb2.GetConfigurationRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetConfigurationApiResult:
         """
         Invokes the getConfiguration() API method with the supplied request.
         :param request: GetConfigurationRequest with parameters for the call.
@@ -776,18 +785,21 @@ class MachineConfigClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully retrieved configuration: %s", request.configurationName
             ),
+            timeout=timeout,
         )
 
-    def get_configuration(self, configuration_name: str) -> GetConfigurationApiResult:
+    def get_configuration(self, configuration_name: str, *, timeout: TimeoutArg = DEFAULT) -> GetConfigurationApiResult:
         """
         User-facing method for invoking the getConfiguration() API method.
         :param configuration_name: Configuration name to look up.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetConfigurationApiResult with the method response and status information.
         """
         self.logger.info("Starting getConfiguration operation for: %s", configuration_name)
 
         request = self._build_get_configuration_request(configuration_name)
-        result = self._send_get_configuration(request)
+        result = self._send_get_configuration(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetConfiguration operation failed: %s", result.result_status.message)
@@ -825,7 +837,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_query_configurations(
-        self, request: annotation_pb2.QueryConfigurationsRequest
+        self, request: annotation_pb2.QueryConfigurationsRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QueryConfigurationsApiResult:
         """
         Invokes the queryConfigurations() API method with the supplied request.
@@ -845,6 +857,7 @@ class MachineConfigClient(ServiceApiClientBase):
                 "QueryConfigurations returned %d records",
                 len(response.queryConfigurationsResult.configurations),
             ),
+            timeout=timeout,
         )
 
     def query_configurations(
@@ -852,6 +865,8 @@ class MachineConfigClient(ServiceApiClientBase):
         criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryConfigurationsApiResult:
         """
         User-facing method for invoking the queryConfigurations() API method.  Returns a single page of results; use
@@ -865,13 +880,15 @@ class MachineConfigClient(ServiceApiClientBase):
             to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryConfigurationsApiResult with a single page of results and status information.
         """
         criteria = criteria or []
         self.logger.info("Starting queryConfigurations operation with %d criteria", len(criteria))
 
         request = self._build_query_configurations_request(criteria, limit=limit, page_token=page_token)
-        result = self._send_query_configurations(request)
+        result = self._send_query_configurations(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryConfigurations operation failed: %s", result.result_status.message)
@@ -884,6 +901,8 @@ class MachineConfigClient(ServiceApiClientBase):
         self,
         criteria: list[annotation_pb2.QueryConfigurationsRequest.QueryConfigurationsCriterion] | None = None,
         limit: int | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[common_pb2.Configuration]:
         """
         Convenience generator that transparently pages through all queryConfigurations() results, following the
@@ -897,11 +916,13 @@ class MachineConfigClient(ServiceApiClientBase):
         :param criteria: List of QueryConfigurationsCriterion objects (see ConfigurationQuery helpers), or None
             to match all records.
         :param limit: Maximum number of records to return per page (optional).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching Configuration records across all pages.
         """
         page_token: str | None = None
         while True:
-            result = self.query_configurations(criteria, limit=limit, page_token=page_token)
+            result = self.query_configurations(criteria, limit=limit, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryConfigurations failed during paging: {result.result_status.message}")
 
@@ -927,7 +948,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_delete_configuration(
-        self, request: annotation_pb2.DeleteConfigurationRequest
+        self, request: annotation_pb2.DeleteConfigurationRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> DeleteConfigurationApiResult:
         """
         Invokes the deleteConfiguration() API method with the supplied request.
@@ -944,18 +965,23 @@ class MachineConfigClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully deleted configuration: %s", request.configurationName
             ),
+            timeout=timeout,
         )
 
-    def delete_configuration(self, configuration_name: str) -> DeleteConfigurationApiResult:
+    def delete_configuration(
+        self, configuration_name: str, *, timeout: TimeoutArg = DEFAULT
+    ) -> DeleteConfigurationApiResult:
         """
         User-facing method for invoking the deleteConfiguration() API method.
         :param configuration_name: Configuration name to delete.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteConfigurationApiResult with the method response and status information.
         """
         self.logger.info("Starting deleteConfiguration operation for: %s", configuration_name)
 
         request = self._build_delete_configuration_request(configuration_name)
-        result = self._send_delete_configuration(request)
+        result = self._send_delete_configuration(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteConfiguration operation failed: %s", result.result_status.message)
@@ -1012,7 +1038,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_save_configuration_activation(
-        self, request: annotation_pb2.SaveConfigurationActivationRequest
+        self, request: annotation_pb2.SaveConfigurationActivationRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> SaveConfigurationActivationApiResult:
         """
         Invokes the saveConfigurationActivation() API method with the supplied request.
@@ -1032,14 +1058,17 @@ class MachineConfigClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully saved configuration activation for: %s", request.configurationName
             ),
+            timeout=timeout,
         )
 
     def save_configuration_activation(
-        self, request_params: SaveConfigurationActivationRequestParams
+        self, request_params: SaveConfigurationActivationRequestParams, *, timeout: TimeoutArg = DEFAULT
     ) -> SaveConfigurationActivationApiResult:
         """
         User-facing method for invoking the saveConfigurationActivation() API method.
         :param request_params: Contains user parameters for the call to saveConfigurationActivation().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveConfigurationActivationApiResult with the method response and status information.
         """
         self.logger.info(
@@ -1048,7 +1077,7 @@ class MachineConfigClient(ServiceApiClientBase):
         )
 
         request = self._build_save_configuration_activation_request(request_params)
-        result = self._send_save_configuration_activation(request)
+        result = self._send_save_configuration_activation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveConfigurationActivation operation failed: %s", result.result_status.message)
@@ -1125,7 +1154,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_get_configuration_activation(
-        self, request: annotation_pb2.GetConfigurationActivationRequest
+        self, request: annotation_pb2.GetConfigurationActivationRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> GetConfigurationActivationApiResult:
         """
         Invokes the getConfigurationActivation() API method with the supplied request.
@@ -1139,6 +1168,7 @@ class MachineConfigClient(ServiceApiClientBase):
             "getConfigurationActivationResult",
             "getConfigurationActivation",
             success_log=lambda _response: self.logger.info("Successfully retrieved configuration activation"),
+            timeout=timeout,
         )
 
     def get_configuration_activation(
@@ -1146,6 +1176,8 @@ class MachineConfigClient(ServiceApiClientBase):
         client_activation_id: str | None = None,
         configuration_name: str | None = None,
         start_time: TimestampInput | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> GetConfigurationActivationApiResult:
         """
         User-facing method for invoking the getConfigurationActivation() API method.  Look up an activation by either
@@ -1154,13 +1186,15 @@ class MachineConfigClient(ServiceApiClientBase):
         :param client_activation_id: Client activation id to look up.
         :param configuration_name: Configuration name of the composite key.
         :param start_time: Start time of the composite key (tz-aware datetime, epoch seconds, or common.Timestamp).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetConfigurationActivationApiResult with the method response and status information.
         :raises ValueError: if the supplied key form is invalid.
         """
         self.logger.info("Starting getConfigurationActivation operation")
 
         request = self._build_get_configuration_activation_request(client_activation_id, configuration_name, start_time)
-        result = self._send_get_configuration_activation(request)
+        result = self._send_get_configuration_activation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetConfigurationActivation operation failed: %s", result.result_status.message)
@@ -1200,7 +1234,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_query_configuration_activations(
-        self, request: annotation_pb2.QueryConfigurationActivationsRequest
+        self, request: annotation_pb2.QueryConfigurationActivationsRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QueryConfigurationActivationsApiResult:
         """
         Invokes the queryConfigurationActivations() API method with the supplied request.
@@ -1220,6 +1254,7 @@ class MachineConfigClient(ServiceApiClientBase):
                 "QueryConfigurationActivations returned %d records",
                 len(response.queryConfigurationActivationsResult.configurationActivations),
             ),
+            timeout=timeout,
         )
 
     def query_configuration_activations(
@@ -1227,6 +1262,8 @@ class MachineConfigClient(ServiceApiClientBase):
         criteria: list["_ActivationCriterion"] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryConfigurationActivationsApiResult:
         """
         User-facing method for invoking the queryConfigurationActivations() API method.  Returns a single page of
@@ -1240,13 +1277,15 @@ class MachineConfigClient(ServiceApiClientBase):
             or None to match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryConfigurationActivationsApiResult with a single page of results and status information.
         """
         criteria = criteria or []
         self.logger.info("Starting queryConfigurationActivations operation with %d criteria", len(criteria))
 
         request = self._build_query_configuration_activations_request(criteria, limit=limit, page_token=page_token)
-        result = self._send_query_configuration_activations(request)
+        result = self._send_query_configuration_activations(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryConfigurationActivations operation failed: %s", result.result_status.message)
@@ -1259,6 +1298,8 @@ class MachineConfigClient(ServiceApiClientBase):
         self,
         criteria: list["_ActivationCriterion"] | None = None,
         limit: int | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[common_pb2.ConfigurationActivation]:
         """
         Convenience generator that transparently pages through all queryConfigurationActivations() results, following
@@ -1272,11 +1313,13 @@ class MachineConfigClient(ServiceApiClientBase):
         :param criteria: List of QueryConfigurationActivationsCriterion objects (see ConfigurationActivationQuery),
             or None to match all records.
         :param limit: Maximum number of records to return per page (optional).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching ConfigurationActivation records across all pages.
         """
         page_token: str | None = None
         while True:
-            result = self.query_configuration_activations(criteria, limit=limit, page_token=page_token)
+            result = self.query_configuration_activations(criteria, limit=limit, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(
                     f"queryConfigurationActivations failed during paging: {result.result_status.message}"
@@ -1327,7 +1370,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_delete_configuration_activation(
-        self, request: annotation_pb2.DeleteConfigurationActivationRequest
+        self, request: annotation_pb2.DeleteConfigurationActivationRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> DeleteConfigurationActivationApiResult:
         """
         Invokes the deleteConfigurationActivation() API method with the supplied request.
@@ -1341,6 +1384,7 @@ class MachineConfigClient(ServiceApiClientBase):
             "deleteConfigurationActivationResult",
             "deleteConfigurationActivation",
             success_log=lambda _response: self.logger.info("Successfully deleted configuration activation"),
+            timeout=timeout,
         )
 
     def delete_configuration_activation(
@@ -1348,6 +1392,8 @@ class MachineConfigClient(ServiceApiClientBase):
         client_activation_id: str | None = None,
         configuration_name: str | None = None,
         start_time: TimestampInput | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> DeleteConfigurationActivationApiResult:
         """
         User-facing method for invoking the deleteConfigurationActivation() API method.  Delete an activation by
@@ -1356,6 +1402,8 @@ class MachineConfigClient(ServiceApiClientBase):
         :param client_activation_id: Client activation id to delete.
         :param configuration_name: Configuration name of the composite key.
         :param start_time: Start time of the composite key (tz-aware datetime, epoch seconds, or common.Timestamp).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteConfigurationActivationApiResult with the method response and status information.
         :raises ValueError: if the supplied key form is invalid.
         """
@@ -1364,7 +1412,7 @@ class MachineConfigClient(ServiceApiClientBase):
         request = self._build_delete_configuration_activation_request(
             client_activation_id, configuration_name, start_time
         )
-        result = self._send_delete_configuration_activation(request)
+        result = self._send_delete_configuration_activation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteConfigurationActivation operation failed: %s", result.result_status.message)
@@ -1396,7 +1444,7 @@ class MachineConfigClient(ServiceApiClientBase):
         return request
 
     def _send_get_active_configurations(
-        self, request: annotation_pb2.GetActiveConfigurationsRequest
+        self, request: annotation_pb2.GetActiveConfigurationsRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> GetActiveConfigurationsApiResult:
         """
         Invokes the getActiveConfigurations() API method with the supplied request.
@@ -1413,21 +1461,26 @@ class MachineConfigClient(ServiceApiClientBase):
                 "GetActiveConfigurations returned %d records",
                 len(response.getActiveConfigurationsResult.configurationActivations),
             ),
+            timeout=timeout,
         )
 
-    def get_active_configurations(self, timestamp: TimestampInput | None = None) -> GetActiveConfigurationsApiResult:
+    def get_active_configurations(
+        self, timestamp: TimestampInput | None = None, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetActiveConfigurationsApiResult:
         """
         User-facing method for invoking the getActiveConfigurations() API method: returns every configuration
         activation whose interval covers the given instant.  With no argument, answers "what is active right now"
         (current UTC time).
         :param timestamp: The instant to look up (tz-aware datetime, epoch seconds, or common.Timestamp).  If None,
             the current UTC time is used.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetActiveConfigurationsApiResult with the method response and status information.
         """
         self.logger.info("Starting getActiveConfigurations operation")
 
         request = self._build_get_active_configurations_request(timestamp)
-        result = self._send_get_active_configurations(request)
+        result = self._send_get_active_configurations(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetActiveConfigurations operation failed: %s", result.result_status.message)

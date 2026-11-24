@@ -387,15 +387,15 @@ class TestIterQuerySamples(unittest.TestCase):
         page2 = QuerySamplesApiResult(is_error=False, message="", response=_result_response(""))
         calls = []
 
-        def fake_query_samples(params, page_token=None):
-            calls.append(page_token)
+        def fake_query_samples(params, page_token=None, *, timeout):
+            calls.append((page_token, timeout))
             return page1 if page_token is None else page2
 
         self.client.query_samples = Mock(side_effect=fake_query_samples)
-        results = list(self.client.iter_query_samples(self.params))
+        results = list(self.client.iter_query_samples(self.params, timeout=7))
         self.assertEqual(len(results), 2)
-        # page 1 sent no token; page 2 sent page 1's token.
-        self.assertEqual(calls, [None, "tok"])
+        # page 1 sent no token; page 2 sent page 1's token.  The timeout applies to each page's call (#81 D2).
+        self.assertEqual(calls, [(None, 7), ("tok", 7)])
 
     def test_single_page(self):
         page = QuerySamplesApiResult(is_error=False, message="", response=_result_response(""))

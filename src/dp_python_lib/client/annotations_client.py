@@ -5,7 +5,7 @@ import grpc
 
 from dp_python_lib.client.query_support import check_at_most_one_text_criterion
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
 
@@ -518,7 +518,9 @@ class AnnotationsClient(ServiceApiClientBase):
         self.logger.debug("SaveAnnotationRequest built successfully")
         return request
 
-    def _send_save_annotation(self, request: annotation_pb2.SaveAnnotationRequest) -> SaveAnnotationApiResult:
+    def _send_save_annotation(
+        self, request: annotation_pb2.SaveAnnotationRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveAnnotationApiResult:
         """
         Invokes the saveAnnotation() API method with the supplied request.
         :param request: SaveAnnotationRequest with parameters for the call.
@@ -540,9 +542,12 @@ class AnnotationsClient(ServiceApiClientBase):
                 request.name,
                 response.saveAnnotationResult.annotationId,
             ),
+            timeout=timeout,
         )
 
-    def save_annotation(self, request_params: SaveAnnotationRequestParams) -> SaveAnnotationApiResult:
+    def save_annotation(
+        self, request_params: SaveAnnotationRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveAnnotationApiResult:
         """
         User-facing method for invoking the saveAnnotation() API method.
 
@@ -550,12 +555,14 @@ class AnnotationsClient(ServiceApiClientBase):
         omitting them clears and deletes the stored object.  Read with get_annotation() and resend to preserve them.
 
         :param request_params: Contains user parameters for the call to saveAnnotation().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveAnnotationApiResult with the method response and status information.
         """
         self.logger.info("Starting saveAnnotation operation for annotation: %s", request_params.name)
 
         request = self._build_save_annotation_request(request_params)
-        result = self._send_save_annotation(request)
+        result = self._send_save_annotation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveAnnotation operation failed: %s", result.result_status.message)
@@ -579,7 +586,9 @@ class AnnotationsClient(ServiceApiClientBase):
         request.annotationId = annotation_id
         return request
 
-    def _send_get_annotation(self, request: annotation_pb2.GetAnnotationRequest) -> GetAnnotationApiResult:
+    def _send_get_annotation(
+        self, request: annotation_pb2.GetAnnotationRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetAnnotationApiResult:
         """
         Invokes the getAnnotation() API method with the supplied request.
         :param request: GetAnnotationRequest with parameters for the call.
@@ -595,9 +604,10 @@ class AnnotationsClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully retrieved annotation for id: %s", request.annotationId
             ),
+            timeout=timeout,
         )
 
-    def get_annotation(self, annotation_id: str) -> GetAnnotationApiResult:
+    def get_annotation(self, annotation_id: str, *, timeout: TimeoutArg = DEFAULT) -> GetAnnotationApiResult:
         """
         User-facing method for invoking the getAnnotation() API method.
 
@@ -605,12 +615,14 @@ class AnnotationsClient(ServiceApiClientBase):
         comes back as a business error, not an empty success.
 
         :param annotation_id: Id of the annotation to retrieve.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetAnnotationApiResult with the method response and status information.
         """
         self.logger.info("Starting getAnnotation operation for id: %s", annotation_id)
 
         request = self._build_get_annotation_request(annotation_id)
-        result = self._send_get_annotation(request)
+        result = self._send_get_annotation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetAnnotation operation failed: %s", result.result_status.message)
@@ -647,7 +659,9 @@ class AnnotationsClient(ServiceApiClientBase):
             request.pageToken = page_token
         return request
 
-    def _send_query_annotations(self, request: annotation_pb2.QueryAnnotationsRequest) -> QueryAnnotationsApiResult:
+    def _send_query_annotations(
+        self, request: annotation_pb2.QueryAnnotationsRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryAnnotationsApiResult:
         """
         Invokes the queryAnnotations() API method with the supplied request.
         :param request: QueryAnnotationsRequest with parameters for the call.
@@ -665,6 +679,7 @@ class AnnotationsClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "QueryAnnotations returned %d records", len(response.annotationsResult.annotations)
             ),
+            timeout=timeout,
         )
 
     def query_annotations(
@@ -672,6 +687,8 @@ class AnnotationsClient(ServiceApiClientBase):
         criteria: list[annotation_pb2.QueryAnnotationsRequest.QueryAnnotationsCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryAnnotationsApiResult:
         """
         User-facing method for invoking the queryAnnotations() API method.  Returns a single page of results; use
@@ -684,6 +701,8 @@ class AnnotationsClient(ServiceApiClientBase):
             match all.
         :param limit: Maximum number of records to return PER PAGE -- not a cap on the total (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryAnnotationsApiResult with a single page of results and status information.
         :raises ValueError: if criteria contains more than one text criterion.
         """
@@ -693,7 +712,7 @@ class AnnotationsClient(ServiceApiClientBase):
         self.logger.info("Starting queryAnnotations operation with %d criteria", len(criteria))
 
         request = self._build_query_annotations_request(criteria, limit=limit, page_token=page_token)
-        result = self._send_query_annotations(request)
+        result = self._send_query_annotations(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryAnnotations operation failed: %s", result.result_status.message)
@@ -706,6 +725,8 @@ class AnnotationsClient(ServiceApiClientBase):
         self,
         criteria: list[annotation_pb2.QueryAnnotationsRequest.QueryAnnotationsCriterion] | None = None,
         limit: int | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[annotation_pb2.Annotation]:
         """
         Convenience generator that transparently pages through all queryAnnotations() results, following the
@@ -716,13 +737,15 @@ class AnnotationsClient(ServiceApiClientBase):
         :param criteria: List of QueryAnnotationsCriterion objects (see AnnotationQuery helpers), or None to
             match all.
         :param limit: Maximum number of records to return per page (optional).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching Annotation records across all pages.
         :raises ValueError: if criteria contains more than one text criterion.
         :raises RuntimeError: if any page returns an error.
         """
         page_token: str | None = None
         while True:
-            result = self.query_annotations(criteria, limit=limit, page_token=page_token)
+            result = self.query_annotations(criteria, limit=limit, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryAnnotations failed during paging: {result.result_status.message}")
 
@@ -747,7 +770,9 @@ class AnnotationsClient(ServiceApiClientBase):
         request.annotationId = annotation_id
         return request
 
-    def _send_delete_annotation(self, request: annotation_pb2.DeleteAnnotationRequest) -> DeleteAnnotationApiResult:
+    def _send_delete_annotation(
+        self, request: annotation_pb2.DeleteAnnotationRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> DeleteAnnotationApiResult:
         """
         Invokes the deleteAnnotation() API method with the supplied request.
         :param request: DeleteAnnotationRequest with parameters for the call.
@@ -763,9 +788,10 @@ class AnnotationsClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully deleted annotation id: %s", request.annotationId
             ),
+            timeout=timeout,
         )
 
-    def delete_annotation(self, annotation_id: str) -> DeleteAnnotationApiResult:
+    def delete_annotation(self, annotation_id: str, *, timeout: TimeoutArg = DEFAULT) -> DeleteAnnotationApiResult:
         """
         User-facing method for invoking the deleteAnnotation() API method.
 
@@ -776,12 +802,14 @@ class AnnotationsClient(ServiceApiClientBase):
         Deleting an annotation that does not exist is a business error, not a silent success.
 
         :param annotation_id: Id of the annotation to delete.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteAnnotationApiResult with the method response and status information.
         """
         self.logger.info("Starting deleteAnnotation operation for id: %s", annotation_id)
 
         request = self._build_delete_annotation_request(annotation_id)
-        result = self._send_delete_annotation(request)
+        result = self._send_delete_annotation(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteAnnotation operation failed: %s", result.result_status.message)
@@ -805,7 +833,9 @@ class AnnotationsClient(ServiceApiClientBase):
         request.calculationsId = calculations_id
         return request
 
-    def _send_get_calculations(self, request: annotation_pb2.GetCalculationsRequest) -> GetCalculationsApiResult:
+    def _send_get_calculations(
+        self, request: annotation_pb2.GetCalculationsRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetCalculationsApiResult:
         """
         Invokes the getCalculations() API method with the supplied request.
         :param request: GetCalculationsRequest with parameters for the call.
@@ -823,9 +853,10 @@ class AnnotationsClient(ServiceApiClientBase):
                 request.calculationsId,
                 len(response.getCalculationsResult.calculations.calculationDataFrames),
             ),
+            timeout=timeout,
         )
 
-    def get_calculations(self, calculations_id: str) -> GetCalculationsApiResult:
+    def get_calculations(self, calculations_id: str, *, timeout: TimeoutArg = DEFAULT) -> GetCalculationsApiResult:
         """
         User-facing method for invoking the getCalculations() API method.
 
@@ -833,12 +864,14 @@ class AnnotationsClient(ServiceApiClientBase):
         content.  Calculations that do not exist come back as a business error.
 
         :param calculations_id: Id of the calculations object to retrieve.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetCalculationsApiResult with the method response and status information.
         """
         self.logger.info("Starting getCalculations operation for id: %s", calculations_id)
 
         request = self._build_get_calculations_request(calculations_id)
-        result = self._send_get_calculations(request)
+        result = self._send_get_calculations(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetCalculations operation failed: %s", result.result_status.message)

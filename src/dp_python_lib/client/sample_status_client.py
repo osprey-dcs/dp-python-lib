@@ -6,7 +6,7 @@ import grpc
 from dp_python_lib.client.data_frame import sampling_clock, timestamp_list
 from dp_python_lib.client.data_frame import timestamp_count as _timestamp_count
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
@@ -424,7 +424,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_save_sample_statuses(
-        self, request: annotation_pb2.SaveSampleStatusesRequest
+        self, request: annotation_pb2.SaveSampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> SaveSampleStatusesApiResult:
         """
         Invokes the saveSampleStatuses() API method with the supplied request.
@@ -443,19 +443,24 @@ class SampleStatusClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully saved %d sample status(es)", response.saveSampleStatusesResult.savedCount
             ),
+            timeout=timeout,
         )
 
-    def save_sample_statuses(self, request_params: SaveSampleStatusesRequestParams) -> SaveSampleStatusesApiResult:
+    def save_sample_statuses(
+        self, request_params: SaveSampleStatusesRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveSampleStatusesApiResult:
         """
         User-facing method for invoking the saveSampleStatuses() API method.  Saving is a per-status upsert keyed by
         (pvName, timestamp, domain, layer), replacing the matched status in full.
         :param request_params: User parameters for the call (see SaveSampleStatusesRequestParams).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveSampleStatusesApiResult with the method response and status information.
         """
         self.logger.info("Starting saveSampleStatuses operation")
 
         request = self._build_save_sample_statuses_request(request_params)
-        result = self._send_save_sample_statuses(request)
+        result = self._send_save_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveSampleStatuses operation failed: %s", result.result_status.message)
@@ -508,7 +513,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_query_sample_statuses(
-        self, request: annotation_pb2.QuerySampleStatusesRequest
+        self, request: annotation_pb2.QuerySampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QuerySampleStatusesApiResult:
         """
         Invokes the querySampleStatuses() unary API method with the supplied request.
@@ -525,24 +530,29 @@ class SampleStatusClient(ServiceApiClientBase):
                 "Successfully queried %d sample status bucket(s)",
                 len(response.querySampleStatusesResult.sampleStatusBuckets),
             ),
+            timeout=timeout,
         )
 
     def query_sample_statuses(
         self,
         request_params: QuerySampleStatusesRequestParams,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QuerySampleStatusesApiResult:
         """
         User-facing method for invoking the unary querySampleStatuses() API method.  Returns a single page of results;
         use iter_sample_statuses() to page through all results transparently.
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QuerySampleStatusesApiResult with a single page of results and status information.
         """
         self.logger.info("Starting querySampleStatuses operation")
 
         request = self._build_query_sample_statuses_request(request_params, page_token=page_token)
-        result = self._send_query_sample_statuses(request)
+        result = self._send_query_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QuerySampleStatuses operation failed: %s", result.result_status.message)
@@ -552,7 +562,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return result
 
     def iter_sample_statuses(
-        self, request_params: QuerySampleStatusesRequestParams
+        self, request_params: QuerySampleStatusesRequestParams, *, timeout: TimeoutArg = DEFAULT
     ) -> Iterator[QuerySampleStatusesApiResult]:
         """
         Convenience generator that transparently pages through all unary querySampleStatuses() results, following the
@@ -561,11 +571,13 @@ class SampleStatusClient(ServiceApiClientBase):
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
         """
         page_token: str | None = None
         while True:
-            result = self.query_sample_statuses(request_params, page_token=page_token)
+            result = self.query_sample_statuses(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"querySampleStatuses failed during paging: {result.result_status.message}")
 
@@ -710,7 +722,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_delete_sample_statuses(
-        self, request: annotation_pb2.DeleteSampleStatusesRequest
+        self, request: annotation_pb2.DeleteSampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> DeleteSampleStatusesApiResult:
         """
         Invokes the deleteSampleStatuses() API method with the supplied request.
@@ -729,6 +741,7 @@ class SampleStatusClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully deleted %d sample status(es)", response.deleteSampleStatusesResult.deletedCount
             ),
+            timeout=timeout,
         )
 
     def delete_sample_statuses(
@@ -739,6 +752,8 @@ class SampleStatusClient(ServiceApiClientBase):
         layer: str,
         pv_names: list[str] | None = None,
         all_pvs: bool = False,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> DeleteSampleStatusesApiResult:
         """
         User-facing method for invoking the deleteSampleStatuses() API method.  Deletes statuses in the half-open
@@ -758,6 +773,8 @@ class SampleStatusClient(ServiceApiClientBase):
         :param layer: Required layer scoping the delete.
         :param pv_names: PVs to delete statuses for; mutually exclusive with all_pvs.
         :param all_pvs: Explicit opt-in to deleting statuses for every PV in the (domain, layer).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteSampleStatusesApiResult with the method response and status information.
         :raises ValueError: if domain or layer is empty, if begin_time is not strictly before end_time, or if
             neither (or both) of pv_names and all_pvs is supplied.
@@ -767,7 +784,7 @@ class SampleStatusClient(ServiceApiClientBase):
         request = self._build_delete_sample_statuses_request(
             begin_time, end_time, domain, layer, pv_names=pv_names, all_pvs=all_pvs
         )
-        result = self._send_delete_sample_statuses(request)
+        result = self._send_delete_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteSampleStatuses operation failed: %s", result.result_status.message)

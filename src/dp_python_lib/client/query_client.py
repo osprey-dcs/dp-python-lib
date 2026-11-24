@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 import grpc
 
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import common_pb2, query_pb2, query_pb2_grpc
 
@@ -784,7 +784,9 @@ class QueryClient(ServiceApiClientBase):
     # querySamples (unary)
     # ------------------------------------------------------------------
 
-    def _send_query_samples(self, request: query_pb2.QuerySamplesRequest) -> QuerySamplesApiResult:
+    def _send_query_samples(
+        self, request: query_pb2.QuerySamplesRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QuerySamplesApiResult:
         """
         Invokes the querySamples() unary API method with the supplied request.
         :param request: QuerySamplesRequest with parameters for the call.
@@ -797,20 +799,25 @@ class QueryClient(ServiceApiClientBase):
             "sampleQueryResult",
             "querySamples",
             success_log=lambda _response: self.logger.info("QuerySamples returned a result page"),
+            timeout=timeout,
         )
 
-    def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:
+    def query_samples(
+        self, request_params: QueryParams, page_token: str | None = None, *, timeout: TimeoutArg = DEFAULT
+    ) -> QuerySamplesApiResult:
         """
         User-facing method for invoking the unary querySamples() API method.  Returns a single page of results; use
         iter_query_samples() to page through all results transparently.
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QuerySamplesApiResult with a single page of results and status information.
         """
         self.logger.info("Starting querySamples operation")
 
         request = self._build_query_samples_request(request_params, page_token=page_token)
-        result = self._send_query_samples(request)
+        result = self._send_query_samples(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QuerySamples operation failed: %s", result.result_status.message)
@@ -819,7 +826,9 @@ class QueryClient(ServiceApiClientBase):
 
         return result
 
-    def iter_query_samples(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
+    def iter_query_samples(
+        self, request_params: QueryParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QuerySamplesApiResult]:
         """
         Convenience generator that transparently pages through all unary querySamples() results, following the
         nextPageToken (reached via response.sampleQueryResult.nextPageToken) until the results are exhausted.  Yields
@@ -828,11 +837,13 @@ class QueryClient(ServiceApiClientBase):
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
         """
         page_token: str | None = None
         while True:
-            result = self.query_samples(request_params, page_token=page_token)
+            result = self.query_samples(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"querySamples failed during paging: {result.result_status.message}")
 
@@ -890,7 +901,9 @@ class QueryClient(ServiceApiClientBase):
     # queryBuckets (unary)
     # ------------------------------------------------------------------
 
-    def _send_query_buckets(self, request: query_pb2.QueryBucketsRequest) -> QueryBucketsApiResult:
+    def _send_query_buckets(
+        self, request: query_pb2.QueryBucketsRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryBucketsApiResult:
         """
         Invokes the queryBuckets() unary API method with the supplied request.
         :param request: QueryBucketsRequest with parameters for the call.
@@ -905,9 +918,12 @@ class QueryClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "QueryBuckets returned %d buckets", len(response.bucketQueryResult.dataBuckets)
             ),
+            timeout=timeout,
         )
 
-    def query_buckets(self, request_params: QueryParams, page_token: str | None = None) -> QueryBucketsApiResult:
+    def query_buckets(
+        self, request_params: QueryParams, page_token: str | None = None, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryBucketsApiResult:
         """
         User-facing method for invoking the unary queryBuckets() API method.  Returns a single page of whole buckets;
         use iter_query_buckets() to page through all results transparently.
@@ -918,13 +934,15 @@ class QueryClient(ServiceApiClientBase):
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
             carry a sample_status_filter.
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryBucketsApiResult with a single page of results and status information.
         :raises ValueError: if request_params carries a sample_status_filter.
         """
         self.logger.info("Starting queryBuckets operation")
 
         request = self._build_query_buckets_request(request_params, page_token=page_token)
-        result = self._send_query_buckets(request)
+        result = self._send_query_buckets(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryBuckets operation failed: %s", result.result_status.message)
@@ -933,7 +951,9 @@ class QueryClient(ServiceApiClientBase):
 
         return result
 
-    def iter_query_buckets(self, request_params: QueryParams) -> Iterator[QueryBucketsApiResult]:
+    def iter_query_buckets(
+        self, request_params: QueryParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QueryBucketsApiResult]:
         """
         Convenience generator that transparently pages through all unary queryBuckets() results, following the
         nextPageToken until the results are exhausted.  Yields one QueryBucketsApiResult per page.
@@ -942,12 +962,14 @@ class QueryClient(ServiceApiClientBase):
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
             carry a sample_status_filter.
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
         :raises ValueError: if request_params carries a sample_status_filter (on the first next()).
         """
         page_token: str | None = None
         while True:
-            result = self.query_buckets(request_params, page_token=page_token)
+            result = self.query_buckets(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryBuckets failed during paging: {result.result_status.message}")
 

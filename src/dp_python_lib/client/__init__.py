@@ -51,6 +51,7 @@ from dp_python_lib.client.dataset_client import (
     data_block,
 )
 from dp_python_lib.client.export_client import (
+    DEFAULT_EXPORT_TIMEOUT_SECONDS,
     ExportClient,
     ExportDataApiResult,
     ExportDataRequestParams,
@@ -127,6 +128,7 @@ from dp_python_lib.client.time_conversions import TimestampInput, from_epoch_nan
 
 __all__ = [
     "DEFAULT_CALL_TIMEOUT_SECONDS",
+    "DEFAULT_EXPORT_TIMEOUT_SECONDS",
     "DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS",
     "AnnotationClient",
     "AnnotationQuery",

@@ -11,13 +11,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client.dataset_client import data_block
 from dp_python_lib.client.export_client import (
+    DEFAULT_EXPORT_TIMEOUT_SECONDS,
     ExportClient,
     ExportDataApiResult,
     ExportDataRequestParams,
     ExportFormat,
     calculations_spec,
 )
-from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2
 
 BEGIN = datetime(2026, 7, 14, 18, tzinfo=timezone.utc)
@@ -215,7 +215,7 @@ class TestSendExportData(unittest.TestCase):
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.file_path, "/srv/exports/out.csv")
         self.assertEqual(result.file_url, "https://example.test/exports/out.csv")
-        mock_stub.exportData.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
+        mock_stub.exportData.assert_called_once_with(self.request, timeout=DEFAULT_EXPORT_TIMEOUT_SECONDS)
 
     def test_empty_file_url_is_normal(self):
         # An empty fileUrl means the deployment does not publish over HTTP -- not a failure.

@@ -4,7 +4,7 @@ from collections.abc import Iterator
 import grpc
 
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
 
@@ -313,7 +313,9 @@ class PvMetadataClient(ServiceApiClientBase):
         self.logger.debug("SavePvMetadataRequest built successfully")
         return request
 
-    def _send_save_pv_metadata(self, request: annotation_pb2.SavePvMetadataRequest) -> SavePvMetadataApiResult:
+    def _send_save_pv_metadata(
+        self, request: annotation_pb2.SavePvMetadataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> SavePvMetadataApiResult:
         """
         Invokes the savePvMetadata() API method with the supplied request.
         :param request: SavePvMetadataRequest with parameters for the call.
@@ -327,18 +329,23 @@ class PvMetadataClient(ServiceApiClientBase):
             "savePvMetadata",
             request_log=lambda: self.logger.info("Calling savePvMetadata API for PV: %s", request.pvName),
             success_log=lambda _response: self.logger.info("Successfully saved PV metadata for: %s", request.pvName),
+            timeout=timeout,
         )
 
-    def save_pv_metadata(self, request_params: SavePvMetadataRequestParams) -> SavePvMetadataApiResult:
+    def save_pv_metadata(
+        self, request_params: SavePvMetadataRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SavePvMetadataApiResult:
         """
         User-facing method for invoking the savePvMetadata() API method.
         :param request_params: Contains user parameters for the call to savePvMetadata().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SavePvMetadataApiResult with the method response and status information.
         """
         self.logger.info("Starting savePvMetadata operation for PV: %s", request_params.pv_name)
 
         request = self._build_save_pv_metadata_request(request_params)
-        result = self._send_save_pv_metadata(request)
+        result = self._send_save_pv_metadata(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SavePvMetadata operation failed: %s", result.result_status.message)
@@ -362,7 +369,9 @@ class PvMetadataClient(ServiceApiClientBase):
         request.pvNameOrAlias = pv_name_or_alias
         return request
 
-    def _send_get_pv_metadata(self, request: annotation_pb2.GetPvMetadataRequest) -> GetPvMetadataApiResult:
+    def _send_get_pv_metadata(
+        self, request: annotation_pb2.GetPvMetadataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetPvMetadataApiResult:
         """
         Invokes the getPvMetadata() API method with the supplied request.
         :param request: GetPvMetadataRequest with parameters for the call.
@@ -378,18 +387,21 @@ class PvMetadataClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully retrieved PV metadata for: %s", request.pvNameOrAlias
             ),
+            timeout=timeout,
         )
 
-    def get_pv_metadata(self, pv_name_or_alias: str) -> GetPvMetadataApiResult:
+    def get_pv_metadata(self, pv_name_or_alias: str, *, timeout: TimeoutArg = DEFAULT) -> GetPvMetadataApiResult:
         """
         User-facing method for invoking the getPvMetadata() API method.
         :param pv_name_or_alias: PV name or alias to look up.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetPvMetadataApiResult with the method response and status information.
         """
         self.logger.info("Starting getPvMetadata operation for: %s", pv_name_or_alias)
 
         request = self._build_get_pv_metadata_request(pv_name_or_alias)
-        result = self._send_get_pv_metadata(request)
+        result = self._send_get_pv_metadata(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetPvMetadata operation failed: %s", result.result_status.message)
@@ -426,7 +438,9 @@ class PvMetadataClient(ServiceApiClientBase):
             request.pageToken = page_token
         return request
 
-    def _send_query_pv_metadata(self, request: annotation_pb2.QueryPvMetadataRequest) -> QueryPvMetadataApiResult:
+    def _send_query_pv_metadata(
+        self, request: annotation_pb2.QueryPvMetadataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryPvMetadataApiResult:
         """
         Invokes the queryPvMetadata() API method with the supplied request.
         :param request: QueryPvMetadataRequest with parameters for the call.
@@ -442,6 +456,7 @@ class PvMetadataClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "QueryPvMetadata returned %d records", len(response.pvMetadataResult.pvMetadata)
             ),
+            timeout=timeout,
         )
 
     def query_pv_metadata(
@@ -449,6 +464,8 @@ class PvMetadataClient(ServiceApiClientBase):
         criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryPvMetadataApiResult:
         """
         User-facing method for invoking the queryPvMetadata() API method.  Returns a single page of results; use
@@ -462,13 +479,15 @@ class PvMetadataClient(ServiceApiClientBase):
             match all records.
         :param limit: Maximum number of records to return per page (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryPvMetadataApiResult with a single page of results and status information.
         """
         criteria = criteria or []
         self.logger.info("Starting queryPvMetadata operation with %d criteria", len(criteria))
 
         request = self._build_query_pv_metadata_request(criteria, limit=limit, page_token=page_token)
-        result = self._send_query_pv_metadata(request)
+        result = self._send_query_pv_metadata(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryPvMetadata operation failed: %s", result.result_status.message)
@@ -481,6 +500,8 @@ class PvMetadataClient(ServiceApiClientBase):
         self,
         criteria: list[annotation_pb2.QueryPvMetadataRequest.QueryPvMetadataCriterion] | None = None,
         limit: int | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[common_pb2.PvMetadata]:
         """
         Convenience generator that transparently pages through all queryPvMetadata() results, following the
@@ -494,11 +515,13 @@ class PvMetadataClient(ServiceApiClientBase):
         :param criteria: List of QueryPvMetadataCriterion objects (see PvMetadataQuery helpers), or None to
             match all records.
         :param limit: Maximum number of records to return per page (optional).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching PvMetadata records across all pages.
         """
         page_token: str | None = None
         while True:
-            result = self.query_pv_metadata(criteria, limit=limit, page_token=page_token)
+            result = self.query_pv_metadata(criteria, limit=limit, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryPvMetadata failed during paging: {result.result_status.message}")
 
@@ -523,7 +546,9 @@ class PvMetadataClient(ServiceApiClientBase):
         request.pvNameOrAlias = pv_name_or_alias
         return request
 
-    def _send_delete_pv_metadata(self, request: annotation_pb2.DeletePvMetadataRequest) -> DeletePvMetadataApiResult:
+    def _send_delete_pv_metadata(
+        self, request: annotation_pb2.DeletePvMetadataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> DeletePvMetadataApiResult:
         """
         Invokes the deletePvMetadata() API method with the supplied request.
         :param request: DeletePvMetadataRequest with parameters for the call.
@@ -539,18 +564,21 @@ class PvMetadataClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully deleted PV metadata for: %s", request.pvNameOrAlias
             ),
+            timeout=timeout,
         )
 
-    def delete_pv_metadata(self, pv_name_or_alias: str) -> DeletePvMetadataApiResult:
+    def delete_pv_metadata(self, pv_name_or_alias: str, *, timeout: TimeoutArg = DEFAULT) -> DeletePvMetadataApiResult:
         """
         User-facing method for invoking the deletePvMetadata() API method.
         :param pv_name_or_alias: PV name or alias to delete.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeletePvMetadataApiResult with the method response and status information.
         """
         self.logger.info("Starting deletePvMetadata operation for: %s", pv_name_or_alias)
 
         request = self._build_delete_pv_metadata_request(pv_name_or_alias)
-        result = self._send_delete_pv_metadata(request)
+        result = self._send_delete_pv_metadata(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeletePvMetadata operation failed: %s", result.result_status.message)
