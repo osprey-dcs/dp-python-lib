@@ -457,6 +457,11 @@ no stub call passed a `timeout` and channels had no keepalive, so a call the ser
   facade forwards each where it applies.  A channel the library did not build gets keepalive only from the
   caller's `options=channel_options()`.
 - **Retries are out of scope**: a retry on `DEADLINE_EXCEEDED` is unsafe for the non-idempotent saves and ingests.
+- **Live verification** (#81 T9; results table in the plan) ran against a dp-service development checkout, not a
+  release tag.  A 10 s keepalive draws GOAWAY `too_many_pings` at about 40 s, and 60 s does not.  Four minutes of
+  data-heavy bucket streams on one channel drew 84 BDP pings and no GOAWAY.  An upload into a stopped server stalls
+  after about 1 MiB (grpc-java's default window), and its idle timeout fires.  dp-service pings the client every
+  60 s itself, which resets the client's keepalive timer, so on a quiet stream the client rarely pings at all.
 
 ### Testing Best Practices
 - Use `@patch` decorators to mock gRPC stubs and avoid real network calls

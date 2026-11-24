@@ -552,6 +552,36 @@ Against a local dp-service stack, with `GRPC_TRACE=http_keepalive,http2_ping`:
 
 Run the changed cookbook recipes as one script.
 
+**Results (2026-11-24).**  These were run against dp-service `440fe3f` (a development checkout of `main`, built that
+day, not a release tag), with its shipped `application.yml` (`permitKeepAliveTimeSeconds: 30`, server keepalive
+60 s), on localhost, with grpcio 1.84.0.  Every check matched the plan's expectation; nothing in D6 changes.
+
+| Check | Result |
+|---|---|
+| Quiet bidi ingest stream, 10 s keepalive | WARNING logged at channel build, then GOAWAY `too_many_pings` (ENHANCE_YOUR_CALM) at 40 s, after the 4th ping. The call failed: `gRPC error: Stream removed (Socket closed (GOAWAY received; Error code: 11; Debug Text: too_many_pings))` |
+| Quiet bidi ingest stream, 60 s keepalive, held 200 s | Completed normally, no GOAWAY. The server's own 60 s keepalive pings (payload 57005) reset the client's timer, so the client sent only 1 ping of its own; all were acked |
+| Data-heavy bucket stream, D6 defaults, fast consumer | 143 back-to-back streams on one channel over 241 s, 28.6 GB, 500 × 400 KB buckets each. The client sent 84 pings (BDP probes, spread over the run, thinning out); all 84 acked, no GOAWAY |
+| The same, consumer sleeping 0.5 s per message | 10 streams over 253 s, 2 GB, 84 pings acked, no GOAWAY |
+| Upload into a server that stops reading | Stalled after 3 of 200 requests (about 1.2 MB: grpc-java's 1 MiB default window plus one request), and the 5 s idle timeout fired: `gRPC error: stream idle timeout: no message from the server within 5 s` |
+| Bidi ingest, one unanswered request | The 5 s idle timeout fired, as a `RuntimeError` with the same text |
+| Unary `query_buckets(timeout=3)`, server paused | `DEADLINE_EXCEEDED` at 3.0 s: `Deadline Exceeded (deadline 3 s, passed as timeout=)` |
+| Bucket stream, server paused after the first message | The 3 s idle timeout fired 3.0 s after the pause |
+| Cookbook recipes, as one script | The YAML block loads as documented (`ingestion.keepalive_time_seconds: 0` gives no channel options). The `timeout=` / `idle_timeout=` snippets and all three `qc` / `bc` conveniences ran with their keywords. A 2 s `query.call_timeout_seconds` against a paused server gave the documented hint, naming `MLDP_QUERY_CALL_TIMEOUT_SECONDS / query.call_timeout_seconds`. The explicit-channel recipe builds |
+| `tests/integration/` | 72 passed, before the checks and again after them |
+
+**Amended during T9 (2026-11-24):**
+
+- **A server that "stops reading" was simulated with `SIGSTOP` on its JVM**, after the connection was up, instead of
+  with a test handler or a debugger pause.  A stopped process reads nothing and sends no `WINDOW_UPDATE`, which is the
+  condition the upload clock exists for, so the upload-stall half was verified live against grpc-java's window.  The
+  same pause gave live unary-deadline, bidi-idle, and server-stream-idle checks, which the plan did not list.  A
+  paused process also leaves keepalive pings unanswered, so this is not the #314 shape (a connected server whose
+  handler hangs); the bounds fired first only because they were shorter than the 80 s keepalive detection.
+- **Where the data-heavy case runs its pings.**  The bucket stream ran back to back on one channel rather than as
+  one multi-minute stream, since 200 MB streams in about 2 s locally.  A GOAWAY is per connection, so what matters is
+  four minutes of data on one connection under grpc-core's BDP pings, and the slow-consumer run keeps a single
+  stream open for 25 s at a time under flow control.
+
 ## Out of scope
 
 - The service-side fixes: dp-service#314 (PRs #318 and #323).
