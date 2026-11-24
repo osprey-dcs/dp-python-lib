@@ -187,18 +187,21 @@ per call however long the stream runs, and the interface stays arm / disarm / `e
   different threads (the feed on grpcio's request thread, `next()` on the caller's), so a small state object holds
   `waiting` and `outstanding` under one lock, and re-evaluates arm/disarm on every transition: entering and leaving
   `next()`, the feed handing over a request, and a response arriving.
-- **Client-streaming ingest** (`_send_ingest_data_stream()`): switches to `stub.ingestDataStream.future(...)`, and
-  arms the watchdog from the moment the feed is exhausted until the summary arrives.  Whether grpcio's request
-  consumption also exposes a flow-control stall during upload (the server not reading) is to be prototyped in T1;
-  if it does not, an upload stall is left to keepalive and to an explicit `timeout`, and the docstring says so.
+- **Client-streaming ingest** (`_send_ingest_data_stream()`): switches to `stub.ingestDataStream.future(...)`.  The
+  clock runs whenever grpcio, not the caller, holds the next step: from the feed handing grpcio a request until
+  grpcio asks for the next one, and from the feed's exhaustion until the summary arrives.  Time inside the caller's
+  iterable never counts.  T1 showed this covers an upload stall as well as a summary that never comes: grpcio
+  pulls the next request only once the previous send completes, and a send does not complete while HTTP/2 flow
+  control is closed, so a server that stops reading stops the pulls (T1 results below).
   The switch must keep the existing contracts: the caller's own exception still re-raised through
   `feed.reraise()` when `future.result()` raises, a partial reject still returned with its response, and
   `test_ingestion_streaming_grpc.py` passing unchanged.
 
-On expiry the watchdog sets a flag and calls `call.cancel()`.  The sender, seeing `CANCELLED` with the flag set,
-reports `"gRPC error: stream idle timeout: no message from the server within <n> s"` instead of grpcio's "Locally
-cancelled by application!", so the public wrappers raise their existing `RuntimeError` with that text.  The
-watchdog is always disarmed in the sender's `finally`, so a closed generator leaves no timer behind.
+On expiry the watchdog sets a flag and calls `call.cancel()`.  The sender, seeing `CANCELLED` with the flag set (on
+the client-streaming future, `FutureCancelledError`; T1), reports `"gRPC error: stream idle timeout: no message
+from the server within <n> s"` instead of grpcio's "Locally cancelled by application!", so the public wrappers
+raise their existing `RuntimeError` with that text.  The watchdog is always disarmed in the sender's `finally`, so
+a closed generator leaves no timer behind.
 
 The prototype's watchdog already shows `cancel()` from another thread ends a blocked stream iteration at once,
 with `CANCELLED`.
@@ -275,6 +278,27 @@ the ack wait, so a grpcio that does honors the same bound.  Detection of a dropp
 Extend the prototype: does grpcio's request-iterator thread stop pulling while the server is not reading (HTTP/2
 flow control), so that "time since the feed last handed grpcio a request, excluding time inside the caller's
 iterable" measures an upload stall?  Record the answer in D3 and choose between the two forms there.
+
+**Done 2026-11-24** (`cs_proto.py` in the ticket scratch area; grpcio 1.84, in-process grpcio server on localhost).
+**Yes: the pulls stop**, so D3 takes the form that covers the upload.
+
+| Server handler | Request size | Pulled before the stall | Then |
+|---|---|---|---|
+| never reads | 1,000 B | 4,174 (4.2 MB) | no pull for 8 s, until cancelled |
+| never reads | 64 KiB | 64 (4.2 MB) | same |
+| never reads | 1 MiB | 4 (4.2 MB) | same |
+| reads 50, then stops | 64 KiB | 128 (8.4 MB) | same |
+| sleeps 4 s, then reads all | 64 KiB | 64, then all 400 at 4.05 s | completes; a slow server is not a stall |
+| reads promptly | 64 KiB | all 400 | completes in 0.26 s |
+
+- The stall shows up after about 4 MB is buffered past what the server has read, whatever the message size.  That
+  is this grpcio server's window.  dp-service sets no flow-control window (`GrpcServerBase` configures the message
+  size and keepalive limits only), so grpc-java's Netty default applies, and T9 checks the stall against it.  An upload smaller than the window never stalls on
+  the way up; it is caught by the clock that runs after exhaustion instead.
+- **`future.cancel()` makes `future.result()` raise `grpc.FutureCancelledError`**, at once, not an `RpcError` with
+  `CANCELLED` as on the streaming calls.  So `_send_ingest_data_stream()` checks the watchdog's `expired` flag on
+  `FutureCancelledError` and turns it into the D3 idle-timeout message.  grpcio pulled no further requests after the
+  cancel.
 
 ### T2. `service_api_client_base.py`
 
@@ -395,6 +419,10 @@ Against a local dp-service stack, with `GRPC_TRACE=http_keepalive,http2_ping`:
   draws no GOAWAY either (R6).  `max_pings_without_data=0` changes when pings go out while data flows, and how
   grpc-core's other pings (BDP probes) count against grpc-java's ping limit is not settled by the quiet case.
   If it does draw GOAWAY, D6 is revisited before the implementation PR merges.
+- a client-streaming ingest into a server that stops reading stalls the feed's pulls once grpc-java's flow-control
+  window is full, as T1 showed against a grpcio server, and the idle timeout then cancels it.  dp-service has no
+  "stop reading" switch, so this needs a test handler or a debugger pause; if neither is practical, the PR says the
+  upload-stall half was verified only in-process.
 
 Run the changed cookbook recipes as one script.
 
