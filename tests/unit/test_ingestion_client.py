@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client.ingestion_client import (
+    AWAIT_MIN_POLL_SECONDS,
     REQUEST_STATUS_CLOCK_SKEW,
     IngestDataRequestParams,
     IngestionClient,
@@ -21,7 +22,7 @@ from dp_python_lib.client.ingestion_client import (
     chunked_request_params,
 )
 from dp_python_lib.client.ingestion_client import RequestStatusQuery as RS
-from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS, ClientTimeout
 from dp_python_lib.client.time_conversions import to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, ingestion_pb2
 
@@ -868,6 +869,69 @@ class TestAwaitRequestStatuses(_ClientTestCase):
         with self.assertRaises(RuntimeError) as ctx:
             self._await(["a"])
         self.assertIn("gRPC error: down", str(ctx.exception))
+
+    def _poll_timeouts(self):
+        # Rounded: the fake clock starts at 1000 s, so "deadline - now" carries float residue.
+        return [round(c.kwargs["timeout"], 9) for c in self.stub.queryRequestStatus.call_args_list]
+
+    def test_each_poll_is_bounded_by_the_time_remaining(self):
+        self.stub.queryRequestStatus.side_effect = [_status_response(), _status_response(_document("a"))]
+        self._await(["a"], timeout=10.0, poll_interval=4.0)
+        # Shorter than the client default, so the remaining time is passed explicitly, poll by poll.
+        self.assertEqual(self._poll_timeouts(), [10.0, 6.0])
+
+    def test_the_client_default_bounds_a_poll_when_it_is_shorter(self):
+        self.stub.queryRequestStatus.return_value = _status_response(_document("a"))
+        self._await(["a"], timeout=DEFAULT_CALL_TIMEOUT_SECONDS * 2)
+        # Passed as DEFAULT, so a DEADLINE_EXCEEDED hint names the client setting rather than timeout=.
+        self.assertEqual(self._poll_timeouts(), [DEFAULT_CALL_TIMEOUT_SECONDS])
+
+    def test_a_disabled_client_default_leaves_the_remaining_time(self):
+        self.client._call_timeout = ClientTimeout(None, "disabled for the test")
+        self.stub.queryRequestStatus.return_value = _status_response(_document("a"))
+        self._await(["a"], timeout=DEFAULT_CALL_TIMEOUT_SECONDS * 2)
+        self.assertEqual(self._poll_timeouts(), [DEFAULT_CALL_TIMEOUT_SECONDS * 2])
+
+    def test_the_poll_at_the_deadline_gets_the_floor(self):
+        self.stub.queryRequestStatus.return_value = _status_response()
+        with self.assertRaises(TimeoutError):
+            self._await(["a"], timeout=5.0, poll_interval=5.0)
+        self.assertEqual(self._poll_timeouts(), [5.0, AWAIT_MIN_POLL_SECONDS])
+
+    def test_the_floor_never_exceeds_the_timeout(self):
+        self.stub.queryRequestStatus.return_value = _status_response()
+        with self.assertRaises(TimeoutError):
+            self._await(["a"], timeout=0.2, poll_interval=0.2)
+        self.assertEqual(self._poll_timeouts(), [0.2, 0.2])
+
+    def test_a_hung_poll_ends_at_the_deadline_with_timeout_error(self):
+        def hang(request, timeout):
+            self.clock.now += timeout  # the poll's deadline expires
+            raise _FakeRpcError(grpc.StatusCode.DEADLINE_EXCEEDED, "Deadline Exceeded")
+
+        self.stub.queryRequestStatus.side_effect = hang
+        start = self.clock.now
+        with self.assertRaises(TimeoutError) as ctx:
+            self._await(["a", "b"], timeout=3.0)
+        message = str(ctx.exception)
+        self.assertIn("2 of 2", message)
+        self.assertIn("a, b", message)
+        self.assertIn("the last status query failed: gRPC error: Deadline Exceeded", message)
+        self.assertEqual(self.clock.now - start, 3.0)
+        self.assertEqual(self.stub.queryRequestStatus.call_count, 1)
+
+    def test_a_late_failure_names_the_ids_the_last_good_poll_lacked(self):
+        def first_answers_then_hangs(request, timeout):
+            if self.stub.queryRequestStatus.call_count == 1:
+                return _status_response(_document("a"))
+            self.clock.now += timeout
+            raise _FakeRpcError(grpc.StatusCode.DEADLINE_EXCEEDED, "Deadline Exceeded")
+
+        self.stub.queryRequestStatus.side_effect = first_answers_then_hangs
+        with self.assertRaises(TimeoutError) as ctx:
+            self._await(["a", "b"], timeout=2.0, poll_interval=1.0)
+        self.assertIn("1 of 2", str(ctx.exception))
+        self.assertIn(": b;", str(ctx.exception))
 
     def test_duplicate_input_ids_are_waited_for_once(self):
         self.stub.queryRequestStatus.return_value = _status_response(_document("a"))

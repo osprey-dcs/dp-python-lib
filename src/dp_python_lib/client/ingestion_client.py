@@ -58,6 +58,13 @@ from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
 # documents' createdAt comes from the server's clock and `since` from the caller's.
 REQUEST_STATUS_CLOCK_SKEW = timedelta(seconds=60)
 
+AWAIT_MIN_POLL_SECONDS = 1.0
+"""
+The shortest deadline await_request_statuses() gives a poll (#81 T4), capped at its own timeout.  Polls are bounded
+by the time remaining, so without a floor the poll that starts at the deadline -- the last chance to see a document
+that has just been written -- would be given no time at all.  It is also the most the wait can overrun its timeout.
+"""
+
 # Status-detail texts that identify a message-size violation, matched case-insensitively within a
 # RESOURCE_EXHAUSTED.  RESOURCE_EXHAUSTED alone also covers quotas and other resource limits, where "split your
 # frame" would be the wrong advice.  Neither text is a stable API, so both are kept here, with their sources.
@@ -106,6 +113,15 @@ def _ingest_size_hint(e: grpc.RpcError) -> str:
         f" (the request exceeds the server's inbound message limit, {SERVER_DEFAULT_MAX_MESSAGE_BYTES:,} bytes by "
         "default; split the frame with data_frame.split_data_frame(frame, max_bytes=...) and ingest the chunks, "
         "e.g. with ingest_data_stream())"
+    )
+
+
+def _await_timeout_message(timeout: float, missing: list[str], wanted: list[str]) -> str:
+    """await_request_statuses()'s TimeoutError text, naming at most ten of the ids still lacking a document."""
+    shown = ", ".join(missing[:10]) + (f", ... ({len(missing) - 10} more)" if len(missing) > 10 else "")
+    return (
+        f"await_request_statuses() timed out after {timeout} s with {len(missing)} of {len(wanted)} "
+        f"request(s) still lacking a status document: {shown}"
     )
 
 
@@ -1193,12 +1209,16 @@ class IngestionClient(ServiceApiClientBase):
         :param provider_id: The provider the requests were sent as.
         :param client_request_ids: The requests to wait for.
         :param since: A time at or before the first request was sent.
-        :param timeout: Seconds to wait before giving up.
+        :param timeout: Seconds to wait in all, polls included, before giving up.  Each poll's deadline is the
+            client's call default or the time remaining, whichever is shorter, so one hung query cannot outlast it.
+            A poll that starts at the deadline still gets min(timeout, AWAIT_MIN_POLL_SECONDS), so the wait can
+            overrun by at most that much.
         :param poll_interval: Seconds between polls.
         :return: {client_request_id: [documents]}, one entry per distinct id; a list because ids are not unique.
         :raises ValueError: on blank or empty arguments, or a non-positive timeout or poll_interval.
-        :raises TimeoutError: if some ids have no document by the timeout; the message names them.
-        :raises RuntimeError: if a status query fails.
+        :raises TimeoutError: if some ids have no document by the timeout, including when the poll that ran out the
+            time failed; the message names them.
+        :raises RuntimeError: if a status query fails before the timeout.
         """
         if not provider_id or not provider_id.strip():
             raise ValueError("await_request_statuses() requires a non-blank provider_id")
@@ -1221,11 +1241,23 @@ class IngestionClient(ServiceApiClientBase):
 
         wanted_set = set(wanted)
         deadline = time.monotonic() + timeout
+        min_poll = min(timeout, AWAIT_MIN_POLL_SECONDS)
+        missing = wanted
         attempt = 0
         while True:
             attempt += 1
-            result = self.query_request_status(criteria)
+            # #81 T4: bound each poll by the time remaining as well as the client default.  When the default is the
+            # tighter bound, pass DEFAULT so a DEADLINE_EXCEEDED hint names the client setting, not timeout=.
+            budget = max(deadline - time.monotonic(), min_poll)
+            client_default = self._call_timeout.seconds
+            poll_timeout: TimeoutArg = DEFAULT if client_default is not None and client_default <= budget else budget
+            result = self.query_request_status(criteria, timeout=poll_timeout)
             if result.result_status.is_error:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        _await_timeout_message(timeout, missing, wanted)
+                        + f"; the last status query failed: {result.result_status.message}"
+                    )
                 raise RuntimeError(f"await_request_statuses() status query failed: {result.result_status.message}")
             found: dict[str, list] = {}
             for document in result.request_statuses or []:
@@ -1240,9 +1272,5 @@ class IngestionClient(ServiceApiClientBase):
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                shown = ", ".join(missing[:10]) + (f", ... ({len(missing) - 10} more)" if len(missing) > 10 else "")
-                raise TimeoutError(
-                    f"await_request_statuses() timed out after {timeout} s with {len(missing)} of {len(wanted)} "
-                    f"request(s) still lacking a status document: {shown}"
-                )
+                raise TimeoutError(_await_timeout_message(timeout, missing, wanted))
             time.sleep(min(poll_interval, remaining))

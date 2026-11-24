@@ -385,6 +385,22 @@ too.  If a poll fails *and* the overall deadline has passed,
 raise the existing `TimeoutError` naming the missing ids, not `RuntimeError("status query failed")`.  Unit test
 against the fake clock: a poll that would hang is bounded, and the error type is `TimeoutError`.
 
+Amended during T4 (2026-11-24):
+
+- **A floor for the last poll.**  The loop trims its final sleep to the deadline and then polls once more, so
+  "the time remaining" is zero for exactly the poll most likely to see a just-written document.  Each poll gets at
+  least `AWAIT_MIN_POLL_SECONDS` (1 s), capped at the call's own `timeout`; that is also the most the wait can
+  overrun, and the docstring says so.
+- **`DEFAULT` when the client default is the tighter bound.**  Passing it as a number would make a
+  `DEADLINE_EXCEEDED` hint say "passed as timeout=", which the caller never did.  With the default disabled, the
+  remaining time bounds the poll alone.
+- **Which ids the `TimeoutError` names** after a failed poll: those the last successful poll lacked, or all of them
+  if none succeeded.  The message ends with the failed query's own text.  A poll that fails *before* the deadline
+  (for instance, bounded by a shorter client default) still raises `RuntimeError`, as before.
+- Tests: seven cases in `TestAwaitRequestStatuses` (remaining time per poll, the client default, the default
+  disabled, the floor and its cap, a hung poll, a late failure after a partial result).  Mutation checks: dropping
+  the per-poll timeout fails five, and dropping the `TimeoutError` conversion fails two.
+
 ### T5. `config/config.py`, `config/loader.py`, `client/mldp_client.py`, `client/annotation_client.py`
 
 The D4 fields and their validation; the YAML flattener's per-service key list (one tuple, so the next setting is a
