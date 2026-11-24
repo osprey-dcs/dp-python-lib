@@ -20,8 +20,10 @@ import grpc
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
+from dp_python_lib.client import data_frame as dfb
+from dp_python_lib.client.ingestion_client import IngestDataRequestParams, IngestionClient
 from dp_python_lib.client.query_client import PvQuery, QueryClient, QueryParams
-from dp_python_lib.grpc import query_pb2, query_pb2_grpc
+from dp_python_lib.grpc import ingestion_pb2, ingestion_pb2_grpc, query_pb2, query_pb2_grpc
 
 IDLE = 0.5  # idle bound used by the stream tests, seconds
 LIMIT = 5.0  # every test must finish within this, seconds
@@ -116,14 +118,14 @@ class TestTimeoutsAgainstInProcessServer(unittest.TestCase):
         self.assertLess(elapsed, IDLE + 1.5)
 
     def test_slow_server_within_the_bound_and_a_slower_consumer_do_not_trip(self):
-        # Server sends every 0.3 s (inside the 0.5 s bound); the consumer then spends 0.8 s (past it) on each
+        # Server sends every 0.3 s (inside the 0.5 s bound); the consumer then spends 0.7 s (past it) on each
         # message.  Only time waiting on the server counts, so this completes.
         self.servicer.mode = "slow"
         self.servicer.delay = 0.3
         received = 0
         for _page_result in self.client.iter_query_samples_stream(self.params, idle_timeout=IDLE):
             received += 1
-            time.sleep(0.8)
+            time.sleep(0.7)
         self.assertEqual(3, received)
 
     def test_slow_server_past_the_bound_trips(self):
@@ -152,6 +154,157 @@ class TestTimeoutsAgainstInProcessServer(unittest.TestCase):
         stream = self.client.iter_query_samples_stream(self.params, idle_timeout=IDLE)
         next(stream)
         stream.close()
+        self.assertEqual(before, _watchdog_threads())
+
+
+class _IngestionServicer(ingestion_pb2_grpc.DpIngestionServiceServicer):
+    """
+    mode: "ok" (read promptly, answer promptly), "silent" (read everything, never answer), or "deaf" (never read
+    the request stream at all, so HTTP/2 flow control eventually stops the client's sends).
+    """
+
+    def __init__(self):
+        self.mode = "ok"
+
+    @staticmethod
+    def _hang(context):
+        while context.is_active():
+            time.sleep(0.02)
+
+    def ingestDataStream(self, request_iterator, context):
+        if self.mode == "deaf":
+            self._hang(context)
+            return ingestion_pb2.IngestDataStreamResponse()
+        ids = [request.clientRequestId for request in request_iterator]
+        if self.mode == "silent":
+            self._hang(context)
+        response = ingestion_pb2.IngestDataStreamResponse(clientRequestIds=ids)
+        response.ingestDataStreamResult.numRequests = len(ids)
+        return response
+
+    def ingestDataBidiStream(self, request_iterator, context):
+        if self.mode == "deaf":
+            self._hang(context)
+            return
+        for request in request_iterator:
+            if self.mode == "silent":
+                continue
+            response = ingestion_pb2.IngestDataResponse(clientRequestId=request.clientRequestId)
+            response.ackResult.numRows = 1
+            yield response
+        if self.mode == "silent":
+            self._hang(context)
+
+
+def _request(index, values=1):
+    frame = dfb.data_frame(
+        dfb.sampling_clock(1_770_000_000, 1_000, values), [dfb.double_column("pv", [float(v) for v in range(values)])]
+    )
+    return IngestDataRequestParams("provider-1", frame, client_request_id=f"r-{index}")
+
+
+def _requests(count, pause=0.0, values=1):
+    for index in range(count):
+        if pause:
+            time.sleep(pause)
+        yield _request(index, values)
+
+
+class TestIngestionIdleTimeoutsAgainstInProcessServer(unittest.TestCase):
+    def setUp(self):
+        self.servicer = _IngestionServicer()
+        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
+        ingestion_pb2_grpc.add_DpIngestionServiceServicer_to_server(self.servicer, self.server)
+        port = self.server.add_insecure_port("localhost:0")
+        self.server.start()
+        self.channel = grpc.insecure_channel(f"localhost:{port}")
+        self.client = IngestionClient(self.channel)
+        self.started = time.monotonic()
+
+    def tearDown(self):
+        self.channel.close()
+        self.server.stop(grace=None)
+        self.assertLess(time.monotonic() - self.started, LIMIT)
+
+    # ---- client-streaming (ingestDataStream, through .future())
+
+    def test_upload_healthy(self):
+        result = self.client.ingest_data_stream(_requests(5), idle_timeout=IDLE)
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+        self.assertEqual(5, result.num_requests)
+
+    def test_upload_slow_producer_does_not_trip(self):
+        # The caller's iterable takes longer than the bound between requests; that time is the caller's.
+        result = self.client.ingest_data_stream(_requests(2, pause=0.7), idle_timeout=IDLE)
+        self.assertFalse(result.result_status.is_error, result.result_status.message)
+
+    def test_upload_whose_summary_never_comes_trips(self):
+        self.servicer.mode = "silent"
+        began = time.monotonic()
+        result = self.client.ingest_data_stream(_requests(3), idle_timeout=IDLE)
+        self.assertEqual(
+            "gRPC error: stream idle timeout: no message from the server within 0.5 s", result.result_status.message
+        )
+        self.assertLess(time.monotonic() - began, IDLE + 1.5)
+
+    def test_upload_into_a_server_that_stops_reading_trips(self):
+        # T1: grpcio stops pulling once flow control fills (~4 MB against a grpcio server), so the clock that runs
+        # while grpcio holds a request expires.  80 requests of 64 KiB is ~5 MB, past the window.
+        self.servicer.mode = "deaf"
+        pulled = []
+
+        def requests():
+            for index in range(80):
+                pulled.append(index)
+                yield _request(index, values=8192)
+
+        result = self.client.ingest_data_stream(requests(), idle_timeout=IDLE)
+        self.assertIn("stream idle timeout", result.result_status.message)
+        self.assertLess(len(pulled), 80, "the upload never stalled, so this did not test the stall")
+
+    def test_upload_total_timeout_names_itself(self):
+        self.servicer.mode = "silent"
+        result = self.client.ingest_data_stream(_requests(2), idle_timeout=None, timeout=0.5)
+        self.assertEqual(
+            "gRPC error: Deadline Exceeded (deadline 0.5 s, passed as timeout=)", result.result_status.message
+        )
+
+    # ---- bidirectional (iter_ingest_data_bidi_stream)
+
+    def test_bidi_healthy(self):
+        results = list(self.client.iter_ingest_data_bidi_stream(_requests(5), idle_timeout=IDLE))
+        self.assertEqual([f"r-{i}" for i in range(5)], [r.client_request_id for r in results])
+
+    def test_bidi_unanswered_request_trips(self):
+        self.servicer.mode = "silent"
+        began = time.monotonic()
+        with self.assertRaises(RuntimeError) as ctx:
+            list(self.client.iter_ingest_data_bidi_stream(_requests(2), idle_timeout=IDLE))
+        self.assertEqual(
+            "ingestDataBidiStream failed: gRPC error: stream idle timeout: no message from the server within 0.5 s",
+            str(ctx.exception),
+        )
+        self.assertLess(time.monotonic() - began, IDLE + 1.5)
+
+    def test_bidi_slow_producer_does_not_trip(self):
+        # Waiting in next() while the caller's own iterable builds the next request: nothing is outstanding.
+        results = list(self.client.iter_ingest_data_bidi_stream(_requests(2, pause=0.7), idle_timeout=IDLE))
+        self.assertEqual(2, len(results))
+
+    def test_bidi_slow_consumer_with_acks_pending_does_not_trip(self):
+        # R1: several requests sent, and the caller spends longer than the bound on the first ack.  Requests stay
+        # outstanding throughout, but the later acks are already buffered client-side, so no waiting on the server
+        # happened.  A clock counting outstanding requests alone would cancel this healthy call.
+        received = []
+        for result in self.client.iter_ingest_data_bidi_stream(_requests(5), idle_timeout=IDLE):
+            received.append(result.client_request_id)
+            if len(received) == 1:
+                time.sleep(IDLE * 2)
+        self.assertEqual(5, len(received))
+
+    def test_bidi_watchdog_thread_ends_with_the_stream(self):
+        before = _watchdog_threads()
+        list(self.client.iter_ingest_data_bidi_stream(_requests(3), idle_timeout=IDLE))
         self.assertEqual(before, _watchdog_threads())
 
 

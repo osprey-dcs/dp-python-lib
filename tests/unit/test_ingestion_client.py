@@ -483,13 +483,29 @@ class TestIngestData(_ClientTestCase):
                 self.assertEqual(self.client.ingest_data(_params()).result_status.message, f"gRPC error: {details}")
 
 
-def _consume_then(response):
-    """A stub side effect that drains the request iterator, as grpcio does, before returning response."""
+class _FakeFuture:
+    """The grpc future ingestDataStream.future() returns (#81): result() returns the response or raises."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+        self.cancel = Mock()
+
+    def result(self):
+        if isinstance(outcome := self._outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+def _consume_then(outcome):
+    """
+    A stub .future side effect that drains the request iterator, as grpcio does, and returns a future whose
+    result() is outcome (a response, or an exception to raise).
+    """
     sent = []
 
-    def call(requests):
+    def call(requests, **_kwargs):
         sent.extend(requests)
-        return response
+        return _FakeFuture(outcome)
 
     return call, sent
 
@@ -498,7 +514,7 @@ class TestIngestDataStream(_ClientTestCase):
     def test_all_accepted(self):
         response = ingestion_pb2.IngestDataStreamResponse(clientRequestIds=["a", "b"])
         response.ingestDataStreamResult.numRequests = 2
-        self.stub.ingestDataStream.side_effect, sent = _consume_then(response)
+        self.stub.ingestDataStream.future.side_effect, sent = _consume_then(response)
         result = self.client.ingest_data_stream([_params("a"), _params("b")])
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.num_requests, 2)
@@ -507,7 +523,7 @@ class TestIngestDataStream(_ClientTestCase):
     def test_partial_reject_keeps_the_response(self):
         response = ingestion_pb2.IngestDataStreamResponse(clientRequestIds=["a", "b"], rejectedRequestIds=["b"])
         response.exceptionalResult.message = "one or more requests were rejected"
-        self.stub.ingestDataStream.side_effect, _ = _consume_then(response)
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(response)
         result = self.client.ingest_data_stream([_params("a"), _params("b")])
         self.assertTrue(result.result_status.is_error)
         self.assertEqual(result.rejected_request_ids, ["b"])
@@ -515,7 +531,9 @@ class TestIngestDataStream(_ClientTestCase):
         self.assertIsNone(result.num_requests)
 
     def test_grpc_error_has_no_response(self):
-        self.stub.ingestDataStream.side_effect = _FakeRpcError(grpc.StatusCode.UNAVAILABLE, "down")
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(
+            _FakeRpcError(grpc.StatusCode.UNAVAILABLE, "down")
+        )
         result = self.client.ingest_data_stream([_params()])
         self.assertEqual(result.result_status.message, "gRPC error: down")
         self.assertIsNone(result.client_request_ids)
@@ -523,13 +541,13 @@ class TestIngestDataStream(_ClientTestCase):
         self.assertIsNone(result.num_requests)
 
     def test_oversized_request_points_at_split_data_frame(self):
-        self.stub.ingestDataStream.side_effect = _FakeRpcError(
-            grpc.StatusCode.RESOURCE_EXHAUSTED, "gRPC message exceeds maximum size 4096000: 9"
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(
+            _FakeRpcError(grpc.StatusCode.RESOURCE_EXHAUSTED, "gRPC message exceeds maximum size 4096000: 9")
         )
         self.assertIn("split_data_frame", self.client.ingest_data_stream([_params()]).result_status.message)
 
     def test_unexpected_exception_has_no_response(self):
-        self.stub.ingestDataStream.side_effect = RuntimeError("kaboom")
+        self.stub.ingestDataStream.future.side_effect = RuntimeError("kaboom")
         result = self.client.ingest_data_stream([_params()])
         self.assertTrue(result.result_status.is_error)
         self.assertEqual(result.result_status.message, "Unexpected error: kaboom")
@@ -539,9 +557,53 @@ class TestIngestDataStream(_ClientTestCase):
         self.assertIsNone(result.num_requests)
 
     def test_unrecognized_response_is_an_error(self):
-        self.stub.ingestDataStream.side_effect, _ = _consume_then(ingestion_pb2.IngestDataStreamResponse())
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(ingestion_pb2.IngestDataStreamResponse())
         result = self.client.ingest_data_stream([_params()])
         self.assertIn("neither exceptionalResult nor ingestDataStreamResult", result.result_status.message)
+
+    def test_unexpected_exception_from_result_has_no_response(self):
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(RuntimeError("kaboom"))
+        result = self.client.ingest_data_stream([_params()])
+        self.assertEqual(result.result_status.message, "Unexpected error: kaboom")
+        self.assertIsNone(result.response)
+
+    def test_callers_exception_is_reraised_in_place_of_grpcs(self):
+        # The feed records the iterable's exception; grpcio reports only UNKNOWN, which the sender replaces.
+        class Boom(Exception):
+            pass
+
+        def requests():
+            yield _params("a")
+            raise Boom("producer failed")
+
+        def call(feed, **_kwargs):
+            with contextlib.suppress(Boom):
+                list(feed)
+            return _FakeFuture(_FakeRpcError(grpc.StatusCode.UNKNOWN, "Exception iterating requests!"))
+
+        self.stub.ingestDataStream.future.side_effect = call
+        with self.assertRaises(Boom):
+            self.client.ingest_data_stream(requests())
+
+    def test_a_cancel_not_made_by_the_watchdog_is_an_unexpected_error(self):
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(grpc.FutureCancelledError())
+        result = self.client.ingest_data_stream([_params()])
+        self.assertTrue(result.result_status.message.startswith("Unexpected error: cancelled"))
+
+    def test_omitted_timeout_sets_no_total_deadline_and_an_explicit_one_is_forwarded(self):
+        response = ingestion_pb2.IngestDataStreamResponse()
+        response.ingestDataStreamResult.numRequests = 1
+        self.stub.ingestDataStream.future.side_effect, _ = _consume_then(response)
+        self.client.ingest_data_stream([_params()])
+        self.assertNotIn("timeout", self.stub.ingestDataStream.future.call_args.kwargs)
+        self.client.ingest_data_stream([_params()], timeout=9)
+        self.assertEqual(9, self.stub.ingestDataStream.future.call_args.kwargs["timeout"])
+
+    def test_zero_timeouts_raise_before_any_call(self):
+        for kwargs in ({"timeout": 0}, {"idle_timeout": 0}):
+            with self.subTest(**kwargs), self.assertRaisesRegex(ValueError, "=None to disable"):
+                self.client.ingest_data_stream([_params()], **kwargs)
+        self.stub.ingestDataStream.future.assert_not_called()
 
 
 class TestIngestDataBidiStream(_ClientTestCase):

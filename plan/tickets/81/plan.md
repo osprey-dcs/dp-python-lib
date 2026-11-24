@@ -364,8 +364,18 @@ the idle case adds a new text.
 - A stream's total `timeout=` gets the per-call D2 hint on `DEADLINE_EXCEEDED`, like a unary call's.
 - The senders are annotated `Generator[...]`, not `Iterator[...]`, since `closing()` needs `close()`.
 - `test_call_timeouts.py` checks all 40 unary and paging methods (not a sample, since the keyword went in
-  mechanically) and the stream methods; `test_timeouts_grpc.py` holds the in-process unary-deadline and
-  server-stream idle tests T6 lists.
+  mechanically) and the stream methods, and pins the count at 45; `test_timeouts_grpc.py` holds the in-process
+  unary-deadline, server-stream, client-streaming and bidi idle tests T6 lists.
+- Ingestion streams: `_RequestFeed` reports `pulling()` / `handed_over()` / `exhausted()` to an optional
+  listener on grpcio's request thread.  `_UploadClock` (client-streaming) and `_BidiIdleClock` (bidi) are the two
+  listeners.  The bidi clock keeps its start while it stays running, so a request handed over while the caller
+  waits does not restart the bound for older unanswered requests.  A `FutureCancelledError` the watchdog did not
+  cause becomes an "Unexpected error" result, like any other unexpected exception, rather than escaping.
+- Mutation checks run while writing the tests: dropping one sender's `timeout=timeout` fails
+  `test_call_timeouts.py`, and a bidi clock counting outstanding requests alone (the R1 rejected form) fails
+  `test_bidi_slow_consumer_with_acks_pending_does_not_trip`.
+- Cost: the in-process tests run in real time with a 0.5 s bound, and take the unit suite from about 3 s to about
+  13 s.  Each test asserts it finished inside 5 s.
 
 ### T4. `await_request_statuses()` honors its own timeout
 

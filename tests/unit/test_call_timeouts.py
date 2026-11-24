@@ -280,6 +280,29 @@ class TestStreamTimeouts(unittest.TestCase):
                     getattr(client._stub, stub_method).assert_not_called()
 
 
+class TestAllFortyFiveMethods(unittest.TestCase):
+    """The plan's count (#81 D2, T3): 40 unary/paging methods take timeout, 5 stream methods take both keywords."""
+
+    INGESTION_STREAMS = ("ingest_data_stream", "iter_ingest_data_bidi_stream")
+
+    def test_forty_five(self):
+        methods = {(cls, m) for cls, m, *_ in CASES} | {(cls, m) for cls, m, *_ in STREAM_CASES}
+        methods |= {(IngestionClient, m) for m in self.INGESTION_STREAMS}
+        self.assertEqual(45, len(methods))
+
+    def test_ingestion_streams_take_both_keywords(self):
+        for method in self.INGESTION_STREAMS:
+            for name in ("timeout", "idle_timeout"):
+                with self.subTest(method=method, param=name):
+                    param = inspect.signature(getattr(IngestionClient, method)).parameters[name]
+                    self.assertIs(inspect.Parameter.KEYWORD_ONLY, param.kind)
+                    self.assertIs(DEFAULT, param.default)
+
+    def test_await_request_statuses_keeps_its_own_total_timeout(self):
+        # R3: its timeout is the total wait (default 30 s), not the D2 per-call keyword.
+        self.assertEqual(30.0, inspect.signature(IngestionClient.await_request_statuses).parameters["timeout"].default)
+
+
 class TestExportTimeout(unittest.TestCase):
     def _export(self, client, **kwargs):
         return client.export_data(ExportDataRequestParams(ExportFormat.CSV, dataset_id="ds"), **kwargs)
