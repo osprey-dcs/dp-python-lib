@@ -151,10 +151,12 @@ default most likely wants to change the config, not every call:
   query.call_timeout_seconds; pass timeout= to override one call, or timeout=None to disable)"`;
 - from a per-call `timeout=`: `" (deadline 30 s, passed as timeout=)"`.
 
-So each client knows its service's setting names: `ServiceApiClientBase.__init__` takes them from the subclass
-(`query`, `ingestion`, `annotation`), and `ExportClient` names `annotation_export_timeout_seconds` /
-`MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS`.  A client constructed directly with a non-default `call_timeout=`
-names the constructor argument, not the config.  `_dispatch`'s own hint goes first, then any `rpc_error_hint`
+The source is described by whoever set the default, not by the subclass (amended in T2): a client built directly
+never reads config, so naming `MLDP_QUERY_CALL_TIMEOUT_SECONDS` there would point at a setting with no effect.
+`ServiceApiClientBase.__init__` takes `call_timeout_source=` / `stream_idle_timeout_source=` strings;
+`MldpClient` passes the config names (T5), and `ExportClient` names `annotation_export_timeout_seconds` /
+`MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS`.  Without one, a client given `call_timeout=` names the constructor
+argument, and a bare client says `"the library default; construct the client with call_timeout= to change it"`.  `_dispatch`'s own hint goes first, then any `rpc_error_hint`
 text; the two never meet today (the ingestion size hint fires only on `RESOURCE_EXHAUSTED`), but the order is
 fixed so a later hint on another code composes predictably.
 
@@ -302,15 +304,25 @@ iterable" measures an upload stall?  Record the answer in D3 and choose between 
 
 ### T2. `service_api_client_base.py`
 
-- `__init__(channel, stub_class, *, call_timeout=DEFAULT_CALL_TIMEOUT_SECONDS,
-  stream_idle_timeout=DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS)`; store both, validate non-negative (`0` → `None`).
-- The `_DEFAULT` sentinel and `_resolve_timeout(timeout)` (sentinel → client default).
-- `_dispatch(..., timeout=...)`: forward when not `None`; append the D2 hint on `DEADLINE_EXCEEDED`.
-- A per-call `timeout <= 0` raises `ValueError` (D2); `None` passes through as "no deadline".
+- `__init__(channel, stub_class, *, call_timeout=DEFAULT, stream_idle_timeout=DEFAULT, call_timeout_source=None,
+  stream_idle_timeout_source=None)`; resolved into `ClientTimeout(seconds, source)` pairs, validated non-negative
+  (`0` and `None` → disabled).  The `*_source` strings are the D2 amendment above.
+- The sentinel is `DEFAULT` (an enum member, so mypy narrows on it, with repr `DEFAULT` for `help()`), not a
+  private `_DEFAULT`: it appears in 45 public signatures.  `TimeoutArg = float | _Default | None`.
+- `_resolve_call_timeout(timeout, default=None)` and `_resolve_stream_timeouts(timeout, idle_timeout)` (the second
+  returns `(total, idle)`, total `None` when omitted, per D2).  Both raise `ValueError` on a per-call value `<= 0`
+  (or NaN / infinite), naming `None` as the way to disable, and `TypeError` on a non-number or `bool`.
+- `_dispatch(..., timeout=DEFAULT, default_timeout=None)`: sends no `timeout` keyword at all when disabled, so an
+  opted-out call is exactly the pre-#81 call; appends the D2 hint on `DEADLINE_EXCEEDED`, before any
+  `rpc_error_hint`.  `default_timeout` is how `ExportClient` substitutes its own default (Q1).
 - `_IdleWatchdog` (one daemon thread per call waiting on a `Condition`; arm / disarm / `expired` / `stop`, always
-  stopped in `finally`), here because three modules use it.  The bidi two-condition state (D3) wraps it in
-  `ingestion_client.py`, its only user.
-- The constants, exported from `dp_python_lib.client`.
+  stopped in `finally`), here because three modules use it.  It also has `attach(target)`, because the
+  client-streaming feed arms it before `.future()` returns the call (an expiry before attach cancels on attach),
+  and it calls its target outside its lock, since a cancel can call back into `disarm()` / `stop()`.  The bidi
+  two-condition state (D3) wraps it in `ingestion_client.py`, its only user.
+- `DEFAULT_CALL_TIMEOUT_SECONDS` and `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS`, exported from `dp_python_lib.client`.
+- Because `_dispatch` now applies the default to every unary sender, the 15 stub-call assertions (T6) change in
+  this step, not in T3.
 
 ### T3. The 45 public RPC methods and their senders
 

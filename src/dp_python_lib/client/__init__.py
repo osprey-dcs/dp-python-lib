@@ -119,9 +119,15 @@ from dp_python_lib.client.sample_status_client import (
     timestamp_list,
 )
 from dp_python_lib.client.sample_status_conversions import SampleStatusRow
+from dp_python_lib.client.service_api_client_base import (
+    DEFAULT_CALL_TIMEOUT_SECONDS,
+    DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
+)
 from dp_python_lib.client.time_conversions import TimestampInput, from_epoch_nanos, to_epoch_nanos, to_timestamp
 
 __all__ = [
+    "DEFAULT_CALL_TIMEOUT_SECONDS",
+    "DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS",
     "AnnotationClient",
     "AnnotationQuery",
     "AnnotationsClient",

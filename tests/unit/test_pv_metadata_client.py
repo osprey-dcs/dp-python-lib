@@ -19,6 +19,7 @@ from dp_python_lib.client.pv_metadata_client import (
     SavePvMetadataApiResult,
     SavePvMetadataRequestParams,
 )
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
@@ -183,7 +184,7 @@ class TestSendSavePvMetadata(unittest.TestCase):
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.response, response)
         self.assertEqual(result.pv_name, "ABC:1")
-        mock_stub.savePvMetadata.assert_called_once_with(self.request)
+        mock_stub.savePvMetadata.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")
@@ -256,7 +257,7 @@ class TestSendGetPvMetadata(unittest.TestCase):
         self.assertIsInstance(result, GetPvMetadataApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.pv_metadata.pvName, "ABC:1")
-        mock_stub.getPvMetadata.assert_called_once_with(self.request)
+        mock_stub.getPvMetadata.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")
@@ -324,7 +325,7 @@ class TestSendDeletePvMetadata(unittest.TestCase):
         self.assertIsInstance(result, DeletePvMetadataApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.pv_name, "ABC:1")
-        mock_stub.deletePvMetadata.assert_called_once_with(self.request)
+        mock_stub.deletePvMetadata.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")

@@ -21,6 +21,7 @@ from dp_python_lib.client.ingestion_client import (
     chunked_request_params,
 )
 from dp_python_lib.client.ingestion_client import RequestStatusQuery as RS
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.client.time_conversions import to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, ingestion_pb2
 
@@ -181,7 +182,7 @@ class TestIngestionClient(unittest.TestCase):
         self.assertEqual(result.response, mock_response)
 
         # Verify stub was called correctly
-        mock_stub.registerProvider.assert_called_once_with(request)
+        mock_stub.registerProvider.assert_called_once_with(request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_send_register_provider_exceptional_result(self):
         """Test _send_register_provider with exceptionalResult (business error)."""
