@@ -1,8 +1,10 @@
 # Issue #81 — Deadlines, stream idle timeouts, and keepalive
 
 **Status:** triaged 2026-11-24.  The four design decisions in the issue's "To decide" list were resolved with
-Craig the same day (D1, D3, D5, and the corrections in Background), as were both open questions (Q1, Q2).  Ready
-for implementation once this plan merges.
+Craig the same day (D1, D3, D5, and the corrections in Background), as were both open questions (Q1, Q2).  Plan
+review on PR #82 (2026-11-24) revised D2, D3, D5, T3, T4, T6, and T9: the bidi idle clock, the watchdog's threading,
+`await_request_statuses()`'s existing `timeout`, per-call `timeout=0`, the keepalive floor, and a data-heavy stream
+in live verification (R1–R6 below).  Ready for implementation once this plan merges.
 
 ## Overview
 
@@ -30,9 +32,10 @@ The prototype, its outputs, and `GRPC_TRACE=http_keepalive,http2_ping` traces ar
 
 **The ticket's premises hold:**
 
-- All 35 stub call sites pass no `timeout`: 30 unary calls through `ServiceApiClientBase._dispatch()`, the four
-  server-streaming calls (`_iter_stream()` in `query_client.py` for both query kinds, and
-  `_send_query_sample_statuses_stream()`), and the two client-streaming ingest calls.  No public method accepts a
+- All 36 stub call sites pass no `timeout`: 31 unary calls through `ServiceApiClientBase._dispatch()`, three
+  server-streaming calls (`querySamplesStream` and `queryBucketsStream`, both through `_iter_stream()` in
+  `query_client.py`, and `querySampleStatusesStream` in `_send_query_sample_statuses_stream()`), and the two
+  client-streaming ingest calls.  (Corrected in review from "35 … 30 unary … four server-streaming".)  No public method accepts a
   timeout.  The only timeouts in `src/` are `await_request_statuses()`'s own polling loop.
 - `ServiceConfig.create_channel()` builds `grpc.insecure_channel(target)` / `grpc.secure_channel(target, creds)`
   with no options.
@@ -89,7 +92,8 @@ The prototype, its outputs, and `GRPC_TRACE=http_keepalive,http2_ping` traces ar
 - **Blast radius in the tests:** 15 `stub.<method>.assert_called_once_with(request)` assertions (one in
   `test_service_api_client_base.py`, the rest across the feature-client tests) fail once `timeout=` is passed,
   and the channel tests in `test_config.py` / `test_mldp_client.py` assert `insecure_channel(target)` with no
-  options.
+  options.  The client-streaming ingest tests in `test_ingestion_client.py` (`_consume_then()` and the
+  `ingestDataStream.side_effect` mocks) assume a blocking call, so D3's switch to `.future()` rewrites them (T6).
 - **Wider surface than the client methods:** `config.py`'s YAML flattener hardcodes the `host` / `port` /
   `use_tls` keys, so new settings need adding there; channels passed to `MldpClient` explicitly get no keepalive;
   the whole-query conveniences (`query_conversions.query_samples_to_dataframe()` /
@@ -113,12 +117,23 @@ new source of errors).
 
 ### D2. Per-call override is a keyword on every public RPC method, with a sentinel default
 
-Every public method that makes an RPC gains a keyword-only `timeout` parameter: 46 methods across eight clients
-(listed in T3).  Its default is a module sentinel, so three cases stay distinct:
+Every public method that makes an RPC gains a keyword-only `timeout` parameter: 45 methods across eight clients
+(listed in T3).  `await_request_statuses()` is the exception: it already has a `timeout` (its total wait, default
+30 s), which keeps that meaning, and it bounds each poll itself (T4).  The default is a module sentinel, so three
+cases stay distinct:
 
 - omitted: the client's configured default (D1/D4);
 - a positive number: that many seconds;
 - `None`: no deadline, for a caller who deliberately wants today's behavior.
+
+A per-call `timeout <= 0` raises `ValueError` naming `None` as the way to disable (R4).  grpcio treats `0` as a
+deadline already passed, while `0` in config means "disabled" (D4); accepting it per call would leave one of those
+readings silently wrong.
+
+**Omitting `timeout` means different things on unary and stream methods, deliberately.**  On a unary or paging
+method it is the configured deadline; on a stream method it is *no* total deadline, because the stream's default
+bound is its idle timeout (D3) and a total deadline would cap a healthy long stream.  The stream docstrings and the
+cookbook say so in those words.
 
 On paging methods (`iter_*`, `get_datasets()`) it applies **per RPC** (per page or chunk), not to the whole
 iteration: a total over an unbounded iteration is the same wrong tool as a total on a stream.  The docstrings say
@@ -136,19 +151,36 @@ give one slow call more time without affecting concurrent callers.
 
 ### D3. Streams get an idle timeout, measured only while the client is waiting on the server
 
-`DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 300.0` (Q2).  A private `_IdleWatchdog` (a `threading.Timer` re-armed
-around each wait) cancels the call if the client spends longer than the bound **waiting on the server**:
+`DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 300.0` (Q2).  A private `_IdleWatchdog` cancels the call if the client
+spends longer than the bound **waiting on the server**.
+
+**One watchdog thread per call, not a timer per wait** (R2).  Re-arming a `threading.Timer` around each wait would
+start a thread per message: thousands for a bucket stream of small messages or a bidi ingest of many chunks.
+Instead the watchdog starts one daemon thread when the call starts.  That thread waits on a `threading.Condition`
+for a deadline: `arm()` sets the deadline to now + bound, `disarm()` clears it, both notify, and the thread cancels
+the call when a set deadline passes.  `stop()` in the sender's `finally` ends the thread.  So the cost is one thread
+per call however long the stream runs, and the interface stays arm / disarm / `expired`.
 
 - **Server streaming** (`_iter_stream()`, `_send_query_sample_statuses_stream()`): armed immediately before each
   `next(stream)` and disarmed when it returns.  Time the caller spends processing a yielded page does not count,
   so the first message (which includes server queueing; #314 saw 22–42 s of queue wait) and each later one each
   get the full bound.
-- **Bidi ingest** (`_send_ingest_data_bidi_stream()`): armed only while requests are outstanding (the feed's
-  `sent` count exceeds the responses received), so a slow producer in the caller's iterable never trips it.
+- **Bidi ingest** (`_send_ingest_data_bidi_stream()`): the clock runs only while **both** conditions hold (R1):
+  the caller is blocked in `next(call)`, *and* requests are outstanding (the feed's `sent` count exceeds the
+  responses received).  Neither condition alone is enough.  Outstanding requests alone would count consumer time:
+  with 10 requests sent and one ack processed for 400 s, the other nine acks may already be buffered client-side,
+  yet outstanding stays at nine.  Being in `next()` alone would count the producer's time: a caller waiting while
+  its own iterable builds the next request has nothing to wait for from the server.  The two conditions change on
+  different threads (the feed on grpcio's request thread, `next()` on the caller's), so a small state object holds
+  `waiting` and `outstanding` under one lock, and re-evaluates arm/disarm on every transition: entering and leaving
+  `next()`, the feed handing over a request, and a response arriving.
 - **Client-streaming ingest** (`_send_ingest_data_stream()`): switches to `stub.ingestDataStream.future(...)`, and
   arms the watchdog from the moment the feed is exhausted until the summary arrives.  Whether grpcio's request
   consumption also exposes a flow-control stall during upload (the server not reading) is to be prototyped in T1;
   if it does not, an upload stall is left to keepalive and to an explicit `timeout`, and the docstring says so.
+  The switch must keep the existing contracts: the caller's own exception still re-raised through
+  `feed.reraise()` when `future.result()` raises, a partial reject still returned with its response, and
+  `test_ingestion_streaming_grpc.py` passing unchanged.
 
 On expiry the watchdog sets a flag and calls `call.cancel()`.  The sender, seeing `CANCELLED` with the flag set,
 reports `"gRPC error: stream idle timeout: no message from the server within <n> s"` instead of grpcio's "Locally
@@ -201,6 +233,13 @@ channel = grpc.secure_channel(target, credentials, options=channel_options())
 `keepalive_permit_without_calls` stays off: dp-service would allow it, but a channel with no call in flight has
 nothing to protect, and pinging idle connections only adds load.
 
+**A keepalive interval below the server's limit is worse than none** (R5).  If `keepalive_time_seconds` is under
+dp-service's 30 s `permitKeepAliveTimeSeconds`, the server answers with GOAWAY `too_many_pings`, which fails every
+call on that connection: a guard against hangs becomes an outage.  So `channel_options()` (and through it
+`ServiceConfig`) logs a WARNING for a non-zero value below `MIN_SERVER_KEEPALIVE_SECONDS = 30`, naming the
+dp-service setting.  It warns rather than rejects, because a deployment can lower the server's limit and the
+client cannot know.  The cookbook states the floor next to the defaults.
+
 *Rejected:* opt-in (the silent network drop is as much a hang as the server one, and the cost is one ping a
 minute per active connection); documenting raw grpcio option names for callers to copy (they are exactly the
 names that turned out not to mean what they say).
@@ -230,10 +269,13 @@ iterable" measures an upload stall?  Record the answer in D3 and choose between 
   stream_idle_timeout=DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS)`; store both, validate non-negative (`0` → `None`).
 - The `_DEFAULT` sentinel and `_resolve_timeout(timeout)` (sentinel → client default).
 - `_dispatch(..., timeout=...)`: forward when not `None`; append the D2 hint on `DEADLINE_EXCEEDED`.
-- `_IdleWatchdog` (arm / disarm / `expired`, always disarmed in `finally`), here because three modules use it.
+- A per-call `timeout <= 0` raises `ValueError` (D2); `None` passes through as "no deadline".
+- `_IdleWatchdog` (one daemon thread per call waiting on a `Condition`; arm / disarm / `expired` / `stop`, always
+  stopped in `finally`), here because three modules use it.  The bidi two-condition state (D3) wraps it in
+  `ingestion_client.py`, its only user.
 - The constants, exported from `dp_python_lib.client`.
 
-### T3. The 46 public RPC methods and their senders
+### T3. The 45 public RPC methods and their senders
 
 Add `timeout=` (unary, paging) or `idle_timeout=` + `timeout=` (streams), and thread it to `_dispatch()` /
 the stream senders:
@@ -255,14 +297,16 @@ the stream senders:
 - `QueryClient`: `query_samples`, `iter_query_samples`, `iter_query_samples_stream`, `query_buckets`,
   `iter_query_buckets`, `iter_query_buckets_stream`
 - `IngestionClient`: `register_provider`, `ingest_data`, `ingest_data_stream`, `iter_ingest_data_bidi_stream`,
-  `query_request_status`, `await_request_statuses` (T4)
+  `query_request_status`.  Not `await_request_statuses()`: its existing `timeout` stays the total wait (D2, T4).
 
 The stream senders get the D3 watchdog.  `_iter_stream()` keeps its yield-errors contract and error texts; only
 the idle case adds a new text.
 
 ### T4. `await_request_statuses()` honors its own timeout
 
-Each poll's `timeout` is `min(client default, remaining)`.  If a poll fails *and* the overall deadline has passed,
+The method keeps its signature: its `timeout` stays the total wait (default 30 s), and it gains no per-call
+`timeout` of the D2 kind.  Each poll's deadline is `min(client default, remaining)`, so the total bounds the polls
+too.  If a poll fails *and* the overall deadline has passed,
 raise the existing `TimeoutError` naming the missing ids, not `RuntimeError("status query failed")`.  Unit test
 against the fake clock: a poll that would hang is bounded, and the error type is `TimeoutError`.
 
@@ -276,17 +320,26 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
 
 - **Update** the 15 stub-call assertions to `assert_called_once_with(request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)`,
   which also pins the default's propagation, and the channel tests to expect `options=channel_options()`.
-- `test_service_api_client_base.py`: timeout forwarded / omitted for `None`; sentinel resolution; the
-  `DEADLINE_EXCEEDED` hint appended; `0` disabling; negative rejected.
+- **Rewrite** the client-streaming ingest tests in `test_ingestion_client.py` for `.future()`: `_consume_then()`
+  and the `ingestDataStream.side_effect` mocks become a mocked `.future` whose `result()` returns the response or
+  raises, keeping every current case (accepted, partial reject, `RpcError`, unexpected error, unrecognized
+  response, the caller's exception re-raised).
+- `test_service_api_client_base.py`: timeout forwarded / omitted for `None`; sentinel resolution; per-call
+  `timeout=0` and negative raising `ValueError`; the `DEADLINE_EXCEEDED` hint appended; config `0` disabling;
+  negative config rejected.  `_IdleWatchdog`: expiry cancels and sets `expired`; disarm before expiry does not;
+  many arm/disarm cycles run on one thread (assert `threading.active_count()` does not grow with the cycles);
+  `stop()` ends the thread.
 - `test_config.py`: each field through init / env / YAML precedence (with `isolate_mldp_env`), `0` disables,
-  negative rejected, `channel_options()` contents and the `[]` case.
+  negative rejected, `channel_options()` contents and the `[]` case, and the WARNING for a non-zero keepalive below
+  30 s (`assertLogs`), with none at 30 s or 0.
 - **In-process grpcio tests** (alongside `test_ingestion_streaming_grpc.py`), with second-scale values so the suite
   stays fast:
   - a unary call to a hanging handler fails with `DEADLINE_EXCEEDED` and the hint;
   - a server stream that never sends fails with the idle-timeout `RuntimeError` within the bound, and one that
     sends slowly but within the bound completes, with the consumer sleeping longer than the bound between
     messages (the consumer-time exclusion);
-  - bidi ingest with a slow producer does not trip, and an unanswered request does;
+  - bidi ingest with a slow producer does not trip; a **slow consumer with acks pending** (several requests sent,
+    the caller sleeping past the bound after the first ack) does not trip either; and an unanswered request does;
   - the client-streaming case as T1 settles it;
   - **keepalive**: through the blackhole proxy, a channel built with `channel_options()` at small values fails a
     quiet stream with `UNAVAILABLE` within a bound, and the same channel without options does not.  If grpc-core
@@ -313,9 +366,16 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
 
 ### T9. Live verification (recorded in the PR, not a CI test)
 
-Against a local dp-service stack: a 60 s keepalive on a long-quiet stream draws no GOAWAY (`GRPC_TRACE`), and a
-10 s one does draw `too_many_pings`, which confirms the enforcement the 60 s value is sized against.  Run the
-changed cookbook recipes as one script.
+Against a local dp-service stack, with `GRPC_TRACE=http_keepalive,http2_ping`:
+
+- a 60 s keepalive on a long-quiet stream draws no GOAWAY, and a 10 s one does draw `too_many_pings`, which
+  confirms the enforcement the 60 s value is sized against;
+- a **data-heavy** stream (a bucket stream over enough ingested data to run several minutes) with the D6 options
+  draws no GOAWAY either (R6).  `max_pings_without_data=0` changes when pings go out while data flows, and how
+  grpc-core's other pings (BDP probes) count against grpc-java's ping limit is not settled by the quiet case.
+  If it does draw GOAWAY, D6 is revisited before the implementation PR merges.
+
+Run the changed cookbook recipes as one script.
 
 ## Out of scope
 
@@ -357,3 +417,24 @@ so there is one number to explain.
 **Recommendation: 300 s**, matching D1, revisited if field reports show hung streams lingering.
 
 **Resolved 2026-11-24 (Craig): 300 s.**
+
+## Plan review (PR #82, 2026-11-24)
+
+Six findings from reviewing this plan against the code, all accepted by Craig and folded into the sections named:
+
+- **R1. The bidi idle clock counted consumer time** (D3).  "Armed while requests are outstanding" cancels a healthy
+  call whose caller is slow to process acks that have already arrived.  The clock now runs only while the caller is
+  blocked in `next()` *and* requests are outstanding.  T6 adds the slow-consumer case.
+- **R2. A `threading.Timer` per wait starts a thread per message** (D3, T2).  Replaced by one watchdog thread per
+  call waiting on a `Condition`.
+- **R3. `await_request_statuses()` already has a `timeout`** (D2, T3, T4), meaning the total wait.  It keeps that
+  meaning and is not one of the D2 methods, so they number 45, not 46.
+- **R4. `timeout=0` per call was unspecified, and omitting `timeout` differs between unary and stream methods**
+  (D2).  A per-call `timeout <= 0` now raises `ValueError`; the unary/stream difference is stated as deliberate.
+- **R5. A keepalive interval below the server's 30 s limit draws GOAWAY `too_many_pings`** (D5).  It now logs a
+  WARNING, not an error, since a deployment can lower the server's limit.
+- **R6. Live verification checked only a quiet stream** (T9).  It adds a data-heavy bucket stream under
+  `GRPC_TRACE`.
+
+The review also corrected the call-site counts in Background (36 sites: 31 unary, 3 server-streaming) and added the
+client-streaming ingest test rewrite that D3's `.future()` switch implies (Background, T6).
