@@ -38,6 +38,7 @@ person cutting the release has any reason to re-read.
 - [Ingesting data (#17)](#ingesting-data-issue-17)
 - [Querying whole buckets (#16)](#querying-whole-buckets-issue-16)
 - [Install from PyPI (#76)](#install-from-pypi-issue-76)
+- [Every call has a deadline (#81)](#every-call-has-a-deadline-issue-81)
 - [Cutting the release](#cutting-the-release)
 
 ---
@@ -292,6 +293,65 @@ gives the commands.  PyPI also shows PEP 740 attestations for each file, a secon
 same provenance.  Earlier releases are not on PyPI and will not be added.
 
 See [#76](https://github.com/osprey-dcs/dp-python-lib/issues/76) and `plan/tickets/76/plan.md`.
+
+## Every call has a deadline (Issue #81)
+
+**Silent behavior changes.**  Until now no call had a deadline, and the channels the library built
+had no keepalive, so a call the server never answered waited forever.  Every call now has a bound
+by default:
+
+- **A unary call fails after 300 s** with `gRPC error: Deadline Exceeded`.  That covers every
+  `get_*`, `save_*`, `delete_*`, and `query_*` method, and each page of an `iter_*` method (the
+  bound is per page, not for the whole iteration).
+- **`export_data()` fails after 3600 s**, since it returns only once the server has written the
+  whole file.
+- **A stream fails after 300 s spent waiting on the server**, with `gRPC error: stream idle timeout:
+  no message from the server within 300 s`.  Only time spent waiting on the server counts.  A
+  stream that keeps delivering runs as long as it needs, however slowly your code consumes it or
+  produces its requests.  There is no total deadline on a stream unless you pass one.
+- **Channels built from configuration send keepalive pings** every 60 s while a call is in
+  progress, and fail the call with `UNAVAILABLE` if a ping goes unanswered for 20 s.  This
+  detects a network path that has silently gone dead, within 80 s.  It does not detect a server
+  that is connected but never answers; the deadlines above do.
+
+Check before upgrading: **if you have legitimate calls that run longer than these bounds**, a very
+large export or a server that takes minutes to produce a stream's next message, raise the setting
+for that service, or the call will now fail where it used to succeed.  To get the old behavior
+back, use `timeout=None` on one call, or set `call_timeout_seconds`, `stream_idle_timeout_seconds`,
+`keepalive_time_seconds`, and (for the annotation service) `export_timeout_seconds` to `0`.
+
+What's new:
+
+- **A keyword-only `timeout=` on every method that calls the server**: omitted for the configured
+  default, a number of seconds for that call, or `None` for no deadline.  `timeout=0` or a negative
+  value raises `ValueError`, since gRPC reads `0` as a deadline already passed.  Stream methods
+  also take `idle_timeout=`, with the same three meanings.  A deadline error names the deadline
+  that applied and the setting or argument that set it.
+- **New settings, per service**, through the usual precedence (constructor, `MLDP_*` variables,
+  YAML): `call_timeout_seconds`, `stream_idle_timeout_seconds`, `keepalive_time_seconds`, and
+  `keepalive_timeout_seconds`, plus `annotation.export_timeout_seconds`
+  (`MLDP_QUERY_CALL_TIMEOUT_SECONDS`, and so on).  `0` disables each of them except
+  `keepalive_timeout_seconds`, which must be positive.  Negative, infinite, and NaN values are
+  rejected.
+- **`dp_python_lib.config.channel_options()`** returns the grpcio options for the same keepalive,
+  for channels you build yourself, which get none otherwise.  Write
+  `grpc.secure_channel(target, credentials, options=channel_options())`.  The grpcio option names do
+  not do what they say on their own, so prefer this to copying them.  A keepalive interval below
+  30 s logs a WARNING: dp-service by default closes a connection that pings more often than that,
+  failing every call on it.
+- **`await_request_statuses()` can no longer hang on one status query.**  Its `timeout` was always
+  the total wait, but it checked the clock only between queries.  Each query is now bounded by the
+  time remaining, and a query that fails after the wait has run out raises the same `TimeoutError`
+  as an ordinary timeout.
+- **Exported constants** for the defaults: `DEFAULT_CALL_TIMEOUT_SECONDS`,
+  `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS`, and `DEFAULT_EXPORT_TIMEOUT_SECONDS` from
+  `dp_python_lib.client`; `DEFAULT_KEEPALIVE_TIME_SECONDS`, `DEFAULT_KEEPALIVE_TIMEOUT_SECONDS`, and
+  `MIN_SERVER_KEEPALIVE_SECONDS` from `dp_python_lib.config`.
+
+The cookbook's [Deadlines, idle timeouts, and keepalive](https://github.com/osprey-dcs/dp-python-lib/blob/main/doc/cookbook/conventions.md#deadlines-idle-timeouts-and-keepalive)
+section has the details.
+
+See [#81](https://github.com/osprey-dcs/dp-python-lib/issues/81) and `plan/tickets/81/plan.md`.
 
 ## Installing
 

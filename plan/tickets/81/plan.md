@@ -504,6 +504,21 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
   misleading option names, per-page timeout semantics, `0` disables) in gRPC Error Handling and the configuration
   section; the Key Files entries for the changed modules.
 
+**Amended during T7 (2026-11-24):**
+
+- **Two more cookbook pages got a pointer.**  Exports are discussed in `datasets-and-annotations.md`, not
+  `query.md` or `ingestion.md`, so the 3600 s export default is stated there.  `connecting.md`, where the YAML keys,
+  explicit channels, and custom TLS are documented, names the new settings and `options=channel_options()`.
+- **The CLAUDE.md invariants are a subsection of their own**, "Deadlines, idle timeouts, and keepalive", after gRPC
+  Error Handling, not bullets spread through it; the configuration section gains a "Timeout and keepalive settings"
+  paragraph and a `channel_options()` entry.  The stale "leave them as they are" note now says all three server
+  streams go through `ServiceApiClientBase._iter_stream()`, and why the public wrappers close it.
+- Key Files gains `test_call_timeouts.py`, `test_timeouts_grpc.py`, and `test_keepalive_grpc.py`.
+- **The docs say nothing yet about `timeout` on the whole-query conveniences**, which do not take it until T8; T8
+  adds the line.
+- `NEXT.md` also lists the `await_request_statuses()` fix and the exported default constants, which a reader
+  upgrading would otherwise find only in the code.
+
 ### T8. Whole-query conveniences
 
 `query_samples_to_dataframe()`, `stream_query_samples_to_dataframes()`, and `query_buckets_to_dataframes()` pass
