@@ -390,11 +390,34 @@ class SampleStatusClient(ServiceApiClientBase):
     are reserved placeholders that return a "not implemented" error.
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        stream_idle_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+        stream_idle_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Annotation Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
+        :param stream_idle_timeout: Default idle timeout, in seconds, for this client's streaming calls: the longest
+            the client waits on the server for a stream's next step.  Omitted: DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS.
+            None or 0 disables it.  A call's own ``idle_timeout=`` overrides it.
+        :param stream_idle_timeout_source: The same as ``call_timeout_source``, for ``stream_idle_timeout``.
         """
-        super().__init__(channel, annotation_pb2_grpc.DpAnnotationServiceStub)
+        super().__init__(
+            channel,
+            annotation_pb2_grpc.DpAnnotationServiceStub,
+            call_timeout=call_timeout,
+            stream_idle_timeout=stream_idle_timeout,
+            call_timeout_source=call_timeout_source,
+            stream_idle_timeout_source=stream_idle_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("SampleStatusClient initialized with channel: %s", channel)
 

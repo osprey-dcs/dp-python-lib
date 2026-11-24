@@ -407,6 +407,31 @@ The D4 fields and their validation; the YAML flattener's per-service key list (o
 one-line change); `ServiceConfig.create_channel()` with `options=channel_options(...)`; `channel_options()`
 exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeouts; the facade forwarding them.
 
+**Amended during T5 (2026-11-24):**
+
+- **Each client takes only the timeouts it uses.**  The three clients with streams (`IngestionClient`,
+  `QueryClient`, `SampleStatusClient`) take `call_timeout` and `stream_idle_timeout`, each with its `*_source`; the
+  four unary-only annotation clients take `call_timeout` alone; `ExportClient` takes only `export_timeout` (T3).
+  A `stream_idle_timeout` on a client with no streams would be accepted and do nothing.  The facade takes all three
+  and forwards each where it applies.
+- **`keepalive_timeout_seconds` must be positive.**  D4's "`0` disables" does not fit a ping timeout, which has
+  nothing to disable; keepalive itself is turned off with `keepalive_time_seconds: 0`.  So `0` is a validation
+  error at config load rather than a confusing failure at channel creation, and `channel_options()` rejects it too.
+- **The config defaults are literals** in `config.py`, not imports of `DEFAULT_CALL_TIMEOUT_SECONDS` and friends:
+  importing `dp_python_lib.client` from `config` would import `MldpClient`, which imports `config`.
+  `test_config.py` pins them equal to the client constants.
+- **MldpClient names the setting even when it holds the default** ("set by MLDP_QUERY_CALL_TIMEOUT_SECONDS /
+  query.call_timeout_seconds"), since that is where a caller of `MldpClient` would change it.  Without a config
+  (explicit channels only), the clients' own library-default text applies.
+- **The YAML flattener is in `config.py`** (`from_yaml()`), not `loader.py`, which needed no change.  It reads a
+  `_SERVICE_KEYS` tuple plus `_SERVICE_ONLY_KEYS` for `annotation.export_timeout_seconds`.
+- **Also exported** from `dp_python_lib.config`: `DEFAULT_KEEPALIVE_TIME_SECONDS`, `DEFAULT_KEEPALIVE_TIMEOUT_SECONDS`
+  and `MIN_SERVER_KEEPALIVE_SECONDS`; `ServiceConfig` gains a `channel_options()` method that `create_channel()`
+  uses.
+- **Tests moved up from T6:** the four channel assertions (`test_config.py`, `test_mldp_client.py`) now expect
+  `options=channel_options()`, and the facade and `MldpClient` wiring is pinned (`TestAnnotationClientTimeouts`,
+  `TestMldpClientTimeouts`).  The config field, precedence, `channel_options()` and WARNING tests stay in T6.
+
 ### T6. Tests
 
 - **Update** the 15 stub-call assertions to `assert_called_once_with(request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)`,

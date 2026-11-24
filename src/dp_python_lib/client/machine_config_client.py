@@ -648,11 +648,26 @@ class MachineConfigClient(ServiceApiClientBase):
     iter_configurations()/iter_configuration_activations() paging iterators.
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Annotation Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
         """
-        super().__init__(channel, annotation_pb2_grpc.DpAnnotationServiceStub)
+        super().__init__(
+            channel,
+            annotation_pb2_grpc.DpAnnotationServiceStub,
+            call_timeout=call_timeout,
+            call_timeout_source=call_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("MachineConfigClient initialized with channel: %s", channel)
 

@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import grpc
 
@@ -6,6 +7,23 @@ from dp_python_lib.client.annotation_client import AnnotationClient
 from dp_python_lib.client.ingestion_client import IngestionClient
 from dp_python_lib.client.query_client import QueryClient
 from dp_python_lib.config import MldpConfig, load_config
+
+
+def _service_timeouts(config: MldpConfig | None, service: str) -> dict[str, Any]:
+    """
+    The timeout keyword arguments for one service's client(s): the configured values, each with the setting it
+    came from for the DEADLINE_EXCEEDED hint (#81 R7), or nothing without a config, leaving the library defaults.
+    """
+    if config is None:
+        return {}
+    timeouts: dict[str, Any] = {}
+    for kwarg, key in (
+        ("call_timeout", "call_timeout_seconds"),
+        ("stream_idle_timeout", "stream_idle_timeout_seconds"),
+    ):
+        timeouts[kwarg] = getattr(config, f"{service}_{key}")
+        timeouts[f"{kwarg}_source"] = config._setting_source(service, key)
+    return timeouts
 
 
 class MldpClient:
@@ -112,14 +130,25 @@ class MldpClient:
             self.logger.debug("No annotation channel provided - will be None")
             self._annotation_channel = None
 
+        # The configured timeouts apply to every client, explicit channels included (#81 D4); keepalive cannot,
+        # being a property of a channel the library did not build.  Without a config, the clients' own defaults.
+        ingestion_timeouts = _service_timeouts(config, "ingestion")
+        query_timeouts = _service_timeouts(config, "query")
+        annotation_timeouts = _service_timeouts(config, "annotation")
+        if config is not None:
+            annotation_timeouts["export_timeout"] = config.annotation_export_timeout_seconds
+            annotation_timeouts["export_timeout_source"] = config._setting_source(
+                "annotation", "export_timeout_seconds"
+            )
+
         # Initialize service clients
         self.logger.info("Initializing ingestion client")
-        self.ingestion_client = IngestionClient(self._ingestion_channel)
+        self.ingestion_client = IngestionClient(self._ingestion_channel, **ingestion_timeouts)
 
         # Annotation service facade (exposes .pv_metadata, etc.); only created if a channel is available
         if self._annotation_channel is not None:
             self.logger.info("Initializing annotation client")
-            self.annotation: AnnotationClient | None = AnnotationClient(self._annotation_channel)
+            self.annotation: AnnotationClient | None = AnnotationClient(self._annotation_channel, **annotation_timeouts)
         else:
             self.logger.debug("No annotation channel provided - annotation client will be None")
             self.annotation = None
@@ -129,7 +158,7 @@ class MldpClient:
         # the .annotation facade.
         if self._query_channel is not None:
             self.logger.info("Initializing query client")
-            self.query: QueryClient | None = QueryClient(self._query_channel)
+            self.query: QueryClient | None = QueryClient(self._query_channel, **query_timeouts)
         else:
             self.logger.debug("No query channel provided - query client will be None")
             self.query = None

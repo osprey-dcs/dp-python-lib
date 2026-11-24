@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from mldp_env import isolate_mldp_env, mldp_env
 
-from dp_python_lib.config import MldpConfig, ServiceConfig, load_config
+from dp_python_lib.config import MldpConfig, ServiceConfig, channel_options, load_config
 from dp_python_lib.config.loader import find_config_file, get_default_config
 
 
@@ -46,7 +46,7 @@ class TestServiceConfig(unittest.TestCase):
 
         channel = config.create_channel()
 
-        mock_insecure_channel.assert_called_once_with("localhost:50051")
+        mock_insecure_channel.assert_called_once_with("localhost:50051", options=channel_options())
         self.assertEqual(channel, mock_channel)
 
     @patch("grpc.ssl_channel_credentials")
@@ -62,8 +62,29 @@ class TestServiceConfig(unittest.TestCase):
         channel = config.create_channel()
 
         mock_ssl_creds.assert_called_once()
-        mock_secure_channel.assert_called_once_with("secure.example.com:443", mock_creds)
+        mock_secure_channel.assert_called_once_with("secure.example.com:443", mock_creds, options=channel_options())
         self.assertEqual(channel, mock_channel)
+
+
+class TestTimeoutDefaults(unittest.TestCase):
+    def test_config_defaults_match_the_client_constants(self):
+        # config.py spells these as literals to avoid an import cycle with dp_python_lib.client (#81 T5).
+        from dp_python_lib.client.export_client import DEFAULT_EXPORT_TIMEOUT_SECONDS
+        from dp_python_lib.client.service_api_client_base import (
+            DEFAULT_CALL_TIMEOUT_SECONDS,
+            DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
+        )
+
+        isolate_mldp_env(self)
+        config = MldpConfig()
+        for service in ("ingestion", "query", "annotation"):
+            with self.subTest(service=service):
+                self.assertEqual(getattr(config, f"{service}_call_timeout_seconds"), DEFAULT_CALL_TIMEOUT_SECONDS)
+                self.assertEqual(
+                    getattr(config, f"{service}_stream_idle_timeout_seconds"), DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS
+                )
+        self.assertEqual(config.annotation_export_timeout_seconds, DEFAULT_EXPORT_TIMEOUT_SECONDS)
+        self.assertEqual(ServiceConfig().call_timeout_seconds, DEFAULT_CALL_TIMEOUT_SECONDS)
 
 
 class TestMldpConfig(unittest.TestCase):
