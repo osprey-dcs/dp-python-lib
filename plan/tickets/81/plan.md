@@ -3,8 +3,9 @@
 **Status:** triaged 2026-11-24.  The four design decisions in the issue's "To decide" list were resolved with
 Craig the same day (D1, D3, D5, and the corrections in Background), as were both open questions (Q1, Q2).  Plan
 review on PR #82 (2026-11-24) revised D2, D3, D5, T3, T4, T6, and T9: the bidi idle clock, the watchdog's threading,
-`await_request_statuses()`'s existing `timeout`, per-call `timeout=0`, the keepalive floor, and a data-heavy stream
-in live verification, the deadline hint's wording, and the keepalive test's time limits (R1–R8 below).  Ready for implementation once this plan merges.
+`await_request_statuses()`'s existing `timeout`, per-call `timeout=0`, the keepalive floor, a data-heavy stream in
+live verification, the deadline hint's wording, and the keepalive test's time limits (R1–R8 below).  Ready for
+implementation once this plan merges.
 
 ## Overview
 
