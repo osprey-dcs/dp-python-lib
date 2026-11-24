@@ -4,7 +4,7 @@
 Craig the same day (D1, D3, D5, and the corrections in Background), as were both open questions (Q1, Q2).  Plan
 review on PR #82 (2026-11-24) revised D2, D3, D5, T3, T4, T6, and T9: the bidi idle clock, the watchdog's threading,
 `await_request_statuses()`'s existing `timeout`, per-call `timeout=0`, the keepalive floor, and a data-heavy stream
-in live verification (R1–R6 below).  Ready for implementation once this plan merges.
+in live verification, the deadline hint's wording, and the keepalive test's time limits (R1–R8 below).  Ready for implementation once this plan merges.
 
 ## Overview
 
@@ -142,8 +142,20 @@ total deadline, defaulting to none.
 
 `_dispatch()` gains a `timeout` parameter and passes it to the stub call only when it is not `None`
 (`stub_call(request, timeout=t)`).  A `DEADLINE_EXCEEDED` result appends a hint to the existing
-`"gRPC error: Deadline Exceeded"`, never replacing it (the prefix is contract): " (client deadline 300 s; pass
-timeout= to change it, or timeout=None to disable)".
+`"gRPC error: Deadline Exceeded"`, never replacing it (the prefix is contract).  The hint names **the deadline
+actually applied and where it came from** (R7), not a fixed "300 s", because a caller who hit the configured
+default most likely wants to change the config, not every call:
+
+- from config or the client default: `" (client deadline 300 s, set by MLDP_QUERY_CALL_TIMEOUT_SECONDS /
+  query.call_timeout_seconds; pass timeout= to override one call, or timeout=None to disable)"`;
+- from a per-call `timeout=`: `" (deadline 30 s, passed as timeout=)"`.
+
+So each client knows its service's setting names: `ServiceApiClientBase.__init__` takes them from the subclass
+(`query`, `ingestion`, `annotation`), and `ExportClient` names `annotation_export_timeout_seconds` /
+`MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS`.  A client constructed directly with a non-default `call_timeout=`
+names the constructor argument, not the config.  `_dispatch`'s own hint goes first, then any `rpc_error_hint`
+text; the two never meet today (the ingestion size hint fires only on `RESOURCE_EXHAUSTED`), but the order is
+fixed so a later hint on another code composes predictably.
 
 *Rejected:* a context manager or context variable (`with client.deadline(30):`) — a much smaller diff, but
 invisible in signatures and IDE completion, and easy to leak across threads; a per-client setter only — cannot
@@ -325,7 +337,8 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
   raises, keeping every current case (accepted, partial reject, `RpcError`, unexpected error, unrecognized
   response, the caller's exception re-raised).
 - `test_service_api_client_base.py`: timeout forwarded / omitted for `None`; sentinel resolution; per-call
-  `timeout=0` and negative raising `ValueError`; the `DEADLINE_EXCEEDED` hint appended; config `0` disabling;
+  `timeout=0` and negative raising `ValueError`; the `DEADLINE_EXCEEDED` hint appended, naming the applied deadline and its source in each of the three cases
+  (config/default, constructor argument, `timeout=`), and ordered before an `rpc_error_hint`; config `0` disabling;
   negative config rejected.  `_IdleWatchdog`: expiry cancels and sets `expired`; disarm before expiry does not;
   many arm/disarm cycles run on one thread (assert `threading.active_count()` does not grow with the cycles);
   `stop()` ends the thread.
@@ -344,6 +357,13 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
   - **keepalive**: through the blackhole proxy, a channel built with `channel_options()` at small values fails a
     quiet stream with `UNAVAILABLE` within a bound, and the same channel without options does not.  If grpc-core
     refuses second-scale keepalive values, mark the test slow and run it in the quality job only.
+    **Both halves have explicit time limits** (R8).  The negative half watches for exactly as long as the
+    positive half's limit (keepalive interval + ping timeout + a fixed margin), then cancels the call itself and
+    asserts it was still open.  Waiting any longer proves nothing more, since keepalive would already have fired
+    by then.  Each half's call also carries a total gRPC deadline well above that limit as a backstop, so a
+    regression fails the test instead of hanging the suite (the project has no `pytest-timeout`, and this needs
+    none).  The limits come from module constants, and the test asserts that the two
+    halves together take less than a stated total, so a change that makes the test slow is noticed.
 
 ### T7. Docs
 
@@ -420,7 +440,7 @@ so there is one number to explain.
 
 ## Plan review (PR #82, 2026-11-24)
 
-Six findings from reviewing this plan against the code, all accepted by Craig and folded into the sections named:
+Findings from reviewing this plan against the code, all accepted by Craig and folded into the sections named:
 
 - **R1. The bidi idle clock counted consumer time** (D3).  "Armed while requests are outstanding" cancels a healthy
   call whose caller is slow to process acks that have already arrived.  The clock now runs only while the caller is
@@ -435,6 +455,13 @@ Six findings from reviewing this plan against the code, all accepted by Craig an
   WARNING, not an error, since a deployment can lower the server's limit.
 - **R6. Live verification checked only a quiet stream** (T9).  It adds a data-heavy bucket stream under
   `GRPC_TRACE`.
+
+Two smaller findings, also accepted:
+
+- **R7. The `DEADLINE_EXCEEDED` hint hardcoded "300 s"** (D2).  It now names the deadline applied and its source:
+  the per-service config setting, the constructor argument, or `timeout=`.
+- **R8. The keepalive test's negative half had no time limit** (T6).  Both halves now have explicit time limits,
+  and the negative half watches no longer than the positive half's limit.
 
 The review also corrected the call-site counts in Background (36 sites: 31 unary, 3 server-streaming) and added the
 client-streaming ingest test rewrite that D3's `.future()` switch implies (Background, T6).
