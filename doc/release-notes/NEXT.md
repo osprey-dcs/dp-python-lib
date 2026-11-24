@@ -326,7 +326,9 @@ What's new:
   default, a number of seconds for that call, or `None` for no deadline.  `timeout=0` or a negative
   value raises `ValueError`, since gRPC reads `0` as a deadline already passed.  Stream methods
   also take `idle_timeout=`, with the same three meanings.  A deadline error names the deadline
-  that applied and the setting or argument that set it.
+  that applied and the setting or argument that set it.  The whole-query conveniences
+  (`query_samples_to_dataframe()`, `stream_query_samples_to_dataframes()`,
+  `query_buckets_to_dataframes()`) take the same keywords and pass them on.
 - **New settings, per service**, through the usual precedence (constructor, `MLDP_*` variables,
   YAML): `call_timeout_seconds`, `stream_idle_timeout_seconds`, `keepalive_time_seconds`, and
   `keepalive_timeout_seconds`, plus `annotation.export_timeout_seconds`

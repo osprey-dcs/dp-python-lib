@@ -32,6 +32,7 @@ from dp_python_lib.client import data_frame_conversions as dfc
 # than a feature module.  Reusing it keeps one implementation of the integer-nanosecond SamplingClock shift.
 from dp_python_lib.client.data_frame import _COLUMN_FIELD_BY_TYPE, _slice_frame
 from dp_python_lib.client.sample_status_conversions import expand_data_timestamps
+from dp_python_lib.client.service_api_client_base import DEFAULT, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_epoch_nanos, to_timestamp
 from dp_python_lib.grpc import common_pb2
 
@@ -474,7 +475,12 @@ def buckets_to_dataframes(
 
 
 def query_buckets_to_dataframes(
-    query_client: Any, params: Any, *, trim: bool = False, max_buckets: int | None = None
+    query_client: Any,
+    params: Any,
+    *,
+    trim: bool = False,
+    max_buckets: int | None = None,
+    timeout: TimeoutArg = DEFAULT,
 ) -> dict[str, Any]:
     """
     Runs a unary bucket query, pages through the whole result with iter_query_buckets(), and assembles one pandas
@@ -488,6 +494,8 @@ def query_buckets_to_dataframes(
     :param trim: When True, trim every bucket to the query's own [begin, end); by default buckets stay whole.
     :param max_buckets: Optional cap on the total number of buckets across all pages; raise once it would be
         exceeded (an unbounded "give me everything" is an out-of-memory foot-gun on large ranges).
+    :param timeout: Deadline in seconds for each page's call, passed to iter_query_buckets(); it bounds one page, not
+        the whole query.  Omitted: the client's default.  None: no deadline.
     :return: A dict of PV name to pandas.DataFrame.
     :raises ValueError: if the result exceeds max_buckets, or the buckets cannot be assembled.
     :raises RuntimeError: if any page returns an error (propagated from iter_query_buckets()).
@@ -495,7 +503,7 @@ def query_buckets_to_dataframes(
     _require_pandas()
 
     buckets: list[common_pb2.DataBucket] = []
-    for page in query_client.iter_query_buckets(params):
+    for page in query_client.iter_query_buckets(params, timeout=timeout):
         buckets.extend(page.data_buckets)
         if max_buckets is not None and len(buckets) > max_buckets:
             raise ValueError(

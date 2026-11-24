@@ -524,6 +524,17 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
 `query_samples_to_dataframe()`, `stream_query_samples_to_dataframes()`, and `query_buckets_to_dataframes()` pass
 `timeout` / `idle_timeout` through to the client methods they call.
 
+**Amended during T8 (2026-11-24):**
+
+- **Each convenience forwards the keyword unconditionally**, `DEFAULT` included, so omitting it means exactly what
+  omitting it on the client method means; the value is validated there, not twice.
+- **`stream_query_samples_to_dataframes()` now closes the stream in a `finally`**, so closing the convenience's
+  generator cancels the call and stops the idle watchdog at once, rather than when the inner generator is collected.
+  It closes only an iterator that has `close()`, since the client argument is untyped and a test double may return a
+  plain iterator.
+- The docs line T7 deferred is in `conventions.md` (after the per-page paragraph), with a sentence in `query.md`'s
+  pointer, the `NEXT.md` "What's new" item, and CLAUDE.md's Key Files entries for both conversion modules.
+
 ### T9. Live verification (recorded in the PR, not a CI test)
 
 Against a local dp-service stack, with `GRPC_TRACE=http_keepalive,http2_ping`:

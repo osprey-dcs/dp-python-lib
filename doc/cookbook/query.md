@@ -390,7 +390,8 @@ or use `itertools.islice`.
 **A long stream is not cut off by a deadline.**  A stream fails only when the server sends nothing
 for 5 minutes (by default) while your loop waits for the next message, and the time your loop spends
 on each page does not count.  Each page of `iter_query_samples()` gets the ordinary 300 s deadline
-instead.  See [Deadlines, idle timeouts, and keepalive](conventions.md#deadlines-idle-timeouts-and-keepalive).
+instead.  The `qc` conveniences take the same keywords and pass them on.  See
+[Deadlines, idle timeouts, and keepalive](conventions.md#deadlines-idle-timeouts-and-keepalive).
 
 ## Whole buckets: arrays, images, and stored metadata
 

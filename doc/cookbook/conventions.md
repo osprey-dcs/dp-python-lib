@@ -356,6 +356,9 @@ query.call_timeout_seconds; pass timeout= to override one call, or timeout=None 
 **On paging methods, `timeout` applies to each page, not to the whole iteration.**  `iter_*` and
 `get_datasets()` make one call per page or chunk, and each call gets the bound.  A total over an
 iteration of unknown length would be the wrong tool; if you need one, check the clock in your loop.
+The whole-query conveniences take the same keyword and pass it to the calls they make:
+`query_samples_to_dataframe()` and `query_buckets_to_dataframes()` take `timeout=` (per page), and
+`stream_query_samples_to_dataframes()` takes `idle_timeout=` and `timeout=` as its stream does.
 
 ### Streams use an idle timeout
 
