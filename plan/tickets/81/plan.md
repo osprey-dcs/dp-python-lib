@@ -469,6 +469,27 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
     none).  The limits come from module constants, and the test asserts that the two
     halves together take less than a stated total, so a change that makes the test slow is noticed.
 
+**Amended during T6 (2026-11-24):**
+
+- **Most of this list landed with the code it tests**, in T2-T5: the stub-call assertions, the `.future()` rewrite
+  of the client-streaming ingest tests, the `_dispatch` / `_IdleWatchdog` tests (thread growth counted by thread
+  name rather than `threading.active_count()`, which also sees threads other tests leave winding down), the
+  in-process deadline and idle tests in `test_timeouts_grpc.py`, and the channel assertions.  T6 adds the rest:
+  `TestTimeoutAndKeepaliveSettings` and `TestChannelOptions` in `test_config.py`, and `test_keepalive_grpc.py`.
+- **The keepalive test runs in the normal suite**, not a slow-marked quality-job test: grpc-core accepts 0.5 s /
+  0.5 s, and detected the blackhole 0.70 s after it in every trial.  The positive half's limit is 2.0 s (interval +
+  ping timeout + 1 s margin), the negative half watches exactly that long, each call carries a 10 s backstop
+  deadline, and the test asserts the two halves finish inside 5.6 s.  It takes about 3.4 s.
+- **The channel comes from `ServiceConfig.create_channel()`**, not `grpc.insecure_channel(options=channel_options())`,
+  so the test also covers the config-to-channel wiring; the negative half is the same config with
+  `keepalive_time_seconds=0`.
+- **The blackhole proxy uses threads and plain sockets**, not the prototype's asyncio, so `close()` can shut every
+  socket and join every thread and the test leaves nothing pending.
+- `from_yaml()` re-raises a `ValidationError` as a `ValueError` naming the file, so the YAML rejection tests match
+  the field name in that message; the env and init paths raise `ValidationError` itself.
+- Mutation checks: dropping `grpc.http2.ping_timeout_ms` from `channel_options()` fails the keepalive test (and
+  three option tests), and `allow_inf_nan=True` fails the non-finite rejections.
+
 ### T7. Docs
 
 - `doc/cookbook/conventions.md`: a "Deadlines, idle timeouts, and keepalive" section: the defaults, the three

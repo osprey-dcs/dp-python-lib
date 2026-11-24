@@ -9,8 +9,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 
 from mldp_env import isolate_mldp_env, mldp_env
+from pydantic import ValidationError
 
-from dp_python_lib.config import MldpConfig, ServiceConfig, channel_options, load_config
+from dp_python_lib.config import (
+    DEFAULT_KEEPALIVE_TIME_SECONDS,
+    DEFAULT_KEEPALIVE_TIMEOUT_SECONDS,
+    MIN_SERVER_KEEPALIVE_SECONDS,
+    MldpConfig,
+    ServiceConfig,
+    channel_options,
+    load_config,
+)
 from dp_python_lib.config.loader import find_config_file, get_default_config
 
 
@@ -85,6 +94,201 @@ class TestTimeoutDefaults(unittest.TestCase):
                 )
         self.assertEqual(config.annotation_export_timeout_seconds, DEFAULT_EXPORT_TIMEOUT_SECONDS)
         self.assertEqual(ServiceConfig().call_timeout_seconds, DEFAULT_CALL_TIMEOUT_SECONDS)
+
+
+# (service, key) for every #81 setting.  export_timeout_seconds exists on the annotation service only.
+_SERVICES = ("ingestion", "query", "annotation")
+_PER_SERVICE_KEYS = (
+    "call_timeout_seconds",
+    "stream_idle_timeout_seconds",
+    "keepalive_time_seconds",
+    "keepalive_timeout_seconds",
+)
+_TIMEOUT_SETTINGS = [(svc, key) for svc in _SERVICES for key in _PER_SERVICE_KEYS] + [
+    ("annotation", "export_timeout_seconds")
+]
+# Settings where 0 disables; a ping timeout has nothing to disable and must be positive (#81 T5).
+_ZERO_DISABLES = [(svc, key) for svc, key in _TIMEOUT_SETTINGS if key != "keepalive_timeout_seconds"]
+
+_CONFIG_LOGGER = "dp_python_lib.config.config"
+
+
+def _value(config: MldpConfig, service: str, key: str) -> float:
+    """The setting as MldpConfig stores it (the flat field every other reader derives from)."""
+    return getattr(config, f"{service}_{key}")
+
+
+class TestTimeoutAndKeepaliveSettings(unittest.TestCase):
+    """The #81 settings through init / env / YAML, with the same precedence as host and port."""
+
+    def setUp(self):
+        isolate_mldp_env(self)
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+
+    def write_yaml(self, service: str, key: str, value: object) -> str:
+        path = os.path.join(self._tmpdir.name, "mldp-config.yaml")
+        with open(path, "w") as f:
+            f.write(f"{service}:\n  {key}: {value}\n")
+        return path
+
+    def test_yaml_sets_each_setting(self):
+        for service, key in _TIMEOUT_SETTINGS:
+            with self.subTest(service=service, key=key):
+                path = self.write_yaml(service, key, 11.5)
+                for config in (load_config(config_file=path), MldpConfig.from_yaml(path)):
+                    self.assertEqual(_value(config, service, key), 11.5)
+
+    def test_env_beats_yaml_for_each_setting(self):
+        for service, key in _TIMEOUT_SETTINGS:
+            with self.subTest(service=service, key=key):
+                path = self.write_yaml(service, key, 11)
+                with mldp_env(**{f"MLDP_{service.upper()}_{key.upper()}": "22"}):
+                    for config in (load_config(config_file=path), MldpConfig.from_yaml(path)):
+                        self.assertEqual(_value(config, service, key), 22)
+
+    def test_init_kwarg_beats_env_for_each_setting(self):
+        for service, key in _TIMEOUT_SETTINGS:
+            with self.subTest(service=service, key=key):
+                with mldp_env(**{f"MLDP_{service.upper()}_{key.upper()}": "22"}):
+                    config = MldpConfig(**{f"{service}_{key}": 33})
+                self.assertEqual(_value(config, service, key), 33)
+
+    def test_service_config_carries_the_per_service_settings(self):
+        for service, key in _TIMEOUT_SETTINGS:
+            if key == "export_timeout_seconds":
+                continue  # a deadline for one annotation method, not a channel or client-wide setting
+            with self.subTest(service=service, key=key):
+                config = MldpConfig(**{f"{service}_{key}": 7})
+                self.assertEqual(getattr(getattr(config, service), key), 7)
+                # the other services keep their defaults
+                for other in _SERVICES:
+                    if other != service:
+                        self.assertNotEqual(getattr(getattr(config, other), key), 7)
+
+    def test_zero_is_accepted_where_it_disables(self):
+        for service, key in _ZERO_DISABLES:
+            with self.subTest(service=service, key=key):
+                path = self.write_yaml(service, key, 0)
+                self.assertEqual(_value(MldpConfig.from_yaml(path), service, key), 0)
+
+    def test_zero_keepalive_timeout_is_rejected(self):
+        for service in _SERVICES:
+            with self.subTest(service=service):
+                path = self.write_yaml(service, "keepalive_timeout_seconds", 0)
+                # from_yaml() re-raises a ValidationError as a ValueError naming the file; the field is in it
+                with self.assertRaisesRegex(ValueError, f"{service}_keepalive_timeout_seconds"):
+                    MldpConfig.from_yaml(path)
+                with (
+                    mldp_env(**{f"MLDP_{service.upper()}_KEEPALIVE_TIMEOUT_SECONDS": "0"}),
+                    self.assertRaises(ValidationError),
+                ):
+                    MldpConfig()
+        with self.assertRaises(ValidationError):
+            ServiceConfig(keepalive_timeout_seconds=0)
+
+    def test_negative_and_non_finite_values_are_rejected(self):
+        for service, key in _TIMEOUT_SETTINGS:
+            for bad in ("-1", "inf", "nan"):
+                with self.subTest(service=service, key=key, value=bad):
+                    path = self.write_yaml(service, key, f".{bad}" if bad != "-1" else bad)  # YAML spells .inf/.nan
+                    with self.assertRaisesRegex(ValueError, f"{service}_{key}"):
+                        MldpConfig.from_yaml(path)
+                    with (
+                        mldp_env(**{f"MLDP_{service.upper()}_{key.upper()}": bad}),
+                        self.assertRaises(ValidationError),
+                    ):
+                        MldpConfig()
+        for key in _PER_SERVICE_KEYS:
+            with self.subTest(service_config=key), self.assertRaises(ValidationError):
+                ServiceConfig(**{key: -1})
+
+    def test_invalid_yaml_value_overridden_by_env_loads(self):
+        # Validation runs on the merged result (#19), so a bad file value an env var replaces is not an error.
+        path = self.write_yaml("query", "call_timeout_seconds", -5)
+        with mldp_env(MLDP_QUERY_CALL_TIMEOUT_SECONDS="45"):
+            self.assertEqual(MldpConfig.from_yaml(path).query.call_timeout_seconds, 45)
+
+    def test_keepalive_settings_reach_the_channel_options(self):
+        config = MldpConfig(query_keepalive_time_seconds=45, query_keepalive_timeout_seconds=7.5)
+        self.assertEqual(
+            config.query.channel_options(),
+            channel_options(keepalive_time_seconds=45, keepalive_timeout_seconds=7.5),
+        )
+        self.assertEqual(config.ingestion.channel_options(), channel_options())
+        self.assertEqual(MldpConfig(annotation_keepalive_time_seconds=0).annotation.channel_options(), [])
+
+    @patch("grpc.insecure_channel")
+    def test_create_channel_without_keepalive_passes_no_options(self, mock_insecure_channel):
+        ServiceConfig(host="h", port=1, keepalive_time_seconds=0).create_channel()
+        mock_insecure_channel.assert_called_once_with("h:1", options=[])
+
+
+class TestChannelOptions(unittest.TestCase):
+    def test_defaults(self):
+        self.assertEqual(DEFAULT_KEEPALIVE_TIME_SECONDS, 60.0)
+        self.assertEqual(DEFAULT_KEEPALIVE_TIMEOUT_SECONDS, 20.0)
+        self.assertEqual(
+            channel_options(),
+            [
+                ("grpc.keepalive_time_ms", 60_000),
+                ("grpc.keepalive_timeout_ms", 20_000),
+                # the option grpc-core actually bounds the ack wait with (#81 D6); same value as the one above
+                ("grpc.http2.ping_timeout_ms", 20_000),
+                # without it a quiet stream is throttled to one ping a minute after two pings
+                ("grpc.http2.max_pings_without_data", 0),
+            ],
+        )
+
+    def test_custom_values_convert_to_whole_milliseconds(self):
+        options = dict(channel_options(keepalive_time_seconds=45.0004, keepalive_timeout_seconds=2.5))
+        self.assertEqual(options["grpc.keepalive_time_ms"], 45_000)
+        self.assertEqual(options["grpc.keepalive_timeout_ms"], 2_500)
+        self.assertEqual(options["grpc.http2.ping_timeout_ms"], 2_500)
+        for value in options.values():
+            self.assertIs(type(value), int)
+
+    def test_sub_millisecond_values_round_up_to_one_millisecond(self):
+        # 0 ms would mean something else to grpc-core (or be rejected), not "very short".
+        with self.assertLogs(_CONFIG_LOGGER, "WARNING"):
+            options = dict(channel_options(keepalive_time_seconds=0.0001, keepalive_timeout_seconds=0.0001))
+        self.assertEqual(options["grpc.keepalive_time_ms"], 1)
+        self.assertEqual(options["grpc.http2.ping_timeout_ms"], 1)
+
+    def test_zero_interval_disables_keepalive(self):
+        self.assertEqual(channel_options(keepalive_time_seconds=0), [])
+        # the ping timeout is irrelevant once keepalive is off, so 0 there is not an error
+        self.assertEqual(channel_options(keepalive_time_seconds=0, keepalive_timeout_seconds=0), [])
+
+    def test_zero_ping_timeout_with_keepalive_on_raises(self):
+        with self.assertRaisesRegex(ValueError, "keepalive_timeout_seconds must be positive"):
+            channel_options(keepalive_timeout_seconds=0)
+
+    def test_invalid_values_raise_naming_the_argument(self):
+        for name in ("keepalive_time_seconds", "keepalive_timeout_seconds"):
+            for bad in (-1, float("inf"), float("nan")):
+                with self.subTest(name=name, value=bad), self.assertRaisesRegex(ValueError, name):
+                    channel_options(**{name: bad})
+            for bad in ("60", None, True):
+                with self.subTest(name=name, value=bad), self.assertRaisesRegex(TypeError, name):
+                    channel_options(**{name: bad})
+
+    def test_warning_below_the_server_minimum(self):
+        self.assertEqual(MIN_SERVER_KEEPALIVE_SECONDS, 30.0)
+        with self.assertLogs(_CONFIG_LOGGER, "WARNING") as logs:
+            channel_options(keepalive_time_seconds=10)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("too_many_pings", logs.output[0])
+        self.assertIn("keepalive_time_seconds=10", logs.output[0])
+
+    def test_no_warning_at_the_minimum_or_when_disabled(self):
+        for interval in (MIN_SERVER_KEEPALIVE_SECONDS, DEFAULT_KEEPALIVE_TIME_SECONDS, 0):
+            with self.subTest(interval=interval), self.assertNoLogs(_CONFIG_LOGGER, "WARNING"):
+                channel_options(keepalive_time_seconds=interval)
+
+    def test_service_config_warns_through_create_channel(self):
+        with patch("grpc.insecure_channel"), self.assertLogs(_CONFIG_LOGGER, "WARNING"):
+            ServiceConfig(keepalive_time_seconds=10).create_channel()
 
 
 class TestMldpConfig(unittest.TestCase):
