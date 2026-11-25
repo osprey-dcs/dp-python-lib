@@ -151,10 +151,12 @@ default most likely wants to change the config, not every call:
   query.call_timeout_seconds; pass timeout= to override one call, or timeout=None to disable)"`;
 - from a per-call `timeout=`: `" (deadline 30 s, passed as timeout=)"`.
 
-So each client knows its service's setting names: `ServiceApiClientBase.__init__` takes them from the subclass
-(`query`, `ingestion`, `annotation`), and `ExportClient` names `annotation_export_timeout_seconds` /
-`MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS`.  A client constructed directly with a non-default `call_timeout=`
-names the constructor argument, not the config.  `_dispatch`'s own hint goes first, then any `rpc_error_hint`
+The source is described by whoever set the default, not by the subclass (amended in T2): a client built directly
+never reads config, so naming `MLDP_QUERY_CALL_TIMEOUT_SECONDS` there would point at a setting with no effect.
+`ServiceApiClientBase.__init__` takes `call_timeout_source=` / `stream_idle_timeout_source=` strings;
+`MldpClient` passes the config names (T5), and `ExportClient` names `annotation_export_timeout_seconds` /
+`MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS`.  Without one, a client given `call_timeout=` names the constructor
+argument, and a bare client says `"the library default; construct the client with call_timeout= to change it"`.  `_dispatch`'s own hint goes first, then any `rpc_error_hint`
 text; the two never meet today (the ingestion size hint fires only on `RESOURCE_EXHAUSTED`), but the order is
 fixed so a later hint on another code composes predictably.
 
@@ -187,18 +189,21 @@ per call however long the stream runs, and the interface stays arm / disarm / `e
   different threads (the feed on grpcio's request thread, `next()` on the caller's), so a small state object holds
   `waiting` and `outstanding` under one lock, and re-evaluates arm/disarm on every transition: entering and leaving
   `next()`, the feed handing over a request, and a response arriving.
-- **Client-streaming ingest** (`_send_ingest_data_stream()`): switches to `stub.ingestDataStream.future(...)`, and
-  arms the watchdog from the moment the feed is exhausted until the summary arrives.  Whether grpcio's request
-  consumption also exposes a flow-control stall during upload (the server not reading) is to be prototyped in T1;
-  if it does not, an upload stall is left to keepalive and to an explicit `timeout`, and the docstring says so.
+- **Client-streaming ingest** (`_send_ingest_data_stream()`): switches to `stub.ingestDataStream.future(...)`.  The
+  clock runs whenever grpcio, not the caller, holds the next step: from the feed handing grpcio a request until
+  grpcio asks for the next one, and from the feed's exhaustion until the summary arrives.  Time inside the caller's
+  iterable never counts.  T1 showed this covers an upload stall as well as a summary that never comes: grpcio
+  pulls the next request only once the previous send completes, and a send does not complete while HTTP/2 flow
+  control is closed, so a server that stops reading stops the pulls (T1 results below).
   The switch must keep the existing contracts: the caller's own exception still re-raised through
   `feed.reraise()` when `future.result()` raises, a partial reject still returned with its response, and
   `test_ingestion_streaming_grpc.py` passing unchanged.
 
-On expiry the watchdog sets a flag and calls `call.cancel()`.  The sender, seeing `CANCELLED` with the flag set,
-reports `"gRPC error: stream idle timeout: no message from the server within <n> s"` instead of grpcio's "Locally
-cancelled by application!", so the public wrappers raise their existing `RuntimeError` with that text.  The
-watchdog is always disarmed in the sender's `finally`, so a closed generator leaves no timer behind.
+On expiry the watchdog sets a flag and calls `call.cancel()`.  The sender, seeing `CANCELLED` with the flag set (on
+the client-streaming future, `FutureCancelledError`; T1), reports `"gRPC error: stream idle timeout: no message
+from the server within <n> s"` instead of grpcio's "Locally cancelled by application!", so the public wrappers
+raise their existing `RuntimeError` with that text.  The watchdog is always disarmed in the sender's `finally`, so
+a closed generator leaves no timer behind.
 
 The prototype's watchdog already shows `cancel()` from another thread ends a blocked stream iteration at once,
 with `CANCELLED`.
@@ -276,17 +281,48 @@ Extend the prototype: does grpcio's request-iterator thread stop pulling while t
 flow control), so that "time since the feed last handed grpcio a request, excluding time inside the caller's
 iterable" measures an upload stall?  Record the answer in D3 and choose between the two forms there.
 
+**Done 2026-11-24** (`cs_proto.py` in the ticket scratch area; grpcio 1.84, in-process grpcio server on localhost).
+**Yes: the pulls stop**, so D3 takes the form that covers the upload.
+
+| Server handler | Request size | Pulled before the stall | Then |
+|---|---|---|---|
+| never reads | 1,000 B | 4,174 (4.2 MB) | no pull for 8 s, until cancelled |
+| never reads | 64 KiB | 64 (4.2 MB) | same |
+| never reads | 1 MiB | 4 (4.2 MB) | same |
+| reads 50, then stops | 64 KiB | 128 (8.4 MB) | same |
+| sleeps 4 s, then reads all | 64 KiB | 64, then all 400 at 4.05 s | completes; a slow server is not a stall |
+| reads promptly | 64 KiB | all 400 | completes in 0.26 s |
+
+- The stall shows up after about 4 MB is buffered past what the server has read, whatever the message size.  That
+  is this grpcio server's window.  dp-service sets no flow-control window (`GrpcServerBase` configures the message
+  size and keepalive limits only), so grpc-java's Netty default applies, and T9 checks the stall against it.  An upload smaller than the window never stalls on
+  the way up; it is caught by the clock that runs after exhaustion instead.
+- **`future.cancel()` makes `future.result()` raise `grpc.FutureCancelledError`**, at once, not an `RpcError` with
+  `CANCELLED` as on the streaming calls.  So `_send_ingest_data_stream()` checks the watchdog's `expired` flag on
+  `FutureCancelledError` and turns it into the D3 idle-timeout message.  grpcio pulled no further requests after the
+  cancel.
+
 ### T2. `service_api_client_base.py`
 
-- `__init__(channel, stub_class, *, call_timeout=DEFAULT_CALL_TIMEOUT_SECONDS,
-  stream_idle_timeout=DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS)`; store both, validate non-negative (`0` → `None`).
-- The `_DEFAULT` sentinel and `_resolve_timeout(timeout)` (sentinel → client default).
-- `_dispatch(..., timeout=...)`: forward when not `None`; append the D2 hint on `DEADLINE_EXCEEDED`.
-- A per-call `timeout <= 0` raises `ValueError` (D2); `None` passes through as "no deadline".
+- `__init__(channel, stub_class, *, call_timeout=DEFAULT, stream_idle_timeout=DEFAULT, call_timeout_source=None,
+  stream_idle_timeout_source=None)`; resolved into `ClientTimeout(seconds, source)` pairs, validated non-negative
+  (`0` and `None` → disabled).  The `*_source` strings are the D2 amendment above.
+- The sentinel is `DEFAULT` (an enum member, so mypy narrows on it, with repr `DEFAULT` for `help()`), not a
+  private `_DEFAULT`: it appears in 45 public signatures.  `TimeoutArg = float | _Default | None`.
+- `_resolve_call_timeout(timeout, default=None)` and `_resolve_stream_timeouts(timeout, idle_timeout)` (the second
+  returns `(total, idle)`, total `None` when omitted, per D2).  Both raise `ValueError` on a per-call value `<= 0`
+  (or NaN / infinite), naming `None` as the way to disable, and `TypeError` on a non-number or `bool`.
+- `_dispatch(..., timeout=DEFAULT, default_timeout=None)`: sends no `timeout` keyword at all when disabled, so an
+  opted-out call is exactly the pre-#81 call; appends the D2 hint on `DEADLINE_EXCEEDED`, before any
+  `rpc_error_hint`.  `default_timeout` is how `ExportClient` substitutes its own default (Q1).
 - `_IdleWatchdog` (one daemon thread per call waiting on a `Condition`; arm / disarm / `expired` / `stop`, always
-  stopped in `finally`), here because three modules use it.  The bidi two-condition state (D3) wraps it in
-  `ingestion_client.py`, its only user.
-- The constants, exported from `dp_python_lib.client`.
+  stopped in `finally`), here because three modules use it.  It also has `attach(target)`, because the
+  client-streaming feed arms it before `.future()` returns the call (an expiry before attach cancels on attach),
+  and it calls its target outside its lock, since a cancel can call back into `disarm()` / `stop()`.  The bidi
+  two-condition state (D3) wraps it in `ingestion_client.py`, its only user.
+- `DEFAULT_CALL_TIMEOUT_SECONDS` and `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS`, exported from `dp_python_lib.client`.
+- Because `_dispatch` now applies the default to every unary sender, the 15 stub-call assertions (T6) change in
+  this step, not in T3.
 
 ### T3. The 45 public RPC methods and their senders
 
@@ -315,6 +351,32 @@ the stream senders:
 The stream senders get the D3 watchdog.  `_iter_stream()` keeps its yield-errors contract and error texts; only
 the idle case adds a new text.
 
+**Amended during T3:**
+
+- `_iter_stream()` moved from `QueryClient` to `ServiceApiClientBase`, and `_send_query_sample_statuses_stream()`
+  now delegates to it.  That sender was a line-for-line copy (same tiers, same texts; its logs hard-coded the
+  names `_iter_stream()` derives), and wiring the watchdog into two copies was the worse option.  CLAUDE.md's "leave
+  them as they are" note is updated in T7.
+- The three public server-stream wrappers close their sender with `contextlib.closing`, as the bidi ingest wrapper
+  already did.  Without it, a wrapper that raises leaves the sender suspended until garbage collection (the
+  traceback holds it), so its `finally` -- which stops the watchdog thread -- ran late.  The in-process test that
+  counts watchdog threads found this.
+- A stream's total `timeout=` gets the per-call D2 hint on `DEADLINE_EXCEEDED`, like a unary call's.
+- The senders are annotated `Generator[...]`, not `Iterator[...]`, since `closing()` needs `close()`.
+- `test_call_timeouts.py` checks all 40 unary and paging methods (not a sample, since the keyword went in
+  mechanically) and the stream methods, and pins the count at 45; `test_timeouts_grpc.py` holds the in-process
+  unary-deadline, server-stream, client-streaming and bidi idle tests T6 lists.
+- Ingestion streams: `_RequestFeed` reports `pulling()` / `handed_over()` / `exhausted()` to an optional
+  listener on grpcio's request thread.  `_UploadClock` (client-streaming) and `_BidiIdleClock` (bidi) are the two
+  listeners.  The bidi clock keeps its start while it stays running, so a request handed over while the caller
+  waits does not restart the bound for older unanswered requests.  A `FutureCancelledError` the watchdog did not
+  cause becomes an "Unexpected error" result, like any other unexpected exception, rather than escaping.
+- Mutation checks run while writing the tests: dropping one sender's `timeout=timeout` fails
+  `test_call_timeouts.py`, and a bidi clock counting outstanding requests alone (the R1 rejected form) fails
+  `test_bidi_slow_consumer_with_acks_pending_does_not_trip`.
+- Cost: the in-process tests run in real time with a 0.5 s bound, and take the unit suite from about 3 s to about
+  13 s.  Each test asserts it finished inside 5 s.
+
 ### T4. `await_request_statuses()` honors its own timeout
 
 The method keeps its signature: its `timeout` stays the total wait (default 30 s), and it gains no per-call
@@ -323,11 +385,52 @@ too.  If a poll fails *and* the overall deadline has passed,
 raise the existing `TimeoutError` naming the missing ids, not `RuntimeError("status query failed")`.  Unit test
 against the fake clock: a poll that would hang is bounded, and the error type is `TimeoutError`.
 
+Amended during T4 (2026-11-24):
+
+- **A floor for the last poll.**  The loop trims its final sleep to the deadline and then polls once more, so
+  "the time remaining" is zero for exactly the poll most likely to see a just-written document.  Each poll gets at
+  least `AWAIT_MIN_POLL_SECONDS` (1 s), capped at the call's own `timeout`; that is also the most the wait can
+  overrun, and the docstring says so.
+- **`DEFAULT` when the client default is the tighter bound.**  Passing it as a number would make a
+  `DEADLINE_EXCEEDED` hint say "passed as timeout=", which the caller never did.  With the default disabled, the
+  remaining time bounds the poll alone.
+- **Which ids the `TimeoutError` names** after a failed poll: those the last successful poll lacked, or all of them
+  if none succeeded.  The message ends with the failed query's own text.  A poll that fails *before* the deadline
+  (for instance, bounded by a shorter client default) still raises `RuntimeError`, as before.
+- Tests: seven cases in `TestAwaitRequestStatuses` (remaining time per poll, the client default, the default
+  disabled, the floor and its cap, a hung poll, a late failure after a partial result).  Mutation checks: dropping
+  the per-poll timeout fails five, and dropping the `TimeoutError` conversion fails two.
+
 ### T5. `config/config.py`, `config/loader.py`, `client/mldp_client.py`, `client/annotation_client.py`
 
 The D4 fields and their validation; the YAML flattener's per-service key list (one tuple, so the next setting is a
 one-line change); `ServiceConfig.create_channel()` with `options=channel_options(...)`; `channel_options()`
 exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeouts; the facade forwarding them.
+
+**Amended during T5 (2026-11-24):**
+
+- **Each client takes only the timeouts it uses.**  The three clients with streams (`IngestionClient`,
+  `QueryClient`, `SampleStatusClient`) take `call_timeout` and `stream_idle_timeout`, each with its `*_source`; the
+  four unary-only annotation clients take `call_timeout` alone; `ExportClient` takes only `export_timeout` (T3).
+  A `stream_idle_timeout` on a client with no streams would be accepted and do nothing.  The facade takes all three
+  and forwards each where it applies.
+- **`keepalive_timeout_seconds` must be positive.**  D4's "`0` disables" does not fit a ping timeout, which has
+  nothing to disable; keepalive itself is turned off with `keepalive_time_seconds: 0`.  So `0` is a validation
+  error at config load rather than a confusing failure at channel creation, and `channel_options()` rejects it too.
+- **The config defaults are literals** in `config.py`, not imports of `DEFAULT_CALL_TIMEOUT_SECONDS` and friends:
+  importing `dp_python_lib.client` from `config` would import `MldpClient`, which imports `config`.
+  `test_config.py` pins them equal to the client constants.
+- **MldpClient names the setting even when it holds the default** ("set by MLDP_QUERY_CALL_TIMEOUT_SECONDS /
+  query.call_timeout_seconds"), since that is where a caller of `MldpClient` would change it.  Without a config
+  (explicit channels only), the clients' own library-default text applies.
+- **The YAML flattener is in `config.py`** (`from_yaml()`), not `loader.py`, which needed no change.  It reads a
+  `_SERVICE_KEYS` tuple plus `_SERVICE_ONLY_KEYS` for `annotation.export_timeout_seconds`.
+- **Also exported** from `dp_python_lib.config`: `DEFAULT_KEEPALIVE_TIME_SECONDS`, `DEFAULT_KEEPALIVE_TIMEOUT_SECONDS`
+  and `MIN_SERVER_KEEPALIVE_SECONDS`; `ServiceConfig` gains a `channel_options()` method that `create_channel()`
+  uses.
+- **Tests moved up from T6:** the four channel assertions (`test_config.py`, `test_mldp_client.py`) now expect
+  `options=channel_options()`, and the facade and `MldpClient` wiring is pinned (`TestAnnotationClientTimeouts`,
+  `TestMldpClientTimeouts`).  The config field, precedence, `channel_options()` and WARNING tests stay in T6.
 
 ### T6. Tests
 
@@ -366,6 +469,27 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
     none).  The limits come from module constants, and the test asserts that the two
     halves together take less than a stated total, so a change that makes the test slow is noticed.
 
+**Amended during T6 (2026-11-24):**
+
+- **Most of this list landed with the code it tests**, in T2-T5: the stub-call assertions, the `.future()` rewrite
+  of the client-streaming ingest tests, the `_dispatch` / `_IdleWatchdog` tests (thread growth counted by thread
+  name rather than `threading.active_count()`, which also sees threads other tests leave winding down), the
+  in-process deadline and idle tests in `test_timeouts_grpc.py`, and the channel assertions.  T6 adds the rest:
+  `TestTimeoutAndKeepaliveSettings` and `TestChannelOptions` in `test_config.py`, and `test_keepalive_grpc.py`.
+- **The keepalive test runs in the normal suite**, not a slow-marked quality-job test: grpc-core accepts 0.5 s /
+  0.5 s, and detected the blackhole 0.70 s after it in every trial.  The positive half's limit is 2.0 s (interval +
+  ping timeout + 1 s margin), the negative half watches exactly that long, each call carries a 10 s backstop
+  deadline, and the test asserts the two halves finish inside 5.6 s.  It takes about 3.4 s.
+- **The channel comes from `ServiceConfig.create_channel()`**, not `grpc.insecure_channel(options=channel_options())`,
+  so the test also covers the config-to-channel wiring; the negative half is the same config with
+  `keepalive_time_seconds=0`.
+- **The blackhole proxy uses threads and plain sockets**, not the prototype's asyncio, so `close()` can shut every
+  socket and join every thread and the test leaves nothing pending.
+- `from_yaml()` re-raises a `ValidationError` as a `ValueError` naming the file, so the YAML rejection tests match
+  the field name in that message; the env and init paths raise `ValidationError` itself.
+- Mutation checks: dropping `grpc.http2.ping_timeout_ms` from `channel_options()` fails the keepalive test (and
+  three option tests), and `allow_inf_nan=True` fails the non-finite rejections.
+
 ### T7. Docs
 
 - `doc/cookbook/conventions.md`: a "Deadlines, idle timeouts, and keepalive" section: the defaults, the three
@@ -380,10 +504,36 @@ exported from `dp_python_lib.config`; `MldpClient` passing the per-service timeo
   misleading option names, per-page timeout semantics, `0` disables) in gRPC Error Handling and the configuration
   section; the Key Files entries for the changed modules.
 
+**Amended during T7 (2026-11-24):**
+
+- **Two more cookbook pages got a pointer.**  Exports are discussed in `datasets-and-annotations.md`, not
+  `query.md` or `ingestion.md`, so the 3600 s export default is stated there.  `connecting.md`, where the YAML keys,
+  explicit channels, and custom TLS are documented, names the new settings and `options=channel_options()`.
+- **The CLAUDE.md invariants are a subsection of their own**, "Deadlines, idle timeouts, and keepalive", after gRPC
+  Error Handling, not bullets spread through it; the configuration section gains a "Timeout and keepalive settings"
+  paragraph and a `channel_options()` entry.  The stale "leave them as they are" note now says all three server
+  streams go through `ServiceApiClientBase._iter_stream()`, and why the public wrappers close it.
+- Key Files gains `test_call_timeouts.py`, `test_timeouts_grpc.py`, and `test_keepalive_grpc.py`.
+- **The docs say nothing yet about `timeout` on the whole-query conveniences**, which do not take it until T8; T8
+  adds the line.
+- `NEXT.md` also lists the `await_request_statuses()` fix and the exported default constants, which a reader
+  upgrading would otherwise find only in the code.
+
 ### T8. Whole-query conveniences
 
 `query_samples_to_dataframe()`, `stream_query_samples_to_dataframes()`, and `query_buckets_to_dataframes()` pass
 `timeout` / `idle_timeout` through to the client methods they call.
+
+**Amended during T8 (2026-11-24):**
+
+- **Each convenience forwards the keyword unconditionally**, `DEFAULT` included, so omitting it means exactly what
+  omitting it on the client method means; the value is validated there, not twice.
+- **`stream_query_samples_to_dataframes()` now closes the stream in a `finally`**, so closing the convenience's
+  generator cancels the call and stops the idle watchdog at once, rather than when the inner generator is collected.
+  It closes only an iterator that has `close()`, since the client argument is untyped and a test double may return a
+  plain iterator.
+- The docs line T7 deferred is in `conventions.md` (after the per-page paragraph), with a sentence in `query.md`'s
+  pointer, the `NEXT.md` "What's new" item, and CLAUDE.md's Key Files entries for both conversion modules.
 
 ### T9. Live verification (recorded in the PR, not a CI test)
 
@@ -395,8 +545,58 @@ Against a local dp-service stack, with `GRPC_TRACE=http_keepalive,http2_ping`:
   draws no GOAWAY either (R6).  `max_pings_without_data=0` changes when pings go out while data flows, and how
   grpc-core's other pings (BDP probes) count against grpc-java's ping limit is not settled by the quiet case.
   If it does draw GOAWAY, D6 is revisited before the implementation PR merges.
+- a client-streaming ingest into a server that stops reading stalls the feed's pulls once grpc-java's flow-control
+  window is full, as T1 showed against a grpcio server, and the idle timeout then cancels it.  dp-service has no
+  "stop reading" switch, so this needs a test handler or a debugger pause; if neither is practical, the PR says the
+  upload-stall half was verified only in-process.
 
 Run the changed cookbook recipes as one script.
+
+**Results (2026-11-24).**  These were run against dp-service `440fe3f` (a development checkout of `main`, built that
+day, not a release tag), with its shipped `application.yml` (`permitKeepAliveTimeSeconds: 30`, server keepalive
+60 s), on localhost, with grpcio 1.84.0.  Every check matched the plan's expectation; nothing in D6 changes.
+
+| Check | Result |
+|---|---|
+| Quiet bidi ingest stream, 10 s keepalive | WARNING logged at channel build, then GOAWAY `too_many_pings` (ENHANCE_YOUR_CALM) at 40 s, after the 4th ping. The call failed: `gRPC error: Stream removed (Socket closed (GOAWAY received; Error code: 11; Debug Text: too_many_pings))` |
+| Quiet bidi ingest stream, 60 s keepalive, held 200 s | Completed normally, no GOAWAY. The server's own 60 s keepalive pings (payload 57005) reset the client's timer, so the client sent only 1 ping of its own; all were acked |
+| Data-heavy bucket stream, D6 defaults, fast consumer | 143 back-to-back streams on one channel over 241 s, 28.6 GB, 500 × 400 KB buckets each. The client sent 84 pings (BDP probes, spread over the run, thinning out); all 84 acked, no GOAWAY |
+| The same, consumer sleeping 0.5 s per message | 10 streams over 253 s, 2 GB, 84 pings acked, no GOAWAY |
+| Upload into a server that stops reading | Stalled after 3 of 200 requests (about 1.2 MB: grpc-java's 1 MiB default window plus one request), and the 5 s idle timeout fired: `gRPC error: stream idle timeout: no message from the server within 5 s` |
+| Bidi ingest, one unanswered request | The 5 s idle timeout fired, as a `RuntimeError` with the same text |
+| Unary `query_buckets(timeout=3)`, server paused | `DEADLINE_EXCEEDED` at 3.0 s: `Deadline Exceeded (deadline 3 s, passed as timeout=)` |
+| Bucket stream, server paused after the first message | The 3 s idle timeout fired 3.0 s after the pause |
+| Cookbook recipes, as one script | The YAML block loads as documented (`ingestion.keepalive_time_seconds: 0` gives no channel options). The `timeout=` / `idle_timeout=` snippets and all three `qc` / `bc` conveniences ran with their keywords. A 2 s `query.call_timeout_seconds` against a paused server gave the documented hint, naming `MLDP_QUERY_CALL_TIMEOUT_SECONDS / query.call_timeout_seconds`. The explicit-channel recipe builds |
+| `tests/integration/` | 72 passed, before the checks and again after them |
+
+**Amended during T9 (2026-11-24):**
+
+- **A server that "stops reading" was simulated with `SIGSTOP` on its JVM**, after the connection was up, instead of
+  with a test handler or a debugger pause.  A stopped process reads nothing and sends no `WINDOW_UPDATE`, which is the
+  condition the upload clock exists for, so the upload-stall half was verified live against grpc-java's window.  The
+  same pause gave live unary-deadline, bidi-idle, and server-stream-idle checks, which the plan did not list.  A
+  paused process also leaves keepalive pings unanswered, so this is not the #314 shape (a connected server whose
+  handler hangs); the bounds fired first only because they were shorter than the 80 s keepalive detection.
+- **Where the data-heavy case runs its pings.**  The bucket stream ran back to back on one channel rather than as
+  one multi-minute stream, since 200 MB streams in about 2 s locally.  A GOAWAY is per connection, so what matters is
+  four minutes of data on one connection under grpc-core's BDP pings, and the slow-consumer run keeps a single
+  stream open for 25 s at a time under flow control.
+
+**Amended in PR #83 review (2026-11-24):**
+
+- **The bidi clock also runs once the feed is exhausted** (D3, R1).  As planned, it stopped once every request was
+  answered, so a caller left in `next()` waiting for the end of the stream had no bound: a server that acks every
+  request and then never closes the stream held the call open forever, since a stream has no total deadline by
+  default.  Reproduced in process; `_BidiIdleClock` now takes `exhausted()` from the feed, as `_UploadClock` does,
+  and runs while waiting and (outstanding or exhausted).  Still only while waiting, so a slow consumer of the last
+  ack does not trip it.  `test_bidi_stream_left_open_after_every_ack_trips` pins it, with a total deadline as a
+  backstop so the outstanding-only form fails rather than hangs.
+- **`_iter_stream()` cancels the call in its `finally`**, as the bidi sender already did, rather than leaving an
+  early-closed server stream to grpcio's cancel on garbage collection.
+- **Per-call and config timeouts accept any `numbers.Real` but `bool`**, normalized to `float` (and keepalive
+  milliseconds to `int`), so a NumPy integer is no longer a `TypeError`.  A bad `timeout=` on a paging `iter_*`
+  method still raises on the first `next()`, like the existing `sample_status_filter` check; the docstrings now
+  say so.
 
 ## Out of scope
 

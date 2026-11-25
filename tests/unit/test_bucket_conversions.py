@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 from dp_python_lib.client import bucket_conversions as bc
 from dp_python_lib.client import data_frame as dfb
 from dp_python_lib.client.query_client import PvQuery, QueryBucketsApiResult, QueryParams
+from dp_python_lib.client.service_api_client_base import DEFAULT
 from dp_python_lib.client.time_conversions import from_epoch_nanos, to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, query_pb2
 
@@ -601,6 +602,14 @@ class TestQueryBucketsToDataFrames(unittest.TestCase):
         self.assertIn("max_buckets=1", str(ctx.exception))
         client = self._pages([_double_bucket("PV:A")], [_double_bucket("PV:B")])
         self.assertEqual(len(bc.query_buckets_to_dataframes(client, self.params, max_buckets=2)), 2)
+
+    def test_forwards_timeout(self):
+        # #81: the per-page deadline reaches iter_query_buckets().
+        for given, expected in (({}, DEFAULT), ({"timeout": 12.5}, 12.5), ({"timeout": None}, None)):
+            with self.subTest(given=given):
+                client = self._pages([_double_bucket("PV:A")])
+                bc.query_buckets_to_dataframes(client, self.params, **given)
+                client.iter_query_buckets.assert_called_once_with(self.params, timeout=expected)
 
     def test_result_to_dataframes_delegates(self):
         response = query_pb2.QueryBucketsResponse()

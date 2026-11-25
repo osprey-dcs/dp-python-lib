@@ -306,6 +306,10 @@ enough: while anything still refers to the iterator, the library keeps pulling r
 producer and sending them, until the iterator is garbage-collected.  Reading to the end needs no
 close.
 
+**A slow producer is safe.**  Both streams fail only when the client has waited on the service for
+5 minutes (by default) with nothing coming back.  The time your generator spends producing the
+next request does not count.  See [Deadlines, idle timeouts, and keepalive](conventions.md#deadlines-idle-timeouts-and-keepalive).
+
 ## Arrays, images, and structures
 
 Beyond scalar columns, the `data_frame` builders cover one fixed-shape array per sample, one

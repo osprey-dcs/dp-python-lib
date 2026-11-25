@@ -1,12 +1,13 @@
+import contextlib
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 
 import grpc
 
 from dp_python_lib.client.data_frame import sampling_clock, timestamp_list
 from dp_python_lib.client.data_frame import timestamp_count as _timestamp_count
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
@@ -389,11 +390,34 @@ class SampleStatusClient(ServiceApiClientBase):
     are reserved placeholders that return a "not implemented" error.
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        stream_idle_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+        stream_idle_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Annotation Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
+        :param stream_idle_timeout: Default idle timeout, in seconds, for this client's streaming calls: the longest
+            the client waits on the server for a stream's next step.  Omitted: DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS.
+            None or 0 disables it.  A call's own ``idle_timeout=`` overrides it.
+        :param stream_idle_timeout_source: The same as ``call_timeout_source``, for ``stream_idle_timeout``.
         """
-        super().__init__(channel, annotation_pb2_grpc.DpAnnotationServiceStub)
+        super().__init__(
+            channel,
+            annotation_pb2_grpc.DpAnnotationServiceStub,
+            call_timeout=call_timeout,
+            stream_idle_timeout=stream_idle_timeout,
+            call_timeout_source=call_timeout_source,
+            stream_idle_timeout_source=stream_idle_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("SampleStatusClient initialized with channel: %s", channel)
 
@@ -424,7 +448,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_save_sample_statuses(
-        self, request: annotation_pb2.SaveSampleStatusesRequest
+        self, request: annotation_pb2.SaveSampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> SaveSampleStatusesApiResult:
         """
         Invokes the saveSampleStatuses() API method with the supplied request.
@@ -443,19 +467,24 @@ class SampleStatusClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully saved %d sample status(es)", response.saveSampleStatusesResult.savedCount
             ),
+            timeout=timeout,
         )
 
-    def save_sample_statuses(self, request_params: SaveSampleStatusesRequestParams) -> SaveSampleStatusesApiResult:
+    def save_sample_statuses(
+        self, request_params: SaveSampleStatusesRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveSampleStatusesApiResult:
         """
         User-facing method for invoking the saveSampleStatuses() API method.  Saving is a per-status upsert keyed by
         (pvName, timestamp, domain, layer), replacing the matched status in full.
         :param request_params: User parameters for the call (see SaveSampleStatusesRequestParams).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveSampleStatusesApiResult with the method response and status information.
         """
         self.logger.info("Starting saveSampleStatuses operation")
 
         request = self._build_save_sample_statuses_request(request_params)
-        result = self._send_save_sample_statuses(request)
+        result = self._send_save_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveSampleStatuses operation failed: %s", result.result_status.message)
@@ -508,7 +537,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_query_sample_statuses(
-        self, request: annotation_pb2.QuerySampleStatusesRequest
+        self, request: annotation_pb2.QuerySampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QuerySampleStatusesApiResult:
         """
         Invokes the querySampleStatuses() unary API method with the supplied request.
@@ -525,24 +554,29 @@ class SampleStatusClient(ServiceApiClientBase):
                 "Successfully queried %d sample status bucket(s)",
                 len(response.querySampleStatusesResult.sampleStatusBuckets),
             ),
+            timeout=timeout,
         )
 
     def query_sample_statuses(
         self,
         request_params: QuerySampleStatusesRequestParams,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QuerySampleStatusesApiResult:
         """
         User-facing method for invoking the unary querySampleStatuses() API method.  Returns a single page of results;
         use iter_sample_statuses() to page through all results transparently.
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QuerySampleStatusesApiResult with a single page of results and status information.
         """
         self.logger.info("Starting querySampleStatuses operation")
 
         request = self._build_query_sample_statuses_request(request_params, page_token=page_token)
-        result = self._send_query_sample_statuses(request)
+        result = self._send_query_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QuerySampleStatuses operation failed: %s", result.result_status.message)
@@ -552,7 +586,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return result
 
     def iter_sample_statuses(
-        self, request_params: QuerySampleStatusesRequestParams
+        self, request_params: QuerySampleStatusesRequestParams, *, timeout: TimeoutArg = DEFAULT
     ) -> Iterator[QuerySampleStatusesApiResult]:
         """
         Convenience generator that transparently pages through all unary querySampleStatuses() results, following the
@@ -561,11 +595,14 @@ class SampleStatusClient(ServiceApiClientBase):
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:
-            result = self.query_sample_statuses(request_params, page_token=page_token)
+            result = self.query_sample_statuses(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"querySampleStatuses failed during paging: {result.result_status.message}")
 
@@ -576,8 +613,12 @@ class SampleStatusClient(ServiceApiClientBase):
                 break
 
     def _send_query_sample_statuses_stream(
-        self, request: annotation_pb2.QuerySampleStatusesRequest
-    ) -> Iterator[QuerySampleStatusesApiResult]:
+        self,
+        request: annotation_pb2.QuerySampleStatusesRequest,
+        *,
+        timeout: float | None = None,
+        idle_timeout: float | None = None,
+    ) -> Generator[QuerySampleStatusesApiResult, None, None]:
         """
         Invokes the querySampleStatusesStream() server-streaming API method with the supplied request, yielding one
         QuerySampleStatusesApiResult per streamed message.
@@ -586,42 +627,27 @@ class SampleStatusClient(ServiceApiClientBase):
         error while iterating the stream each yield an is_error result, and a transport error terminates the generator
         after that final error item.  This is the internal contract -- the public iter_sample_statuses_stream() wrapper
         consumes these and converts the first error result into a RuntimeError, so callers of the public method never
-        see an error result yielded.
+        see an error result yielded.  The shared _iter_stream() does the work, idle watchdog included (#81).
 
         :param request: QuerySampleStatusesRequest with parameters for the call (must carry no page token).
         :return: An iterator over the streamed result messages, possibly ending in an error result.
         """
-        self.logger.info("Calling querySampleStatusesStream API")
-
-        try:
-            self.logger.debug("Invoking stub.querySampleStatusesStream with request")
-            stream = self._stub.querySampleStatusesStream(request)
-            for response in stream:
-                if response.HasField("exceptionalResult"):
-                    error_msg = response.exceptionalResult.message
-                    self.logger.warning("QuerySampleStatusesStream returned business error: %s", error_msg)
-                    yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-                elif response.HasField("querySampleStatusesResult"):
-                    yield QuerySampleStatusesApiResult(is_error=False, message="", response=response)
-                else:
-                    error_msg = (
-                        "Unexpected response format: neither exceptionalResult nor querySampleStatusesResult found"
-                    )
-                    self.logger.error(error_msg)
-                    yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during querySampleStatusesStream: %s", e.details())
-            yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
-
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during querySampleStatusesStream: %s", str(e))
-            yield QuerySampleStatusesApiResult(is_error=True, message=error_msg)
+        return self._iter_stream(
+            self._stub.querySampleStatusesStream,
+            request,
+            QuerySampleStatusesApiResult,
+            "querySampleStatusesResult",
+            "querySampleStatusesStream",
+            timeout=timeout,
+            idle_timeout=idle_timeout,
+        )
 
     def iter_sample_statuses_stream(
-        self, request_params: QuerySampleStatusesRequestParams
+        self,
+        request_params: QuerySampleStatusesRequestParams,
+        *,
+        idle_timeout: TimeoutArg = DEFAULT,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[QuerySampleStatusesApiResult]:
         """
         User-facing lazy generator for the server-streaming querySampleStatusesStream() API method.  Yields one
@@ -635,15 +661,30 @@ class SampleStatusClient(ServiceApiClientBase):
         failure from an empty stream.
 
         :param request_params: User parameters for the query (see QuerySampleStatusesRequestParams).
+        :param idle_timeout: Longest wait, in seconds, for the server's next message.  Time spent processing a
+            yielded result does not count.  Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless
+            configured).  None: no idle bound.  On expiry the call is cancelled and this raises RuntimeError.
+        :param timeout: Optional total deadline, in seconds, for the whole stream.  Omitted or None: none --
+            unlike the unary methods, since a healthy stream can run arbitrarily long and idle_timeout is its default
+            bound.
         :return: A lazy iterator over the streamed result messages.
+        :raises ValueError: if timeout or idle_timeout is zero or negative (on the first next()).
         """
         self.logger.info("Starting querySampleStatusesStream operation")
 
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         request = self._build_query_sample_statuses_request(request_params, page_token=None)
-        for result in self._send_query_sample_statuses_stream(request):
-            if result.result_status.is_error:
-                raise RuntimeError(f"querySampleStatusesStream failed during streaming: {result.result_status.message}")
-            yield result
+        # closing(): the sender's finally stops its idle watchdog, and without an explicit close it would wait
+        # for garbage collection whenever this raises (the traceback keeps the sender alive).
+        with contextlib.closing(
+            self._send_query_sample_statuses_stream(request, timeout=total, idle_timeout=idle)
+        ) as results:
+            for result in results:
+                if result.result_status.is_error:
+                    raise RuntimeError(
+                        f"querySampleStatusesStream failed during streaming: {result.result_status.message}"
+                    )
+                yield result
 
     # ------------------------------------------------------------------
     # deleteSampleStatuses
@@ -710,7 +751,7 @@ class SampleStatusClient(ServiceApiClientBase):
         return request
 
     def _send_delete_sample_statuses(
-        self, request: annotation_pb2.DeleteSampleStatusesRequest
+        self, request: annotation_pb2.DeleteSampleStatusesRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> DeleteSampleStatusesApiResult:
         """
         Invokes the deleteSampleStatuses() API method with the supplied request.
@@ -729,6 +770,7 @@ class SampleStatusClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully deleted %d sample status(es)", response.deleteSampleStatusesResult.deletedCount
             ),
+            timeout=timeout,
         )
 
     def delete_sample_statuses(
@@ -739,6 +781,8 @@ class SampleStatusClient(ServiceApiClientBase):
         layer: str,
         pv_names: list[str] | None = None,
         all_pvs: bool = False,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> DeleteSampleStatusesApiResult:
         """
         User-facing method for invoking the deleteSampleStatuses() API method.  Deletes statuses in the half-open
@@ -758,6 +802,8 @@ class SampleStatusClient(ServiceApiClientBase):
         :param layer: Required layer scoping the delete.
         :param pv_names: PVs to delete statuses for; mutually exclusive with all_pvs.
         :param all_pvs: Explicit opt-in to deleting statuses for every PV in the (domain, layer).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteSampleStatusesApiResult with the method response and status information.
         :raises ValueError: if domain or layer is empty, if begin_time is not strictly before end_time, or if
             neither (or both) of pv_names and all_pvs is supplied.
@@ -767,7 +813,7 @@ class SampleStatusClient(ServiceApiClientBase):
         request = self._build_delete_sample_statuses_request(
             begin_time, end_time, domain, layer, pv_names=pv_names, all_pvs=all_pvs
         )
-        result = self._send_delete_sample_statuses(request)
+        result = self._send_delete_sample_statuses(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteSampleStatuses operation failed: %s", result.result_status.message)

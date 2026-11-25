@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from dp_python_lib.client import query_conversions as conv
 from dp_python_lib.client.query_conversions import Image, data_value_to_python
+from dp_python_lib.client.service_api_client_base import DEFAULT
 from dp_python_lib.grpc import common_pb2, query_pb2
 
 # The conversion layer depends on the optional [analysis] extra; skip the DataFrame/NumPy/Excel tests cleanly when
@@ -480,6 +481,42 @@ class TestQuerySamplesToDataFrame(unittest.TestCase):
         frames = list(conv.stream_query_samples_to_dataframes(client, self._params()))
         self.assertEqual(len(frames), 2)
         self.assertEqual(frames[0]["a"].iloc[0], 1)
+
+    # #81: the conveniences forward the per-call bounds to the client methods they call.
+    def test_unary_forwards_timeout(self):
+        params = self._params()
+        for given, expected in (({}, DEFAULT), ({"timeout": 12.5}, 12.5), ({"timeout": None}, None)):
+            with self.subTest(given=given):
+                client = self._client([])
+                conv.query_samples_to_dataframe(client, params, **given)
+                client.iter_query_samples.assert_called_once_with(params, timeout=expected)
+
+    def test_stream_forwards_idle_timeout_and_timeout(self):
+        params = self._params()
+        client = self._client([], stream_pages=[])
+        list(conv.stream_query_samples_to_dataframes(client, params))
+        client.iter_query_samples_stream.assert_called_once_with(params, idle_timeout=DEFAULT, timeout=DEFAULT)
+        client = self._client([], stream_pages=[])
+        list(conv.stream_query_samples_to_dataframes(client, params, idle_timeout=60, timeout=None))
+        client.iter_query_samples_stream.assert_called_once_with(params, idle_timeout=60, timeout=None)
+
+    def test_closing_the_stream_convenience_closes_the_stream(self):
+        closed = []
+
+        def stream(*args, **kwargs):
+            try:
+                yield self._page(_column_table([1], [("a", [_scalar(intValue=1)])]))
+                yield self._page(_column_table([2], [("a", [_scalar(intValue=2)])]))
+            finally:
+                closed.append(True)
+
+        client = Mock()
+        client.iter_query_samples_stream = Mock(side_effect=stream)
+        frames = conv.stream_query_samples_to_dataframes(client, self._params())
+        next(frames)
+        self.assertEqual(closed, [])
+        frames.close()
+        self.assertEqual(closed, [True])
 
 
 if __name__ == "__main__":

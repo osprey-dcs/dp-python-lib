@@ -21,6 +21,7 @@ from dp_python_lib.client.dataset_client import (
     SaveDataSetRequestParams,
     data_block,
 )
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2
 
 BEGIN = datetime(2026, 7, 14, 18, tzinfo=timezone.utc)
@@ -315,7 +316,7 @@ class TestSendSaveDataSet(unittest.TestCase):
         self.assertIsInstance(result, SaveDataSetApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.dataset_id, "ds-1")
-        mock_stub.saveDataSet.assert_called_once_with(self.request)
+        mock_stub.saveDataSet.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")
@@ -382,7 +383,7 @@ class TestSendGetDataSet(unittest.TestCase):
         self.assertIsInstance(result, GetDataSetApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.dataset.name, "ramp study")
-        mock_stub.getDataSet.assert_called_once_with(self.request)
+        mock_stub.getDataSet.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_not_found_is_a_business_error(self):
         response = _response_with_field("exceptionalResult")
@@ -523,7 +524,7 @@ class TestSendDeleteDataSet(unittest.TestCase):
         self.assertIsInstance(result, DeleteDataSetApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.dataset_id, "ds-1")
-        mock_stub.deleteDataSet.assert_called_once_with(self.request)
+        mock_stub.deleteDataSet.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_referenced_dataset_is_a_business_error(self):
         response = _response_with_field("exceptionalResult")

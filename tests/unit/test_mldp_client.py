@@ -9,8 +9,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
 
 from mldp_env import isolate_mldp_env, mldp_env
 
+from dp_python_lib.client.export_client import DEFAULT_EXPORT_TIMEOUT_SECONDS
 from dp_python_lib.client.mldp_client import MldpClient
-from dp_python_lib.config import MldpConfig
+from dp_python_lib.client.service_api_client_base import (
+    DEFAULT_CALL_TIMEOUT_SECONDS,
+    DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
+    ClientTimeout,
+)
+from dp_python_lib.config import MldpConfig, channel_options
 
 
 class TestMldpClient(unittest.TestCase):
@@ -228,9 +234,9 @@ annotation:
 
                     # Verify channels were created with correct connection strings
                     expected_calls = [
-                        unittest.mock.call("test-ingestion.example.com:9001"),
-                        unittest.mock.call("test-query.example.com:9002"),
-                        unittest.mock.call("test-annotation.example.com:9003"),
+                        unittest.mock.call("test-ingestion.example.com:9001", options=channel_options()),
+                        unittest.mock.call("test-query.example.com:9002", options=channel_options()),
+                        unittest.mock.call("test-annotation.example.com:9003", options=channel_options()),
                     ]
                     mock_insecure_channel.assert_has_calls(expected_calls, any_order=True)
 
@@ -257,7 +263,80 @@ ingestion:
 
                 MldpClient(config_file=path)
 
-                mock_insecure_channel.assert_any_call("env-ingestion.example.com:9001")
+                mock_insecure_channel.assert_any_call("env-ingestion.example.com:9001", options=channel_options())
+
+
+class TestMldpClientTimeouts(unittest.TestCase):
+    """
+    MldpClient passes each service's configured timeouts to its clients, naming the setting each came from so a
+    DEADLINE_EXCEEDED hint points at the right one (#81 D4, R7).
+    """
+
+    def setUp(self):
+        isolate_mldp_env(self)
+
+    def _client(self, config=None, **channels):
+        channels.setdefault("ingestion_channel", Mock())
+        channels.setdefault("query_channel", Mock())
+        channels.setdefault("annotation_channel", Mock())
+        return MldpClient(config=config, **channels)
+
+    def test_configured_timeouts_reach_every_client_with_their_setting_names(self):
+        config = MldpConfig(
+            ingestion_call_timeout_seconds=11,
+            ingestion_stream_idle_timeout_seconds=12,
+            query_call_timeout_seconds=21,
+            query_stream_idle_timeout_seconds=22,
+            annotation_call_timeout_seconds=31,
+            annotation_stream_idle_timeout_seconds=32,
+            annotation_export_timeout_seconds=33,
+        )
+        client = self._client(config)
+        cases = [
+            (client.ingestion_client._call_timeout, 11, "ingestion", "call_timeout_seconds"),
+            (client.ingestion_client._stream_idle_timeout, 12, "ingestion", "stream_idle_timeout_seconds"),
+            (client.query._call_timeout, 21, "query", "call_timeout_seconds"),
+            (client.query._stream_idle_timeout, 22, "query", "stream_idle_timeout_seconds"),
+            (client.annotation.datasets._call_timeout, 31, "annotation", "call_timeout_seconds"),
+            (client.annotation.sample_status._stream_idle_timeout, 32, "annotation", "stream_idle_timeout_seconds"),
+            (client.annotation.export._export_timeout, 33, "annotation", "export_timeout_seconds"),
+        ]
+        for applied, seconds, service, key in cases:
+            # e.g. "set by MLDP_QUERY_CALL_TIMEOUT_SECONDS / query.call_timeout_seconds": env variable, then YAML key.
+            source = f"set by MLDP_{service.upper()}_{key.upper()} / {service}.{key}"
+            with self.subTest(source=source):
+                self.assertEqual(applied, ClientTimeout(float(seconds), source))
+
+    def test_source_spells_the_setting_names(self):
+        # The loop above derives each name; pin one in full so a wrong derivation cannot pass on both sides.
+        client = self._client(MldpConfig())
+        self.assertEqual(
+            client.query._call_timeout.source, "set by MLDP_QUERY_CALL_TIMEOUT_SECONDS / query.call_timeout_seconds"
+        )
+
+    def test_default_config_gives_the_library_defaults(self):
+        client = self._client(MldpConfig())
+        self.assertEqual(client.ingestion_client._call_timeout.seconds, DEFAULT_CALL_TIMEOUT_SECONDS)
+        self.assertEqual(client.query._stream_idle_timeout.seconds, DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS)
+        self.assertEqual(client.annotation.export._export_timeout.seconds, DEFAULT_EXPORT_TIMEOUT_SECONDS)
+        # Still named after the setting: it is where the caller would change it.
+        self.assertIn("MLDP_QUERY_CALL_TIMEOUT_SECONDS", client.query._call_timeout.source)
+
+    def test_zero_in_config_disables(self):
+        client = self._client(MldpConfig(query_call_timeout_seconds=0, query_stream_idle_timeout_seconds=0))
+        self.assertIsNone(client.query._call_timeout.seconds)
+        self.assertIsNone(client.query._stream_idle_timeout.seconds)
+
+    def test_explicit_channels_without_config_get_the_library_defaults(self):
+        client = self._client()
+        self.assertEqual(client.query._call_timeout.seconds, DEFAULT_CALL_TIMEOUT_SECONDS)
+        self.assertIn("library default", client.query._call_timeout.source)
+
+    def test_configured_timeouts_apply_to_explicit_channels_too(self):
+        query_channel = Mock()
+        client = self._client(MldpConfig(query_call_timeout_seconds=7), query_channel=query_channel)
+        self.assertIs(client.query._channel, query_channel)
+        self.assertEqual(client.query._call_timeout.seconds, 7.0)
 
 
 if __name__ == "__main__":

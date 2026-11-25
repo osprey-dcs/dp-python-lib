@@ -21,6 +21,7 @@ from dp_python_lib.client.annotations_client import (
     SaveAnnotationRequestParams,
     calculations,
 )
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
@@ -317,7 +318,7 @@ class TestSendSaveAnnotation(unittest.TestCase):
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.annotation_id, "an-1")
         self.assertEqual(result.calculations_id, "calc-1")
-        mock_stub.saveAnnotation.assert_called_once_with(self.request)
+        mock_stub.saveAnnotation.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_no_calculations_yields_empty_string_not_none(self):
         # "" means the request carried no calculations; None is reserved for a failed call.
@@ -403,7 +404,7 @@ class TestSendGetAnnotation(unittest.TestCase):
         self.assertIsInstance(result, GetAnnotationApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.annotation.name, "BPM X RMS")
-        mock_stub.getAnnotation.assert_called_once_with(self.request)
+        mock_stub.getAnnotation.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_calculations_are_returned_inline(self):
         annotation = annotation_pb2.Annotation(id="an-1", calculationsId="calc-1")
@@ -566,7 +567,7 @@ class TestSendDeleteAnnotation(unittest.TestCase):
         self.assertIsInstance(result, DeleteAnnotationApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.annotation_id, "an-1")
-        mock_stub.deleteAnnotation.assert_called_once_with(self.request)
+        mock_stub.deleteAnnotation.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_not_found_is_a_business_error(self):
         # Deleting an annotation that does not exist is a REJECT, not a silent success.
@@ -634,7 +635,7 @@ class TestSendGetCalculations(unittest.TestCase):
         self.assertIsInstance(result, GetCalculationsApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual([f.name for f in result.calculations.calculationDataFrames], ["f1"])
-        mock_stub.getCalculations.assert_called_once_with(self.request)
+        mock_stub.getCalculations.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_not_found_is_a_business_error(self):
         response = _response_with_field("exceptionalResult")

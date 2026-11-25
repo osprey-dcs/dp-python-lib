@@ -22,6 +22,7 @@ Design decisions (see .dev/plan/issue-7/plan.md, Q6 and section 2):
 from collections.abc import Iterator
 from typing import Any
 
+from dp_python_lib.client.service_api_client_base import DEFAULT, TimeoutArg
 from dp_python_lib.client.time_conversions import to_epoch_nanos
 from dp_python_lib.grpc import common_pb2, query_pb2
 
@@ -380,7 +381,9 @@ def dataframe_to_excel(df: Any, path: str, max_rows: int | None = None) -> None:
 # ----------------------------------------------------------------------
 
 
-def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows: int | None = None) -> Any:
+def query_samples_to_dataframe(
+    query_client: Any, request_params: Any, max_rows: int | None = None, *, timeout: TimeoutArg = DEFAULT
+) -> Any:
     """
     Runs a unary query, pages through the entire result via iter_query_samples(), and concatenates the pages into a
     single DataFrame.  Pages are concatenated on the row axis (axis=0) and aligned by column NAME (an outer join,
@@ -395,6 +398,8 @@ def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows:
     :param request_params: The QueryParams describing the query.
     :param max_rows: Optional total row cap across all pages; raise once the accumulated frame would exceed it
         (unbounded "give me everything" is an OOM foot-gun on large ranges).
+    :param timeout: Deadline in seconds for each page's call, passed to iter_query_samples(); it bounds one page,
+        not the whole query.  Omitted: the client's default.  None: no deadline.
     :return: A single pandas.DataFrame spanning all pages.
     :raises ValueError: if the accumulated result exceeds max_rows.
     :raises RuntimeError: if any page returns an error (propagated from iter_query_samples()).
@@ -403,7 +408,7 @@ def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows:
 
     frames: list[Any] = []
     total = 0
-    for page in query_client.iter_query_samples(request_params):
+    for page in query_client.iter_query_samples(request_params, timeout=timeout):
         frame = column_table_to_dataframe(
             page.column_table, exclude_column_metadata=request_params.exclude_column_metadata
         )
@@ -420,7 +425,9 @@ def query_samples_to_dataframe(query_client: Any, request_params: Any, max_rows:
     return pd.concat(frames, axis=0, join="outer", sort=False)
 
 
-def stream_query_samples_to_dataframes(query_client: Any, request_params: Any) -> Iterator[Any]:
+def stream_query_samples_to_dataframes(
+    query_client: Any, request_params: Any, *, idle_timeout: TimeoutArg = DEFAULT, timeout: TimeoutArg = DEFAULT
+) -> Iterator[Any]:
     """
     Runs a server-streaming query and yields one DataFrame per streamed message (lazy; the stream is NOT concatenated,
     preserving streaming's bounded-memory benefit).  Callers who want the whole result use pd.concat(...) or the unary
@@ -428,10 +435,21 @@ def stream_query_samples_to_dataframes(query_client: Any, request_params: Any) -
 
     :param query_client: A QueryClient.
     :param request_params: The QueryParams describing the query.
+    :param idle_timeout: Longest wait in seconds for the server's next message, passed to iter_query_samples_stream();
+        time spent in the caller's loop does not count.  Omitted: the client's default.  None: no idle timeout.
+    :param timeout: Total deadline in seconds for the whole stream.  Omitted or None: none.
     :return: A lazy iterator of pandas.DataFrame, one per streamed page.
-    :raises RuntimeError: on a mid-stream error (propagated from iter_query_samples_stream()).
+    :raises RuntimeError: on a mid-stream error (propagated from iter_query_samples_stream()), including the idle
+        timeout.
     """
-    for page in query_client.iter_query_samples_stream(request_params):
-        yield column_table_to_dataframe(
-            page.column_table, exclude_column_metadata=request_params.exclude_column_metadata
-        )
+    # Closing this generator closes the stream at once, rather than when the inner generator is collected.
+    pages = query_client.iter_query_samples_stream(request_params, idle_timeout=idle_timeout, timeout=timeout)
+    try:
+        for page in pages:
+            yield column_table_to_dataframe(
+                page.column_table, exclude_column_metadata=request_params.exclude_column_metadata
+            )
+    finally:
+        close = getattr(pages, "close", None)
+        if close is not None:
+            close()

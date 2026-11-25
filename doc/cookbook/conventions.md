@@ -30,6 +30,7 @@ from dp_python_lib.client import (
 - [Query criteria](#query-criteria) — AND/OR rules
 - [Save semantics: full replace](#save-semantics-full-replace)
 - [Time](#time) — accepted inputs, and why naive datetimes are rejected
+- [Deadlines, idle timeouts, and keepalive](#deadlines-idle-timeouts-and-keepalive) — how long a call may wait
 - [Optional dependencies](#optional-dependencies)
 
 ## Checking results
@@ -310,6 +311,156 @@ is returned when it overlaps the requested window at all, so boundary buckets ma
 range you asked for.  Sample-oriented queries (`query_samples()`) trim to the exact range; a
 [bucket query](query.md#buckets-come-back-whole) returns those boundary buckets whole, and trimming
 them is opt-in.
+
+## Deadlines, idle timeouts, and keepalive
+
+Every call made through the library has a bound by default, so a server that never answers produces
+an error instead of a call that waits forever
+([#81](https://github.com/osprey-dcs/dp-python-lib/issues/81)).  The defaults:
+
+| What | Default bound | Configured by (per service) |
+|---|---|---|
+| A unary call (`get_*`, `save_*`, `query_*`, one page of `iter_*`, ...) | 300 s total | `call_timeout_seconds` |
+| `export_data()` | 3600 s total | `annotation.export_timeout_seconds` |
+| A stream (`iter_*_stream()`, `ingest_data_stream()`) | 300 s *waiting on the server*; no total | `stream_idle_timeout_seconds` |
+| The connection, on channels built from configuration | keepalive ping every 60 s, failing after 20 s unanswered | `keepalive_time_seconds`, `keepalive_timeout_seconds` |
+
+These are hang guards, not performance budgets: no healthy call should come near them.
+
+### `timeout=` on a call
+
+Every method that calls the server takes a keyword-only `timeout`, with three meanings:
+
+```python
+# cookbook:partial
+page = client.query.query_samples(params)                 # omitted: the configured deadline (300 s)
+page = client.query.query_samples(params, timeout=30)     # 30 s, for this call only
+page = client.query.query_samples(params, timeout=None)   # no deadline at all
+```
+
+The one exception is `await_request_statuses()`, whose `timeout` was already the total time to wait
+for the statuses; it now also bounds each status query it makes inside that wait.
+
+`timeout=0` and negative values raise `ValueError`: grpcio would read `0` as a deadline already
+passed, while `0` in configuration means "disabled", so the library refuses to guess.  Pass `None` to
+disable the deadline.
+
+A call that runs out of time fails like any other gRPC error (`is_error`, or `RuntimeError` from an
+`iter_*` method).  The message names the deadline and where it was set, so you know what to change:
+
+```
+gRPC error: Deadline Exceeded (client deadline 300 s, set by MLDP_QUERY_CALL_TIMEOUT_SECONDS /
+query.call_timeout_seconds; pass timeout= to override one call, or timeout=None to disable)
+```
+
+**On paging methods, `timeout` applies to each page, not to the whole iteration.**  `iter_*` and
+`get_datasets()` make one call per page or chunk, and each call gets the bound.  A total over an
+iteration of unknown length would be the wrong tool; if you need one, check the clock in your loop.
+The whole-query conveniences take the same keyword and pass it to the calls they make:
+`query_samples_to_dataframe()` and `query_buckets_to_dataframes()` take `timeout=` (per page), and
+`stream_query_samples_to_dataframes()` takes `idle_timeout=` and `timeout=` as its stream does.
+
+### Streams use an idle timeout
+
+A healthy stream can run for hours, so a total deadline would cut off exactly the large queries
+streaming is for.  A stream is bounded instead by how long the client **waits on the server**: if
+the server sends nothing for `idle_timeout` seconds while the client is waiting, the call is
+cancelled.  Time your own code spends counts for nothing:
+
+- **Server streams** (`iter_query_samples_stream()`, `iter_query_buckets_stream()`,
+  `iter_sample_statuses_stream()`): the clock runs only while your loop is waiting for the next
+  message.  Processing a page for ten minutes does not trip it.
+- **`iter_ingest_data_bidi_stream()`**: the clock runs only while your loop is waiting for a result
+  *and* the server owes one: a request is still unanswered, or your requests are exhausted and only
+  the end of the stream remains.  The time your request generator spends producing the next
+  request does not count.
+- **`ingest_data_stream()`**: the clock runs while gRPC is sending a request, and after your
+  requests are exhausted, until the summary arrives.  A server that stops reading stalls the upload,
+  which the clock catches; the time spent inside your generator does not count.
+
+So the first message, which includes any queueing on a busy server, and each message after it each
+get the whole bound.  `idle_timeout=` sets it for one call, with the same three meanings as
+`timeout`.  A stream method also accepts `timeout=` as a total deadline, but **omitting it on a
+stream means no total deadline**, unlike a unary call:
+
+```python
+# cookbook:partial
+for page in client.query.iter_query_samples_stream(params, idle_timeout=60):       # quicker to give up
+    ...
+for page in client.query.iter_query_samples_stream(params, timeout=3600):          # and a cap on the whole
+    ...
+```
+
+An idle-timed-out stream reports
+`gRPC error: stream idle timeout: no message from the server within 300 s`: as a `RuntimeError`
+from the `iter_*` methods, and as an `is_error` result from `ingest_data_stream()`.
+
+### Configuring the defaults
+
+Each service has its own settings, through the usual
+[configuration priority](connecting.md#configuration-priority) (constructor, then `MLDP_*`
+variables, then the YAML file):
+
+```yaml
+query:
+  call_timeout_seconds: 600            # MLDP_QUERY_CALL_TIMEOUT_SECONDS
+  stream_idle_timeout_seconds: 120     # MLDP_QUERY_STREAM_IDLE_TIMEOUT_SECONDS
+annotation:
+  export_timeout_seconds: 7200         # MLDP_ANNOTATION_EXPORT_TIMEOUT_SECONDS
+ingestion:
+  keepalive_time_seconds: 0            # MLDP_INGESTION_KEEPALIVE_TIME_SECONDS: no keepalive
+```
+
+**`0` disables** a timeout or keepalive, everywhere except `keepalive_timeout_seconds`, which
+must be positive (keepalive itself is turned off with `keepalive_time_seconds: 0`).  Negative,
+infinite, and NaN values are rejected when the configuration loads.  To put back the behaviour from
+before #81, set `call_timeout_seconds`, `stream_idle_timeout_seconds`, `keepalive_time_seconds`
+and, for the annotation service, `export_timeout_seconds` to `0`.
+
+A client given explicit channels gets the library defaults for deadlines, since deadlines belong
+to the call, not the channel.  Keepalive is a property of the channel, so it does not reach a
+channel you build yourself; see below.
+
+### Keepalive detects a dead network path, not a hung server
+
+On a channel built from configuration, the client sends an HTTP/2 ping every 60 s while a call is
+in progress, and fails the call with `UNAVAILABLE` ("ping timeout") if the server does not answer
+within 20 s.  This catches a network path that has silently gone dead (a dropped VPN or a firewall
+that discards traffic without resetting the connection), at most **80 s** after the drop.
+
+It does **not** catch a server that is connected but never answers: such a server goes on
+acknowledging pings, so keepalive sees a healthy connection.  That is what the deadlines and idle
+timeouts above are for.  The two cover different failures, and you want both.
+
+**Do not set `keepalive_time_seconds` below 30.**  By default dp-service accepts a ping at most
+every 30 s, and it answers faster pings by closing the connection (GOAWAY `too_many_pings`), which
+fails every call on it.  The library logs a WARNING for a non-zero value below 30, but does not
+refuse it, since a deployment can lower the server's limit.
+
+### Channels you build yourself
+
+A channel you construct (for custom TLS credentials, say) has no keepalive unless you ask for it.
+`channel_options()` returns the grpcio options the library uses:
+
+```python
+import grpc
+from dp_python_lib.client import MldpClient
+from dp_python_lib.config import channel_options
+
+credentials = grpc.ssl_channel_credentials()
+options = channel_options()            # or channel_options(keepalive_time_seconds=120)
+client = MldpClient(
+    ingestion_channel=grpc.secure_channel("ingest.example.com:443", credentials, options=options),
+    query_channel=grpc.secure_channel("query.example.com:443", credentials, options=options),
+    annotation_channel=grpc.secure_channel("annotation.example.com:443", credentials, options=options),
+)
+```
+
+Prefer it to writing the grpcio options out by hand.  Their names overstate what they control:
+`grpc.keepalive_timeout_ms` alone did not bound the wait for a ping's answer in grpcio 1.84 (that
+took `grpc.http2.ping_timeout_ms`), and without `grpc.http2.max_pings_without_data=0` a quiet stream
+is throttled to one ping a minute.  The values were chosen by measuring them against a silently
+dropped connection, and a unit test pins the result.
 
 ## Optional dependencies
 

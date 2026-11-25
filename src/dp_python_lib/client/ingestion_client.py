@@ -22,6 +22,7 @@ Plan: plan/tickets/17/plan.md.  Server behaviors this module encodes, all verifi
 
 import contextlib
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
@@ -36,7 +37,14 @@ from dp_python_lib.client.data_frame import (
     validate_data_frame,
 )
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import (
+    DEFAULT,
+    ServiceApiClientBase,
+    TimeoutArg,
+    _AppliedTimeout,
+    _IdleWatchdog,
+    _rpc_code,
+)
 from dp_python_lib.client.time_conversions import (
     NANOS_PER_SECOND,
     TimestampInput,
@@ -49,6 +57,13 @@ from dp_python_lib.grpc import common_pb2, ingestion_pb2, ingestion_pb2_grpc
 # The floor await_request_statuses() puts under its status query is backed off by this much, because the status
 # documents' createdAt comes from the server's clock and `since` from the caller's.
 REQUEST_STATUS_CLOCK_SKEW = timedelta(seconds=60)
+
+AWAIT_MIN_POLL_SECONDS = 1.0
+"""
+The shortest deadline await_request_statuses() gives a poll (#81 T4), capped at its own timeout.  Polls are bounded
+by the time remaining, so without a floor the poll that starts at the deadline -- the last chance to see a document
+that has just been written -- would be given no time at all.  It is also the most the wait can overrun its timeout.
+"""
 
 # Status-detail texts that identify a message-size violation, matched case-insensitively within a
 # RESOURCE_EXHAUSTED.  RESOURCE_EXHAUSTED alone also covers quotas and other resource limits, where "split your
@@ -77,6 +92,13 @@ def _resource_exhausted_details(e: grpc.RpcError) -> str | None:
         return None
 
 
+def _stream_deadline_hint(e: grpc.RpcError, timeout: float | None) -> str:
+    """The D2 hint for a stream's total deadline, which only ever comes from the call's own timeout=."""
+    if timeout is None or _rpc_code(e) != grpc.StatusCode.DEADLINE_EXCEEDED:
+        return ""
+    return _AppliedTimeout(timeout, per_call=True).deadline_hint()
+
+
 def _ingest_size_hint(e: grpc.RpcError) -> str:
     """
     Advice to append to an ingest call's gRPC error when the server refused the message as too large.
@@ -91,6 +113,15 @@ def _ingest_size_hint(e: grpc.RpcError) -> str:
         f" (the request exceeds the server's inbound message limit, {SERVER_DEFAULT_MAX_MESSAGE_BYTES:,} bytes by "
         "default; split the frame with data_frame.split_data_frame(frame, max_bytes=...) and ingest the chunks, "
         "e.g. with ingest_data_stream())"
+    )
+
+
+def _await_timeout_message(timeout: float, missing: list[str], wanted: list[str]) -> str:
+    """await_request_statuses()'s TimeoutError text, naming at most ten of the ids still lacking a document."""
+    shown = ", ".join(missing[:10]) + (f", ... ({len(missing) - 10} more)" if len(missing) > 10 else "")
+    return (
+        f"await_request_statuses() timed out after {timeout} s with {len(missing)} of {len(wanted)} "
+        f"request(s) still lacking a status document: {shown}"
     )
 
 
@@ -381,12 +412,28 @@ class _RequestFeed:
         self._logger = logger
         self.sent = 0
         self.error: Exception | None = None
+        self.listener: _FeedListener | None = None
 
     def __iter__(self) -> Iterator[ingestion_pb2.IngestDataRequest]:
+        # The listener hooks (#81 D3) run on grpcio's request thread: pulling() as grpcio asks for the next request
+        # (it does so only once the previous send has completed), handed_over() as a request goes to grpcio, and
+        # exhausted() once the caller's iterable is done.  Time between pulling() and handed_over() is the caller's.
+        listener = self.listener
         try:
-            for params in self._requests:
+            requests = iter(self._requests)
+            while True:
+                if listener is not None:
+                    listener.pulling()
+                try:
+                    params = next(requests)
+                except StopIteration:
+                    if listener is not None:
+                        listener.exhausted()
+                    return
                 request = self._build(params)
                 self.sent += 1
+                if listener is not None:
+                    listener.handed_over()
                 yield request
         except Exception as e:
             self.error = e
@@ -414,6 +461,102 @@ class _RequestFeed:
         if hasattr(self.error, "add_note"):
             self.error.add_note(note)
         raise self.error from rpc_error
+
+
+class _FeedListener:
+    """Receives a _RequestFeed's events (see _RequestFeed.__iter__).  The base class ignores them all."""
+
+    def pulling(self) -> None:
+        pass
+
+    def handed_over(self) -> None:
+        pass
+
+    def exhausted(self) -> None:
+        pass
+
+
+class _UploadClock(_FeedListener):
+    """
+    The client-streaming idle clock (#81 D3, T1): runs whenever grpcio, not the caller, holds the next step.
+
+    Armed when a request is handed to grpcio, disarmed when grpcio asks for the next one, and armed again once the
+    feed is exhausted, until the summary arrives.  grpcio asks for the next request only once the previous send has
+    completed, and a send does not complete while HTTP/2 flow control is closed, so a server that stops reading
+    stops the pulls and the clock runs out -- an upload stall is caught as well as a summary that never comes.  Each
+    arm restarts the bound, so a healthy upload of any length never trips.
+    """
+
+    def __init__(self, watchdog: _IdleWatchdog) -> None:
+        self._watchdog = watchdog
+
+    def pulling(self) -> None:
+        self._watchdog.disarm()
+
+    def handed_over(self) -> None:
+        self._watchdog.arm()
+
+    def exhausted(self) -> None:
+        self._watchdog.arm()
+
+
+class _BidiIdleClock(_FeedListener):
+    """
+    The bidirectional ingest idle clock (#81 D3, R1): runs only while the caller is blocked waiting for a response
+    AND the server owes one: a request is outstanding (handed to grpcio but not yet answered), or the feed is
+    exhausted, so all that remains is the server closing the stream.
+
+    Either condition alone is wrong.  Outstanding alone counts the consumer's time: with ten requests sent and the
+    caller spending a long time on the first ack, the other nine acks may already be buffered client-side.  Waiting
+    alone counts the producer's time: a caller waiting while its own iterable builds the next request has nothing
+    to wait for from the server.  The two change on different threads (handed_over on grpcio's request thread,
+    waiting on the caller's), so both live under one lock and every transition re-evaluates.  The clock keeps its
+    start while it stays running, so a new request handed over does not restart it for older unanswered ones.
+
+    Exhaustion counts as owing because, with every request answered, the caller is still in next() waiting for the
+    end of the stream: a server whose handler hangs after its last ack would otherwise hold the call open forever,
+    unbounded by default since a stream has no total deadline.  It mirrors _UploadClock, armed from exhaustion until
+    the summary.
+    """
+
+    def __init__(self, watchdog: _IdleWatchdog) -> None:
+        self._watchdog = watchdog
+        self._lock = threading.Lock()
+        self._waiting = False
+        self._sent = 0
+        self._received = 0
+        self._exhausted = False
+        self._running = False
+
+    def _update(self) -> None:
+        should_run = self._waiting and (self._sent > self._received or self._exhausted)
+        if should_run and not self._running:
+            self._watchdog.arm()
+        elif not should_run and self._running:
+            self._watchdog.disarm()
+        self._running = should_run
+
+    def handed_over(self) -> None:
+        with self._lock:
+            self._sent += 1
+            self._update()
+
+    def exhausted(self) -> None:
+        with self._lock:
+            self._exhausted = True
+            self._update()
+
+    def start_waiting(self) -> None:
+        with self._lock:
+            self._waiting = True
+            self._update()
+
+    def stop_waiting(self, got_response: bool) -> None:
+        with self._lock:
+            self._waiting = False
+            if got_response:
+                self._received += 1
+            self._update()
 
 
 # ----------------------------------------------------------------------
@@ -585,11 +728,34 @@ class IngestionClient(ServiceApiClientBase):
     an ack means only that a request passed validation.
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        stream_idle_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+        stream_idle_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for Ingestion Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
+        :param stream_idle_timeout: Default idle timeout, in seconds, for this client's streaming calls: the longest
+            the client waits on the server for a stream's next step.  Omitted: DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS.
+            None or 0 disables it.  A call's own ``idle_timeout=`` overrides it.
+        :param stream_idle_timeout_source: The same as ``call_timeout_source``, for ``stream_idle_timeout``.
         """
-        super().__init__(channel, ingestion_pb2_grpc.DpIngestionServiceStub)
+        super().__init__(
+            channel,
+            ingestion_pb2_grpc.DpIngestionServiceStub,
+            call_timeout=call_timeout,
+            stream_idle_timeout=stream_idle_timeout,
+            call_timeout_source=call_timeout_source,
+            stream_idle_timeout_source=stream_idle_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("IngestionClient initialized with channel: %s", channel)
 
@@ -632,7 +798,9 @@ class IngestionClient(ServiceApiClientBase):
         self.logger.debug("RegisterProviderRequest built successfully")
         return request
 
-    def _send_register_provider(self, request: ingestion_pb2.RegisterProviderRequest) -> RegisterProviderApiResult:
+    def _send_register_provider(
+        self, request: ingestion_pb2.RegisterProviderRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> RegisterProviderApiResult:
         """
         Invokes the registerProvider() API method with the supplied request object.
         :param request: RegisterProviderRequest object with parameters for call to registerProvider().
@@ -648,19 +816,24 @@ class IngestionClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully registered provider: %s", request.providerName
             ),
+            timeout=timeout,
         )
 
-    def register_provider(self, request_params: RegisterProviderRequestParams) -> RegisterProviderApiResult:
+    def register_provider(
+        self, request_params: RegisterProviderRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> RegisterProviderApiResult:
         """
         User facing method for invoking the registerProvider() API method.
         :param request_params: Contains user parameters for call to registerProvider() API method.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: Returns RegisterProviderApiResult with the method response and status information; its
             provider_id is what every ingestion request needs.
         """
         self.logger.info("Starting registerProvider operation for provider: %s", request_params.name)
 
         request = self._build_register_provider_request(request_params)
-        result = self._send_register_provider(request)
+        result = self._send_register_provider(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("RegisterProvider operation failed: %s", result.result_status.message)
@@ -686,7 +859,9 @@ class IngestionClient(ServiceApiClientBase):
         request.ingestionDataFrame.CopyFrom(request_params.frame)
         return request
 
-    def _send_ingest_data(self, request: ingestion_pb2.IngestDataRequest) -> IngestDataApiResult:
+    def _send_ingest_data(
+        self, request: ingestion_pb2.IngestDataRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> IngestDataApiResult:
         """
         Invokes the unary ingestData() API method.
         :param request: The IngestDataRequest.
@@ -708,9 +883,12 @@ class IngestionClient(ServiceApiClientBase):
                 response.ackResult.numColumns,
             ),
             rpc_error_hint=_ingest_size_hint,
+            timeout=timeout,
         )
 
-    def ingest_data(self, request_params: IngestDataRequestParams) -> IngestDataApiResult:
+    def ingest_data(
+        self, request_params: IngestDataRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> IngestDataApiResult:
         """
         Sends one ingestion request and returns its ack or reject.
 
@@ -721,10 +899,12 @@ class IngestionClient(ServiceApiClientBase):
         message then says so and points at split_data_frame().
 
         :param request_params: The request (see IngestDataRequestParams).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: An IngestDataApiResult whose provider_id and client_request_id identify the request.
         """
         request = self._build_ingest_data_request(request_params)
-        result = self._send_ingest_data(request)
+        result = self._send_ingest_data(request, timeout=timeout)
         # _dispatch keeps no response on an error, so name the request from what was sent.
         result.provider_id = request_params.provider_id
         result.client_request_id = request_params.client_request_id
@@ -736,7 +916,9 @@ class IngestionClient(ServiceApiClientBase):
 
     # ---- ingestDataStream
 
-    def _send_ingest_data_stream(self, feed: _RequestFeed) -> IngestDataStreamApiResult:
+    def _send_ingest_data_stream(
+        self, feed: _RequestFeed, *, timeout: float | None = None, idle_timeout: float | None = None
+    ) -> IngestDataStreamApiResult:
         """
         Invokes the client-streaming ingestDataStream() API method.
 
@@ -744,22 +926,43 @@ class IngestionClient(ServiceApiClientBase):
         arrives on the ExceptionalResult response and is the only record of which requests failed.  And the feed's
         own exception, if any, is re-raised in place of grpcio's generic error.
 
+        Called through .future() (#81), so the idle watchdog can cancel it; see _UploadClock for what it times.
+        Cancelling a future makes result() raise grpc.FutureCancelledError rather than an RpcError (T1).
+
         :param feed: The request iterator.
+        :param timeout: Resolved total deadline in seconds, or None for none.
+        :param idle_timeout: Resolved idle bound in seconds, or None for none.
         :return: An IngestDataStreamApiResult.
         :raises Exception: whatever the caller's request iterable raised.
         """
         self.logger.info("Calling ingestDataStream API")
+        watchdog = _IdleWatchdog(idle_timeout, name="ingestDataStream")
+        feed.listener = _UploadClock(watchdog)
         try:
-            response = self._stub.ingestDataStream(iter(feed))
+            call = self._stub.ingestDataStream.future
+            future = call(iter(feed)) if timeout is None else call(iter(feed), timeout=timeout)
+            watchdog.attach(future.cancel)
+            response = future.result()
+        except grpc.FutureCancelledError as e:
+            if not watchdog.expired:  # nothing else cancels it, but never mistake another cancel for the idle case
+                self.logger.exception("Unexpected cancellation during ingestDataStream")
+                return IngestDataStreamApiResult(is_error=True, message=f"Unexpected error: cancelled {e!s}")
+            self.logger.error("ingestDataStream cancelled after %d request(s): %s", feed.sent, watchdog.message())
+            return IngestDataStreamApiResult(is_error=True, message=f"gRPC error: {watchdog.message()}")
         except grpc.RpcError as e:
             feed.reraise(e, "ingestDataStream")
-            error_msg = f"gRPC error: {e.details()}{_ingest_size_hint(e)}"
-            self.logger.error("gRPC error during ingestDataStream after %d request(s): %s", feed.sent, e.details())
+            if watchdog.expired:
+                error_msg = f"gRPC error: {watchdog.message()}"
+            else:
+                error_msg = f"gRPC error: {e.details()}{_stream_deadline_hint(e, timeout)}{_ingest_size_hint(e)}"
+            self.logger.error("gRPC error during ingestDataStream after %d request(s): %s", feed.sent, error_msg)
             return IngestDataStreamApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
             self.logger.exception("Unexpected error during ingestDataStream: %s", str(e))
             return IngestDataStreamApiResult(is_error=True, message=error_msg)
+        finally:
+            watchdog.stop()
 
         if response.HasField("exceptionalResult"):
             error_msg = response.exceptionalResult.message
@@ -777,7 +980,13 @@ class IngestionClient(ServiceApiClientBase):
         self.logger.error(error_msg)
         return IngestDataStreamApiResult(is_error=True, message=error_msg, response=response)
 
-    def ingest_data_stream(self, requests: Iterable[IngestDataRequestParams]) -> IngestDataStreamApiResult:
+    def ingest_data_stream(
+        self,
+        requests: Iterable[IngestDataRequestParams],
+        *,
+        idle_timeout: TimeoutArg = DEFAULT,
+        timeout: TimeoutArg = DEFAULT,
+    ) -> IngestDataStreamApiResult:
         """
         Sends many ingestion requests on one client-streaming call and returns the server's single summary.
 
@@ -794,17 +1003,31 @@ class IngestionClient(ServiceApiClientBase):
 
         As with ingest_data(), acceptance is not ingestion; confirm with await_request_statuses().
 
+        The idle timeout counts only time the client spends waiting on the server: for a sent request to be taken
+        (a server that stops reading stalls the upload once HTTP/2 flow control fills), and, after the last request,
+        for the summary.  Time the iterable spends producing a request never counts.  On expiry the call is
+        cancelled and the result is an error reading "gRPC error: stream idle timeout: ..."; requests sent before
+        it may have been ingested, so check their status.
+
         :param requests: The requests to send.
+        :param idle_timeout: Longest wait, in seconds, on the server (see above).  Omitted: the client's default
+            (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless configured).  None: no idle bound.
+        :param timeout: Optional total deadline, in seconds, for the whole call.  Omitted or None: none -- unlike
+            the unary methods, since a long upload is legitimate and idle_timeout is the default bound.
         :return: An IngestDataStreamApiResult.
+        :raises ValueError: if timeout or idle_timeout is zero or negative.
         :raises Exception: whatever the iterable raised.
         """
         self.logger.info("Starting ingestDataStream operation")
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         feed = _RequestFeed(requests, self._build_ingest_data_request, self.logger)
-        return self._send_ingest_data_stream(feed)
+        return self._send_ingest_data_stream(feed, timeout=total, idle_timeout=idle)
 
     # ---- ingestDataBidiStream
 
-    def _send_ingest_data_bidi_stream(self, feed: _RequestFeed) -> Generator[IngestDataApiResult, None, None]:
+    def _send_ingest_data_bidi_stream(
+        self, feed: _RequestFeed, *, timeout: float | None = None, idle_timeout: float | None = None
+    ) -> Generator[IngestDataApiResult, None, None]:
         """
         Invokes the bidirectional ingestDataBidiStream() API method, yielding one result per response.
 
@@ -812,15 +1035,39 @@ class IngestionClient(ServiceApiClientBase):
         error is yielded WITHOUT a response and ends the generator; that absence is how the public wrapper tells
         the two apart.  The feed's own exception, if any, is re-raised instead.
 
+        The idle watchdog runs on the _BidiIdleClock's terms: only while this generator waits for a response with
+        requests outstanding, or, once the feed is exhausted, for the end of the stream.
+
         :param feed: The request iterator.
+        :param timeout: Resolved total deadline in seconds, or None for none.
+        :param idle_timeout: Resolved idle bound in seconds, or None for none.
         :return: An iterator over results.
         :raises Exception: whatever the caller's request iterable raised.
         """
         self.logger.info("Calling ingestDataBidiStream API")
+        watchdog = _IdleWatchdog(idle_timeout, name="ingestDataBidiStream")
+        clock = _BidiIdleClock(watchdog)
+        feed.listener = clock
         call = None
         try:
-            call = self._stub.ingestDataBidiStream(iter(feed))
-            for response in call:
+            stub_call = self._stub.ingestDataBidiStream
+            call = stub_call(iter(feed)) if timeout is None else stub_call(iter(feed), timeout=timeout)
+            # getattr: a mocked stub may return a plain iterator, which has nothing to cancel.
+            cancel = getattr(call, "cancel", None)
+            if cancel is not None:
+                watchdog.attach(cancel)
+            responses = iter(call)
+            while True:
+                clock.start_waiting()
+                try:
+                    response = next(responses)
+                except StopIteration:
+                    clock.stop_waiting(got_response=False)
+                    break
+                except BaseException:
+                    clock.stop_waiting(got_response=False)
+                    raise
+                clock.stop_waiting(got_response=True)
                 if response.HasField("exceptionalResult"):
                     error_msg = response.exceptionalResult.message
                     self.logger.warning(
@@ -835,8 +1082,11 @@ class IngestionClient(ServiceApiClientBase):
                     yield IngestDataApiResult(is_error=True, message=error_msg, response=response)
         except grpc.RpcError as e:
             feed.reraise(e, "ingestDataBidiStream")
-            error_msg = f"gRPC error: {e.details()}{_ingest_size_hint(e)}"
-            self.logger.error("gRPC error during ingestDataBidiStream after %d request(s): %s", feed.sent, e.details())
+            if watchdog.expired:
+                error_msg = f"gRPC error: {watchdog.message()}"
+            else:
+                error_msg = f"gRPC error: {e.details()}{_stream_deadline_hint(e, timeout)}{_ingest_size_hint(e)}"
+            self.logger.error("gRPC error during ingestDataBidiStream after %d request(s): %s", feed.sent, error_msg)
             yield IngestDataApiResult(is_error=True, message=error_msg)
         except Exception as e:
             error_msg = f"Unexpected error: {e!s}"
@@ -849,9 +1099,14 @@ class IngestionClient(ServiceApiClientBase):
             # behavior to collection timing; cancel explicitly.  On a call that already finished it does nothing.
             if call is not None and hasattr(call, "cancel"):
                 call.cancel()
+            watchdog.stop()
 
     def iter_ingest_data_bidi_stream(
-        self, requests: Iterable[IngestDataRequestParams]
+        self,
+        requests: Iterable[IngestDataRequestParams],
+        *,
+        idle_timeout: TimeoutArg = DEFAULT,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Generator[IngestDataApiResult, None, None]:
         """
         Sends ingestion requests on a bidirectional stream, yielding each one's ack or reject as it arrives.
@@ -877,18 +1132,30 @@ class IngestionClient(ServiceApiClientBase):
 
         Reading to the end needs no close: the call has finished by then.
 
+        The idle timeout counts only time spent waiting here for a response while requests are outstanding, and,
+        once the iterable is exhausted, for the server to close the stream: not the time the caller spends on a
+        result (later acks may already be buffered), nor the time the iterable spends producing a request.  On
+        expiry the call is cancelled and this raises RuntimeError.
+
         :param requests: The requests to send.
+        :param idle_timeout: Longest wait, in seconds, for a response to an outstanding request, or for the end of
+            the stream after the last request (see above).
+            Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless configured).  None: no bound.
+        :param timeout: Optional total deadline, in seconds, for the whole call.  Omitted or None: none -- unlike
+            the unary methods, since a long stream is legitimate and idle_timeout is the default bound.
         :return: A lazy generator over per-request results.  Typed as a Generator, not an Iterator, because it has
             the close() that contextlib.closing needs.
-        :raises RuntimeError: on a transport or unexpected error.
+        :raises RuntimeError: on a transport or unexpected error, or the idle timeout.
+        :raises ValueError: if timeout or idle_timeout is zero or negative (on the first next()).
         :raises Exception: whatever the iterable raised.
         """
         self.logger.info("Starting ingestDataBidiStream operation")
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         feed = _RequestFeed(requests, self._build_ingest_data_request, self.logger)
         # closing() so that closing THIS generator closes the sender's at once, running the finally that cancels the
         # call.  It does not make a caller's `break` a close: a suspended generator that is still referenced is
         # closed only explicitly or when collected, which is why the docstring asks for contextlib.closing.
-        with contextlib.closing(self._send_ingest_data_bidi_stream(feed)) as results:
+        with contextlib.closing(self._send_ingest_data_bidi_stream(feed, timeout=total, idle_timeout=idle)) as results:
             for result in results:
                 if result.result_status.is_error and result.response is None:
                     raise RuntimeError(f"ingestDataBidiStream failed: {result.result_status.message}")
@@ -897,7 +1164,7 @@ class IngestionClient(ServiceApiClientBase):
     # ---- queryRequestStatus
 
     def _send_query_request_status(
-        self, request: ingestion_pb2.QueryRequestStatusRequest
+        self, request: ingestion_pb2.QueryRequestStatusRequest, *, timeout: TimeoutArg = DEFAULT
     ) -> QueryRequestStatusApiResult:
         """
         Invokes the queryRequestStatus() API method.
@@ -917,11 +1184,14 @@ class IngestionClient(ServiceApiClientBase):
                 "queryRequestStatus returned %d documents", len(response.requestStatusResult.requestStatus)
             ),
             rpc_error_hint=_status_query_size_hint,
+            timeout=timeout,
         )
 
     def query_request_status(
         self,
         criteria: "Sequence[ingestion_pb2.QueryRequestStatusRequest.QueryRequestStatusCriterion]",
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryRequestStatusApiResult:
         """
         Queries request-status documents: the only record of whether an acked request was actually ingested.
@@ -934,6 +1204,8 @@ class IngestionClient(ServiceApiClientBase):
         a time range, not a bare status.
 
         :param criteria: At least one criterion (see RequestStatusQuery); they are ANDed.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryRequestStatusApiResult.
         :raises ValueError: if criteria is empty (the server rejects it).
         """
@@ -941,7 +1213,7 @@ class IngestionClient(ServiceApiClientBase):
             raise ValueError("query_request_status() requires at least one criterion")
         request = ingestion_pb2.QueryRequestStatusRequest()
         request.criteria.extend(criteria)
-        return self._send_query_request_status(request)
+        return self._send_query_request_status(request, timeout=timeout)
 
     def await_request_statuses(
         self,
@@ -974,12 +1246,16 @@ class IngestionClient(ServiceApiClientBase):
         :param provider_id: The provider the requests were sent as.
         :param client_request_ids: The requests to wait for.
         :param since: A time at or before the first request was sent.
-        :param timeout: Seconds to wait before giving up.
+        :param timeout: Seconds to wait in all, polls included, before giving up.  Each poll's deadline is the
+            client's call default or the time remaining, whichever is shorter, so one hung query cannot outlast it.
+            A poll that starts at the deadline still gets min(timeout, AWAIT_MIN_POLL_SECONDS), so the wait can
+            overrun by at most that much.
         :param poll_interval: Seconds between polls.
         :return: {client_request_id: [documents]}, one entry per distinct id; a list because ids are not unique.
         :raises ValueError: on blank or empty arguments, or a non-positive timeout or poll_interval.
-        :raises TimeoutError: if some ids have no document by the timeout; the message names them.
-        :raises RuntimeError: if a status query fails.
+        :raises TimeoutError: if some ids have no document by the timeout, including when the poll that ran out the
+            time failed; the message names them.
+        :raises RuntimeError: if a status query fails before the timeout.
         """
         if not provider_id or not provider_id.strip():
             raise ValueError("await_request_statuses() requires a non-blank provider_id")
@@ -1002,11 +1278,23 @@ class IngestionClient(ServiceApiClientBase):
 
         wanted_set = set(wanted)
         deadline = time.monotonic() + timeout
+        min_poll = min(timeout, AWAIT_MIN_POLL_SECONDS)
+        missing = wanted
         attempt = 0
         while True:
             attempt += 1
-            result = self.query_request_status(criteria)
+            # #81 T4: bound each poll by the time remaining as well as the client default.  When the default is the
+            # tighter bound, pass DEFAULT so a DEADLINE_EXCEEDED hint names the client setting, not timeout=.
+            budget = max(deadline - time.monotonic(), min_poll)
+            client_default = self._call_timeout.seconds
+            poll_timeout: TimeoutArg = DEFAULT if client_default is not None and client_default <= budget else budget
+            result = self.query_request_status(criteria, timeout=poll_timeout)
             if result.result_status.is_error:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        _await_timeout_message(timeout, missing, wanted)
+                        + f"; the last status query failed: {result.result_status.message}"
+                    )
                 raise RuntimeError(f"await_request_statuses() status query failed: {result.result_status.message}")
             found: dict[str, list] = {}
             for document in result.request_statuses or []:
@@ -1021,9 +1309,5 @@ class IngestionClient(ServiceApiClientBase):
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                shown = ", ".join(missing[:10]) + (f", ... ({len(missing) - 10} more)" if len(missing) > 10 else "")
-                raise TimeoutError(
-                    f"await_request_statuses() timed out after {timeout} s with {len(missing)} of {len(wanted)} "
-                    f"request(s) still lacking a status document: {shown}"
-                )
+                raise TimeoutError(_await_timeout_message(timeout, missing, wanted))
             time.sleep(min(poll_interval, remaining))

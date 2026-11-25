@@ -5,7 +5,7 @@ import grpc
 
 from dp_python_lib.client.query_support import check_at_most_one_text_criterion
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import annotation_pb2, annotation_pb2_grpc, common_pb2
 
@@ -395,11 +395,26 @@ class DataSetClient(ServiceApiClientBase):
     patchDataSet() is not wrapped: it is a reserved placeholder that returns "not implemented".
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Annotation Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
         """
-        super().__init__(channel, annotation_pb2_grpc.DpAnnotationServiceStub)
+        super().__init__(
+            channel,
+            annotation_pb2_grpc.DpAnnotationServiceStub,
+            call_timeout=call_timeout,
+            call_timeout_source=call_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("DataSetClient initialized with channel: %s", channel)
 
@@ -446,7 +461,9 @@ class DataSetClient(ServiceApiClientBase):
         self.logger.debug("SaveDataSetRequest built successfully")
         return request
 
-    def _send_save_dataset(self, request: annotation_pb2.SaveDataSetRequest) -> SaveDataSetApiResult:
+    def _send_save_dataset(
+        self, request: annotation_pb2.SaveDataSetRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveDataSetApiResult:
         """
         Invokes the saveDataSet() API method with the supplied request.
         :param request: SaveDataSetRequest with parameters for the call.
@@ -464,21 +481,26 @@ class DataSetClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "Successfully saved DataSet: %s with id: %s", request.name, response.saveDataSetResult.dataSetId
             ),
+            timeout=timeout,
         )
 
-    def save_dataset(self, request_params: SaveDataSetRequestParams) -> SaveDataSetApiResult:
+    def save_dataset(
+        self, request_params: SaveDataSetRequestParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> SaveDataSetApiResult:
         """
         User-facing method for invoking the saveDataSet() API method.
 
         Saving replaces in full when request_params.dataset_id is set: omitted fields are cleared, not preserved.
 
         :param request_params: Contains user parameters for the call to saveDataSet().
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A SaveDataSetApiResult with the method response and status information.
         """
         self.logger.info("Starting saveDataSet operation for DataSet: %s", request_params.name)
 
         request = self._build_save_dataset_request(request_params)
-        result = self._send_save_dataset(request)
+        result = self._send_save_dataset(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("SaveDataSet operation failed: %s", result.result_status.message)
@@ -502,7 +524,9 @@ class DataSetClient(ServiceApiClientBase):
         request.dataSetId = dataset_id
         return request
 
-    def _send_get_dataset(self, request: annotation_pb2.GetDataSetRequest) -> GetDataSetApiResult:
+    def _send_get_dataset(
+        self, request: annotation_pb2.GetDataSetRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> GetDataSetApiResult:
         """
         Invokes the getDataSet() API method with the supplied request.
         :param request: GetDataSetRequest with parameters for the call.
@@ -518,21 +542,24 @@ class DataSetClient(ServiceApiClientBase):
             success_log=lambda _response: self.logger.info(
                 "Successfully retrieved DataSet for id: %s", request.dataSetId
             ),
+            timeout=timeout,
         )
 
-    def get_dataset(self, dataset_id: str) -> GetDataSetApiResult:
+    def get_dataset(self, dataset_id: str, *, timeout: TimeoutArg = DEFAULT) -> GetDataSetApiResult:
         """
         User-facing method for invoking the getDataSet() API method.
 
         A DataSet that does not exist comes back as a business error, not an empty success.
 
         :param dataset_id: Id of the DataSet to retrieve.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A GetDataSetApiResult with the method response and status information.
         """
         self.logger.info("Starting getDataSet operation for id: %s", dataset_id)
 
         request = self._build_get_dataset_request(dataset_id)
-        result = self._send_get_dataset(request)
+        result = self._send_get_dataset(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("GetDataSet operation failed: %s", result.result_status.message)
@@ -568,7 +595,9 @@ class DataSetClient(ServiceApiClientBase):
             request.pageToken = page_token
         return request
 
-    def _send_query_datasets(self, request: annotation_pb2.QueryDataSetsRequest) -> QueryDataSetsApiResult:
+    def _send_query_datasets(
+        self, request: annotation_pb2.QueryDataSetsRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryDataSetsApiResult:
         """
         Invokes the queryDataSets() API method with the supplied request.
         :param request: QueryDataSetsRequest with parameters for the call.
@@ -584,6 +613,7 @@ class DataSetClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "QueryDataSets returned %d records", len(response.dataSetsResult.dataSets)
             ),
+            timeout=timeout,
         )
 
     def query_datasets(
@@ -591,6 +621,8 @@ class DataSetClient(ServiceApiClientBase):
         criteria: list[annotation_pb2.QueryDataSetsRequest.QueryDataSetsCriterion] | None = None,
         limit: int | None = None,
         page_token: str | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> QueryDataSetsApiResult:
         """
         User-facing method for invoking the queryDataSets() API method.  Returns a single page of results; use
@@ -601,6 +633,8 @@ class DataSetClient(ServiceApiClientBase):
         :param criteria: List of QueryDataSetsCriterion objects (see DataSetQuery helpers), or None to match all.
         :param limit: Maximum number of records to return PER PAGE -- not a cap on the total (optional).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryDataSetsApiResult with a single page of results and status information.
         :raises ValueError: if criteria contains more than one text criterion.
         """
@@ -610,7 +644,7 @@ class DataSetClient(ServiceApiClientBase):
         self.logger.info("Starting queryDataSets operation with %d criteria", len(criteria))
 
         request = self._build_query_datasets_request(criteria, limit=limit, page_token=page_token)
-        result = self._send_query_datasets(request)
+        result = self._send_query_datasets(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryDataSets operation failed: %s", result.result_status.message)
@@ -623,6 +657,8 @@ class DataSetClient(ServiceApiClientBase):
         self,
         criteria: list[annotation_pb2.QueryDataSetsRequest.QueryDataSetsCriterion] | None = None,
         limit: int | None = None,
+        *,
+        timeout: TimeoutArg = DEFAULT,
     ) -> Iterator[annotation_pb2.DataSet]:
         """
         Convenience generator that transparently pages through all queryDataSets() results, following the
@@ -632,13 +668,16 @@ class DataSetClient(ServiceApiClientBase):
 
         :param criteria: List of QueryDataSetsCriterion objects (see DataSetQuery helpers), or None to match all.
         :param limit: Maximum number of records to return per page (optional).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching DataSet records across all pages.
         :raises ValueError: if criteria contains more than one text criterion.
         :raises RuntimeError: if any page returns an error.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:
-            result = self.query_datasets(criteria, limit=limit, page_token=page_token)
+            result = self.query_datasets(criteria, limit=limit, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryDataSets failed during paging: {result.result_status.message}")
 
@@ -648,7 +687,9 @@ class DataSetClient(ServiceApiClientBase):
             if not page_token:
                 break
 
-    def get_datasets(self, ids: list[str], chunk_size: int = ID_QUERY_CHUNK_SIZE) -> dict[str, annotation_pb2.DataSet]:
+    def get_datasets(
+        self, ids: list[str], chunk_size: int = ID_QUERY_CHUNK_SIZE, *, timeout: TimeoutArg = DEFAULT
+    ) -> dict[str, annotation_pb2.DataSet]:
         """
         Batch-fetches DataSets by id in a small number of paged queries, rather than one getDataSet() call apiece.
 
@@ -670,6 +711,8 @@ class DataSetClient(ServiceApiClientBase):
 
         :param ids: DataSet ids to fetch.
         :param chunk_size: Maximum number of ids to request per query.  Rarely worth overriding.
+        :param timeout: Deadline in seconds for each query call (one or more per chunk), not for the whole fetch.
+            Omitted: the client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: A dict mapping DataSet id to DataSet, for those ids that resolved.
         :raises ValueError: if chunk_size is not positive.
         :raises RuntimeError: if any page returns an error.
@@ -687,7 +730,7 @@ class DataSetClient(ServiceApiClientBase):
         found: dict[str, annotation_pb2.DataSet] = {}
         for offset in range(0, len(unique_ids), chunk_size):
             chunk = unique_ids[offset : offset + chunk_size]
-            for dataset in self.iter_datasets([DataSetQuery.ids(chunk)]):
+            for dataset in self.iter_datasets([DataSetQuery.ids(chunk)], timeout=timeout):
                 found[dataset.id] = dataset
 
         if len(found) < len(unique_ids):
@@ -716,7 +759,9 @@ class DataSetClient(ServiceApiClientBase):
         request.dataSetId = dataset_id
         return request
 
-    def _send_delete_dataset(self, request: annotation_pb2.DeleteDataSetRequest) -> DeleteDataSetApiResult:
+    def _send_delete_dataset(
+        self, request: annotation_pb2.DeleteDataSetRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> DeleteDataSetApiResult:
         """
         Invokes the deleteDataSet() API method with the supplied request.
         :param request: DeleteDataSetRequest with parameters for the call.
@@ -730,9 +775,10 @@ class DataSetClient(ServiceApiClientBase):
             "deleteDataSet",
             request_log=lambda: self.logger.info("Calling deleteDataSet API for id: %s", request.dataSetId),
             success_log=lambda _response: self.logger.info("Successfully deleted DataSet id: %s", request.dataSetId),
+            timeout=timeout,
         )
 
-    def delete_dataset(self, dataset_id: str) -> DeleteDataSetApiResult:
+    def delete_dataset(self, dataset_id: str, *, timeout: TimeoutArg = DEFAULT) -> DeleteDataSetApiResult:
         """
         User-facing method for invoking the deleteDataSet() API method.
 
@@ -746,12 +792,14 @@ class DataSetClient(ServiceApiClientBase):
         Deleting a DataSet that does not exist is likewise a business error, not a silent success.
 
         :param dataset_id: Id of the DataSet to delete.
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A DeleteDataSetApiResult with the method response and status information.
         """
         self.logger.info("Starting deleteDataSet operation for id: %s", dataset_id)
 
         request = self._build_delete_dataset_request(dataset_id)
-        result = self._send_delete_dataset(request)
+        result = self._send_delete_dataset(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("DeleteDataSet operation failed: %s", result.result_status.message)

@@ -533,6 +533,11 @@ print(export.file_path)     # a path on the SERVER's filesystem
 print(export.file_url)      # '' unless the deployment publishes exports over HTTP
 ```
 
+The call returns only once the server has written the whole file, so `export_data()` has its own
+deadline, **3600 s** by default rather than the 300 s other calls get.  For a bigger export, pass
+`timeout=` or raise `annotation.export_timeout_seconds`; see
+[Deadlines, idle timeouts, and keepalive](conventions.md#deadlines-idle-timeouts-and-keepalive).
+
 `ExportFormat` accepts either the member or its string value, so `ExportFormat.CSV` and
 `"csv"` both work; anything else raises a `ValueError` naming the valid formats, which is what
 makes the server-rejected `EXPORT_FORMAT_UNSPECIFIED` unreachable.

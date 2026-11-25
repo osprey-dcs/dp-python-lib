@@ -1,16 +1,16 @@
+import contextlib
 import logging
-from collections.abc import Callable, Iterable, Iterator
-from typing import Any, TypeVar
+from collections.abc import Generator, Iterator
+from typing import Any
 
 import grpc
 
 from dp_python_lib.client.result import ApiResultBase
-from dp_python_lib.client.service_api_client_base import ServiceApiClientBase
+from dp_python_lib.client.service_api_client_base import DEFAULT, ServiceApiClientBase, TimeoutArg
 from dp_python_lib.client.time_conversions import TimestampInput, to_timestamp
 from dp_python_lib.grpc import common_pb2, query_pb2, query_pb2_grpc
 
 # The result type a server-streaming sender yields (QuerySamplesApiResult or QueryBucketsApiResult).
-_StreamResultT = TypeVar("_StreamResultT", bound=ApiResultBase)
 
 
 class PvQuery:
@@ -617,11 +617,34 @@ class QueryClient(ServiceApiClientBase):
     Queries are described by a kind-neutral QueryParams built from the PvQuery (PV) and ConfigQuery (CFG) helpers.
     """
 
-    def __init__(self, channel: grpc.Channel) -> None:
+    def __init__(
+        self,
+        channel: grpc.Channel,
+        *,
+        call_timeout: TimeoutArg = DEFAULT,
+        stream_idle_timeout: TimeoutArg = DEFAULT,
+        call_timeout_source: str | None = None,
+        stream_idle_timeout_source: str | None = None,
+    ) -> None:
         """
         :param channel: gRPC communication channel for the Query Service.
+        :param call_timeout: Default deadline, in seconds, for each unary call (and each page of a paging method).
+            Omitted: DEFAULT_CALL_TIMEOUT_SECONDS.  None or 0 disables it.  A call's own ``timeout=`` overrides it.
+        :param call_timeout_source: How a DEADLINE_EXCEEDED error describes where ``call_timeout`` was set
+            (MldpClient names the config setting).
+        :param stream_idle_timeout: Default idle timeout, in seconds, for this client's streaming calls: the longest
+            the client waits on the server for a stream's next step.  Omitted: DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS.
+            None or 0 disables it.  A call's own ``idle_timeout=`` overrides it.
+        :param stream_idle_timeout_source: The same as ``call_timeout_source``, for ``stream_idle_timeout``.
         """
-        super().__init__(channel, query_pb2_grpc.DpQueryServiceStub)
+        super().__init__(
+            channel,
+            query_pb2_grpc.DpQueryServiceStub,
+            call_timeout=call_timeout,
+            stream_idle_timeout=stream_idle_timeout,
+            call_timeout_source=call_timeout_source,
+            stream_idle_timeout_source=stream_idle_timeout_source,
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("QueryClient initialized with channel: %s", channel)
 
@@ -727,64 +750,13 @@ class QueryClient(ServiceApiClientBase):
     # server-streaming (shared by both query kinds)
     # ------------------------------------------------------------------
 
-    def _iter_stream(
-        self,
-        stub_call: Callable[[Any], Iterable[Any]],
-        request: Any,
-        result_cls: Callable[..., _StreamResultT],
-        success_field: str,
-        op_name: str,
-    ) -> Iterator[_StreamResultT]:
-        """
-        Invokes a server-streaming query method, yielding one result per streamed message.
-
-        Errors are yielded, not raised: a business error on a message, an unrecognized response, or a gRPC/unexpected
-        error while iterating the stream each yield an is_error result, and a transport error terminates the
-        generator after that final error item.  This is the internal contract -- the public iter_*_stream() wrappers
-        consume these and convert the first error result into a RuntimeError, so callers of the public methods never
-        see an error result yielded.
-
-        Deliberately not routed through _dispatch(), which returns a single result rather than yielding many.
-
-        :param stub_call: The bound stub method (e.g. self._stub.querySamplesStream).
-        :param request: The request for the call (must carry no page token).
-        :param result_cls: The result class; called as result_cls(is_error=, message=, response=).
-        :param success_field: The success oneof field of each response (e.g. "sampleQueryResult").
-        :param op_name: The camelCase method name, for log and error messages.
-        :return: An iterator over the streamed result messages, possibly ending in an error result.
-        """
-        display_name = op_name[0].upper() + op_name[1:]
-        self.logger.info("Calling %s API", op_name)
-
-        try:
-            self.logger.debug("Invoking stub.%s with request", op_name)
-            stream = stub_call(request)
-            for response in stream:
-                if response.HasField("exceptionalResult"):
-                    error_msg = response.exceptionalResult.message
-                    self.logger.warning("%s returned business error: %s", display_name, error_msg)
-                    yield result_cls(is_error=True, message=error_msg)
-                elif response.HasField(success_field):
-                    yield result_cls(is_error=False, message="", response=response)
-                else:
-                    error_msg = f"Unexpected response format: neither exceptionalResult nor {success_field} found"
-                    self.logger.error(error_msg)
-                    yield result_cls(is_error=True, message=error_msg)
-
-        except grpc.RpcError as e:
-            error_msg = f"gRPC error: {e.details()}"
-            self.logger.error("gRPC error during %s: %s", op_name, e.details())
-            yield result_cls(is_error=True, message=error_msg)
-        except Exception as e:
-            error_msg = f"Unexpected error: {e!s}"
-            self.logger.exception("Unexpected error during %s: %s", op_name, str(e))
-            yield result_cls(is_error=True, message=error_msg)
-
     # ------------------------------------------------------------------
     # querySamples (unary)
     # ------------------------------------------------------------------
 
-    def _send_query_samples(self, request: query_pb2.QuerySamplesRequest) -> QuerySamplesApiResult:
+    def _send_query_samples(
+        self, request: query_pb2.QuerySamplesRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QuerySamplesApiResult:
         """
         Invokes the querySamples() unary API method with the supplied request.
         :param request: QuerySamplesRequest with parameters for the call.
@@ -797,20 +769,25 @@ class QueryClient(ServiceApiClientBase):
             "sampleQueryResult",
             "querySamples",
             success_log=lambda _response: self.logger.info("QuerySamples returned a result page"),
+            timeout=timeout,
         )
 
-    def query_samples(self, request_params: QueryParams, page_token: str | None = None) -> QuerySamplesApiResult:
+    def query_samples(
+        self, request_params: QueryParams, page_token: str | None = None, *, timeout: TimeoutArg = DEFAULT
+    ) -> QuerySamplesApiResult:
         """
         User-facing method for invoking the unary querySamples() API method.  Returns a single page of results; use
         iter_query_samples() to page through all results transparently.
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QuerySamplesApiResult with a single page of results and status information.
         """
         self.logger.info("Starting querySamples operation")
 
         request = self._build_query_samples_request(request_params, page_token=page_token)
-        result = self._send_query_samples(request)
+        result = self._send_query_samples(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QuerySamples operation failed: %s", result.result_status.message)
@@ -819,7 +796,9 @@ class QueryClient(ServiceApiClientBase):
 
         return result
 
-    def iter_query_samples(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
+    def iter_query_samples(
+        self, request_params: QueryParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QuerySamplesApiResult]:
         """
         Convenience generator that transparently pages through all unary querySamples() results, following the
         nextPageToken (reached via response.sampleQueryResult.nextPageToken) until the results are exhausted.  Yields
@@ -828,11 +807,14 @@ class QueryClient(ServiceApiClientBase):
         Raises RuntimeError if any page returns an error, so callers can distinguish failure from an empty result set.
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:
-            result = self.query_samples(request_params, page_token=page_token)
+            result = self.query_samples(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"querySamples failed during paging: {result.result_status.message}")
 
@@ -846,7 +828,9 @@ class QueryClient(ServiceApiClientBase):
     # querySamplesStream (server-streaming)
     # ------------------------------------------------------------------
 
-    def _send_query_samples_stream(self, request: query_pb2.QuerySamplesRequest) -> Iterator[QuerySamplesApiResult]:
+    def _send_query_samples_stream(
+        self, request: query_pb2.QuerySamplesRequest, *, timeout: float | None = None, idle_timeout: float | None = None
+    ) -> Generator[QuerySamplesApiResult, None, None]:
         """
         Invokes the querySamplesStream() server-streaming API method with the supplied request, yielding one
         QuerySamplesApiResult per streamed message.  Errors are yielded, not raised; see _iter_stream().
@@ -860,9 +844,13 @@ class QueryClient(ServiceApiClientBase):
             QuerySamplesApiResult,
             "sampleQueryResult",
             "querySamplesStream",
+            timeout=timeout,
+            idle_timeout=idle_timeout,
         )
 
-    def iter_query_samples_stream(self, request_params: QueryParams) -> Iterator[QuerySamplesApiResult]:
+    def iter_query_samples_stream(
+        self, request_params: QueryParams, *, idle_timeout: TimeoutArg = DEFAULT, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QuerySamplesApiResult]:
         """
         User-facing lazy generator for the server-streaming querySamplesStream() API method.  Yields one
         QuerySamplesApiResult per streamed message, symmetric with iter_query_samples() but fire-and-consume: the
@@ -876,21 +864,34 @@ class QueryClient(ServiceApiClientBase):
         failure from an empty stream.
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).
+        :param idle_timeout: Longest wait, in seconds, for the server's next message.  Time spent processing a
+            yielded result does not count.  Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless
+            configured).  None: no idle bound.  On expiry the call is cancelled and this raises RuntimeError.
+        :param timeout: Optional total deadline, in seconds, for the whole stream.  Omitted or None: none --
+            unlike the unary methods, since a healthy stream can run arbitrarily long and idle_timeout is its default
+            bound.
         :return: A lazy iterator over the streamed result messages.
+        :raises ValueError: if timeout or idle_timeout is zero or negative (on the first next()).
         """
         self.logger.info("Starting querySamplesStream operation")
 
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         request = self._build_query_samples_request(request_params, page_token=None)
-        for result in self._send_query_samples_stream(request):
-            if result.result_status.is_error:
-                raise RuntimeError(f"querySamplesStream failed during streaming: {result.result_status.message}")
-            yield result
+        # closing(): the sender's finally stops its idle watchdog, and without an explicit close it would wait
+        # for garbage collection whenever this raises (the traceback keeps the sender alive).
+        with contextlib.closing(self._send_query_samples_stream(request, timeout=total, idle_timeout=idle)) as results:
+            for result in results:
+                if result.result_status.is_error:
+                    raise RuntimeError(f"querySamplesStream failed during streaming: {result.result_status.message}")
+                yield result
 
     # ------------------------------------------------------------------
     # queryBuckets (unary)
     # ------------------------------------------------------------------
 
-    def _send_query_buckets(self, request: query_pb2.QueryBucketsRequest) -> QueryBucketsApiResult:
+    def _send_query_buckets(
+        self, request: query_pb2.QueryBucketsRequest, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryBucketsApiResult:
         """
         Invokes the queryBuckets() unary API method with the supplied request.
         :param request: QueryBucketsRequest with parameters for the call.
@@ -905,9 +906,12 @@ class QueryClient(ServiceApiClientBase):
             success_log=lambda response: self.logger.info(
                 "QueryBuckets returned %d buckets", len(response.bucketQueryResult.dataBuckets)
             ),
+            timeout=timeout,
         )
 
-    def query_buckets(self, request_params: QueryParams, page_token: str | None = None) -> QueryBucketsApiResult:
+    def query_buckets(
+        self, request_params: QueryParams, page_token: str | None = None, *, timeout: TimeoutArg = DEFAULT
+    ) -> QueryBucketsApiResult:
         """
         User-facing method for invoking the unary queryBuckets() API method.  Returns a single page of whole buckets;
         use iter_query_buckets() to page through all results transparently.
@@ -918,13 +922,15 @@ class QueryClient(ServiceApiClientBase):
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
             carry a sample_status_filter.
         :param page_token: Token for retrieving a subsequent page (optional).
+        :param timeout: Deadline in seconds for this call.  Omitted: the client's default
+            (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.  Must be positive.
         :return: A QueryBucketsApiResult with a single page of results and status information.
         :raises ValueError: if request_params carries a sample_status_filter.
         """
         self.logger.info("Starting queryBuckets operation")
 
         request = self._build_query_buckets_request(request_params, page_token=page_token)
-        result = self._send_query_buckets(request)
+        result = self._send_query_buckets(request, timeout=timeout)
 
         if result.result_status.is_error:
             self.logger.error("QueryBuckets operation failed: %s", result.result_status.message)
@@ -933,7 +939,9 @@ class QueryClient(ServiceApiClientBase):
 
         return result
 
-    def iter_query_buckets(self, request_params: QueryParams) -> Iterator[QueryBucketsApiResult]:
+    def iter_query_buckets(
+        self, request_params: QueryParams, *, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QueryBucketsApiResult]:
         """
         Convenience generator that transparently pages through all unary queryBuckets() results, following the
         nextPageToken until the results are exhausted.  Yields one QueryBucketsApiResult per page.
@@ -942,12 +950,15 @@ class QueryClient(ServiceApiClientBase):
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
             carry a sample_status_filter.
+        :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
+            client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over the result pages.
         :raises ValueError: if request_params carries a sample_status_filter (on the first next()).
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:
-            result = self.query_buckets(request_params, page_token=page_token)
+            result = self.query_buckets(request_params, page_token=page_token, timeout=timeout)
             if result.result_status.is_error:
                 raise RuntimeError(f"queryBuckets failed during paging: {result.result_status.message}")
 
@@ -961,7 +972,9 @@ class QueryClient(ServiceApiClientBase):
     # queryBucketsStream (server-streaming)
     # ------------------------------------------------------------------
 
-    def _send_query_buckets_stream(self, request: query_pb2.QueryBucketsRequest) -> Iterator[QueryBucketsApiResult]:
+    def _send_query_buckets_stream(
+        self, request: query_pb2.QueryBucketsRequest, *, timeout: float | None = None, idle_timeout: float | None = None
+    ) -> Generator[QueryBucketsApiResult, None, None]:
         """
         Invokes the queryBucketsStream() server-streaming API method with the supplied request, yielding one
         QueryBucketsApiResult per streamed message.  Errors are yielded, not raised; see _iter_stream().
@@ -975,9 +988,13 @@ class QueryClient(ServiceApiClientBase):
             QueryBucketsApiResult,
             "bucketQueryResult",
             "queryBucketsStream",
+            timeout=timeout,
+            idle_timeout=idle_timeout,
         )
 
-    def iter_query_buckets_stream(self, request_params: QueryParams) -> Iterator[QueryBucketsApiResult]:
+    def iter_query_buckets_stream(
+        self, request_params: QueryParams, *, idle_timeout: TimeoutArg = DEFAULT, timeout: TimeoutArg = DEFAULT
+    ) -> Iterator[QueryBucketsApiResult]:
         """
         User-facing lazy generator for the server-streaming queryBucketsStream() API method.  Yields one
         QueryBucketsApiResult per streamed message, symmetric with iter_query_buckets() but fire-and-consume: the
@@ -992,13 +1009,24 @@ class QueryClient(ServiceApiClientBase):
 
         :param request_params: User parameters for the query (see QueryParams / PvQuery / ConfigQuery).  Must not
             carry a sample_status_filter.
+        :param idle_timeout: Longest wait, in seconds, for the server's next message.  Time spent processing a
+            yielded result does not count.  Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless
+            configured).  None: no idle bound.  On expiry the call is cancelled and this raises RuntimeError.
+        :param timeout: Optional total deadline, in seconds, for the whole stream.  Omitted or None: none --
+            unlike the unary methods, since a healthy stream can run arbitrarily long and idle_timeout is its default
+            bound.
         :return: A lazy iterator over the streamed result messages.
         :raises ValueError: if request_params carries a sample_status_filter (on the first next()).
+        :raises ValueError: if timeout or idle_timeout is zero or negative (on the first next()).
         """
         self.logger.info("Starting queryBucketsStream operation")
 
+        total, idle = self._resolve_stream_timeouts(timeout, idle_timeout)
         request = self._build_query_buckets_request(request_params, page_token=None)
-        for result in self._send_query_buckets_stream(request):
-            if result.result_status.is_error:
-                raise RuntimeError(f"queryBucketsStream failed during streaming: {result.result_status.message}")
-            yield result
+        # closing(): the sender's finally stops its idle watchdog, and without an explicit close it would wait
+        # for garbage collection whenever this raises (the traceback keeps the sender alive).
+        with contextlib.closing(self._send_query_buckets_stream(request, timeout=total, idle_timeout=idle)) as results:
+            for result in results:
+                if result.result_status.is_error:
+                    raise RuntimeError(f"queryBucketsStream failed during streaming: {result.result_status.message}")
+                yield result

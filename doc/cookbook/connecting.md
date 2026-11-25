@@ -97,6 +97,10 @@ client = MldpClient(
 Read [Sub-clients can be None](#sub-clients-can-be-none) before using this form — passing only
 some channels has a consequence that is easy to miss.
 
+A channel you build gets no keepalive unless you pass `options=channel_options()` (from
+`dp_python_lib.config`); the call deadlines still apply.  See
+[Channels you build yourself](conventions.md#channels-you-build-yourself).
+
 ## Configuration files
 
 The default file is `mldp-config.yaml`:
@@ -117,6 +121,11 @@ annotation:
 ```
 
 Every key is optional; anything you omit falls back to the default for that service.
+
+Each service also takes `call_timeout_seconds`, `stream_idle_timeout_seconds`,
+`keepalive_time_seconds`, and `keepalive_timeout_seconds`, and the annotation service takes
+`export_timeout_seconds`; see
+[Deadlines, idle timeouts, and keepalive](conventions.md#deadlines-idle-timeouts-and-keepalive).
 
 Discovery order, first match wins:
 
@@ -253,6 +262,9 @@ client = MldpClient(
     annotation_channel=grpc.secure_channel("annotation.example.com:443", credentials),
 )
 ```
+
+Add `options=channel_options()` to each `secure_channel()` call to keep the keepalive a configured
+channel would have had.
 
 ## Logging
 

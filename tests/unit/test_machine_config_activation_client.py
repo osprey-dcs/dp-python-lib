@@ -19,6 +19,7 @@ from dp_python_lib.client.machine_config_client import (
     activation_end_time,
     activation_is_open,
 )
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
@@ -362,7 +363,9 @@ class TestSaveConfigurationActivation(unittest.TestCase):
 
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.client_activation_id, "act-1")
-        self.mock_stub.saveConfigurationActivation.assert_called_once_with(self.request)
+        self.mock_stub.saveConfigurationActivation.assert_called_once_with(
+            self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS
+        )
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")

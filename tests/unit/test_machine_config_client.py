@@ -17,6 +17,7 @@ from dp_python_lib.client.machine_config_client import (
     SaveConfigurationApiResult,
     SaveConfigurationRequestParams,
 )
+from dp_python_lib.client.service_api_client_base import DEFAULT_CALL_TIMEOUT_SECONDS
 from dp_python_lib.grpc import annotation_pb2, common_pb2
 
 
@@ -183,7 +184,7 @@ class TestSaveConfiguration(unittest.TestCase):
         self.assertIsInstance(result, SaveConfigurationApiResult)
         self.assertFalse(result.result_status.is_error)
         self.assertEqual(result.configuration_name, "cfg-1")
-        self.mock_stub.saveConfiguration.assert_called_once_with(self.request)
+        self.mock_stub.saveConfiguration.assert_called_once_with(self.request, timeout=DEFAULT_CALL_TIMEOUT_SECONDS)
 
     def test_exceptional_result(self):
         response = _response_with_field("exceptionalResult")
