@@ -582,6 +582,22 @@ day, not a release tag), with its shipped `application.yml` (`permitKeepAliveTim
   four minutes of data on one connection under grpc-core's BDP pings, and the slow-consumer run keeps a single
   stream open for 25 s at a time under flow control.
 
+**Amended in PR #83 review (2026-11-24):**
+
+- **The bidi clock also runs once the feed is exhausted** (D3, R1).  As planned, it stopped once every request was
+  answered, so a caller left in `next()` waiting for the end of the stream had no bound: a server that acks every
+  request and then never closes the stream held the call open forever, since a stream has no total deadline by
+  default.  Reproduced in process; `_BidiIdleClock` now takes `exhausted()` from the feed, as `_UploadClock` does,
+  and runs while waiting and (outstanding or exhausted).  Still only while waiting, so a slow consumer of the last
+  ack does not trip it.  `test_bidi_stream_left_open_after_every_ack_trips` pins it, with a total deadline as a
+  backstop so the outstanding-only form fails rather than hangs.
+- **`_iter_stream()` cancels the call in its `finally`**, as the bidi sender already did, rather than leaving an
+  early-closed server stream to grpcio's cancel on garbage collection.
+- **Per-call and config timeouts accept any `numbers.Real` but `bool`**, normalized to `float` (and keepalive
+  milliseconds to `int`), so a NumPy integer is no longer a `TypeError`.  A bad `timeout=` on a paging `iter_*`
+  method still raises on the first `next()`, like the existing `sample_status_filter` check; the docstrings now
+  say so.
+
 ## Out of scope
 
 - The service-side fixes: dp-service#314 (PRs #318 and #323).

@@ -1,6 +1,7 @@
 import enum
 import logging
 import math
+import numbers
 import threading
 import time
 from abc import ABC
@@ -41,18 +42,28 @@ TimeoutArg: TypeAlias = float | _Default | None
 """What a per-call ``timeout`` / ``idle_timeout`` keyword accepts."""
 
 
-def _check_per_call_timeout(value: TimeoutArg, name: str = "timeout") -> None:
+def _is_seconds(value: object) -> bool:
     """
-    Reject a per-call timeout that is neither the sentinel, None, nor a positive finite number.  Zero is rejected
-    rather than read as "disabled", because grpcio reads 0 as a deadline already passed while 0 in config means
-    disabled, and accepting it here would leave one of those readings silently wrong (#81 D2, R4).
+    Whether a value is a number of seconds: any real number but a bool.  numbers.Real rather than int | float, so a
+    NumPy integer (np.int64 subclasses neither) is accepted like a Python int, as np.float64 already was.
+    """
+    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _per_call_timeout(value: TimeoutArg, name: str = "timeout") -> TimeoutArg:
+    """
+    Validate a per-call timeout and return it with a number normalized to a Python float, for grpcio.  Rejects
+    anything that is neither the sentinel, None, nor a positive finite number.  Zero is rejected rather than read
+    as "disabled", because grpcio reads 0 as a deadline already passed while 0 in config means disabled, and
+    accepting it here would leave one of those readings silently wrong (#81 D2, R4).
     """
     if value is DEFAULT or value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    if not _is_seconds(value):
         raise TypeError(f"{name} must be a number of seconds or None, got {type(value).__name__}")
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive number of seconds, got {value!r}; pass {name}=None to disable it")
+    return float(value)
 
 
 def _client_timeout_seconds(value: float | None, name: str) -> float | None:
@@ -62,7 +73,7 @@ def _client_timeout_seconds(value: float | None, name: str) -> float | None:
     """
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if not _is_seconds(value):
         raise TypeError(f"{name} must be a number of seconds or None, got {type(value).__name__}")
     if math.isnan(value) or math.isinf(value) or value < 0:
         raise ValueError(f"{name} must be a non-negative number of seconds (0 disables it), got {value!r}")
@@ -405,6 +416,9 @@ class ServiceApiClientBase(ABC):
         on a yielded result never counts.  On expiry it cancels the call, and the CANCELLED that follows is reported
         as "gRPC error: stream idle timeout: ..." rather than grpcio's "Locally cancelled by application!".
 
+        Closing the generator before the stream ends (the public wrappers do, via contextlib.closing) cancels the
+        call in the finally, rather than leaving it to grpcio's cancel on garbage collection.
+
         :param stub_call: The bound stub method (e.g. self._stub.querySamplesStream).
         :param request: The request for the call (must carry no page token).
         :param result_cls: The result class; called as result_cls(is_error=, message=, response=).
@@ -418,11 +432,13 @@ class ServiceApiClientBase(ABC):
         self.logger.info("Calling %s API", op_name)
 
         watchdog = _IdleWatchdog(None)
+        cancel: Callable[[], Any] | None = None
         try:
             self.logger.debug("Invoking stub.%s with request", op_name)
             stream = stub_call(request) if timeout is None else stub_call(request, timeout=timeout)
             # getattr: a mocked stub may return a plain iterator, which has nothing to cancel.
-            watchdog = _IdleWatchdog(idle_timeout, getattr(stream, "cancel", None), name=op_name)
+            cancel = getattr(stream, "cancel", None)
+            watchdog = _IdleWatchdog(idle_timeout, cancel, name=op_name)
             responses = iter(stream)
             while True:
                 watchdog.arm()
@@ -458,6 +474,11 @@ class ServiceApiClientBase(ABC):
             self.logger.exception("Unexpected error during %s: %s", op_name, str(e))
             yield result_cls(is_error=True, message=error_msg)
         finally:
+            # A consumer that stops early closes this generator; cancel explicitly rather than leave the call to
+            # grpcio's "Cancelled upon garbage collection!", which waits on the call object being collected.  On a
+            # call that already finished it does nothing.
+            if cancel is not None:
+                cancel()
             watchdog.stop()
 
     def _resolve_call_timeout(self, timeout: TimeoutArg, default: ClientTimeout | None = None) -> _AppliedTimeout:
@@ -465,7 +486,7 @@ class ServiceApiClientBase(ABC):
         Resolve a unary call's ``timeout=`` against the client default (#81 D2).  Raises ValueError on a per-call
         value <= 0.
         """
-        _check_per_call_timeout(timeout)
+        timeout = _per_call_timeout(timeout)
         if timeout is DEFAULT:
             client_default = default if default is not None else self._call_timeout
             return _AppliedTimeout(client_default.seconds, per_call=False, source=client_default.source)
@@ -479,8 +500,8 @@ class ServiceApiClientBase(ABC):
         total deadline is none -- deliberately unlike a unary call, since a healthy stream can run arbitrarily long
         and its default bound is the idle timeout (#81 D2, D3).
         """
-        _check_per_call_timeout(timeout)
-        _check_per_call_timeout(idle_timeout, "idle_timeout")
+        timeout = _per_call_timeout(timeout)
+        idle_timeout = _per_call_timeout(idle_timeout, "idle_timeout")
         total = None if timeout is DEFAULT else timeout
         idle = self._stream_idle_timeout.seconds if idle_timeout is DEFAULT else idle_timeout
         return total, idle

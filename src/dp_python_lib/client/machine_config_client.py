@@ -934,6 +934,7 @@ class MachineConfigClient(ServiceApiClientBase):
         :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
             client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching Configuration records across all pages.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:
@@ -1331,6 +1332,7 @@ class MachineConfigClient(ServiceApiClientBase):
         :param timeout: Deadline in seconds for each page's call, not for the whole iteration.  Omitted: the
             client's default (DEFAULT_CALL_TIMEOUT_SECONDS unless configured).  None: no deadline.
         :return: An iterator over all matching ConfigurationActivation records across all pages.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:

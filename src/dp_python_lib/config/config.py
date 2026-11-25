@@ -1,5 +1,6 @@
 import logging
 import math
+import numbers
 from contextvars import ContextVar
 from typing import Any
 
@@ -98,8 +99,9 @@ def channel_options(
             keepalive_time_seconds,
             MIN_SERVER_KEEPALIVE_SECONDS,
         )
-    time_ms = max(1, round(keepalive_time_seconds * 1000))
-    timeout_ms = max(1, round(keepalive_timeout_seconds * 1000))
+    # int(...): grpcio needs a Python int, and round() of a NumPy number returns a NumPy one.
+    time_ms = max(1, int(round(float(keepalive_time_seconds) * 1000)))
+    timeout_ms = max(1, int(round(float(keepalive_timeout_seconds) * 1000)))
     return [
         ("grpc.keepalive_time_ms", time_ms),
         ("grpc.keepalive_timeout_ms", timeout_ms),
@@ -109,7 +111,8 @@ def channel_options(
 
 
 def _check_seconds(value: float, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    # numbers.Real, so a NumPy integer is accepted like a Python int; bool is excluded explicitly.
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a number of seconds, got {type(value).__name__}")
     if not math.isfinite(value) or value < 0:
         raise ValueError(f"{name} must be a non-negative number of seconds (0 disables it), got {value!r}")

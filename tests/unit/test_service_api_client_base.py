@@ -264,6 +264,21 @@ class TestDispatchTimeout(unittest.TestCase):
                     self._dispatch(client, stub_call, timeout=value)
                 stub_call.assert_not_called()
 
+    def test_numpy_integer_and_float_timeouts_are_accepted_and_forwarded_as_python_floats(self):
+        # numbers.Real, not int | float: np.int64 subclasses neither, and was rejected with a TypeError.
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed (the [analysis] extra)")
+        for value in (np.int64(30), np.int32(30), np.float64(30.0), np.float32(30.0)):
+            with self.subTest(value=type(value).__name__):
+                stub_call = self._ok()
+                self._dispatch(_FakeClient(Mock(), call_timeout=value), stub_call, timeout=value)
+                stub_call.assert_called_once_with(self.request, timeout=30.0)
+                self.assertIs(type(stub_call.call_args.kwargs["timeout"]), float)
+        with self.assertRaises(TypeError):
+            self._dispatch(_FakeClient(Mock()), self._ok(), timeout=np.bool_(True))
+
     def test_per_call_non_number_raises_type_error(self):
         for value in ("30", True):
             with self.subTest(value=value), self.assertRaises(TypeError):
@@ -343,6 +358,39 @@ class TestResolveStreamTimeouts(unittest.TestCase):
     def test_zero_idle_timeout_raises_naming_idle_timeout(self):
         with self.assertRaisesRegex(ValueError, "idle_timeout=None"):
             _FakeClient(Mock())._resolve_stream_timeouts(DEFAULT, 0)
+
+
+class TestIterStreamCancel(unittest.TestCase):
+    """_iter_stream() cancels the call in its finally, so closing it early does not wait on garbage collection."""
+
+    def _stream(self, count):
+        stream = Mock()
+        stream.__iter__ = Mock(return_value=iter([_response_with_field("someResult") for _ in range(count)]))
+        return stream
+
+    def _iter(self, client, stream):
+        return client._iter_stream(Mock(return_value=stream), Mock(), _FakeApiResult, "someResult", "someStream")
+
+    def test_closing_the_generator_early_cancels_the_call(self):
+        stream = self._stream(3)
+        results = self._iter(_FakeClient(Mock()), stream)
+        next(results)
+        stream.cancel.assert_not_called()
+        results.close()
+        stream.cancel.assert_called_once_with()
+
+    def test_a_stream_read_to_the_end_is_cancelled_harmlessly_once(self):
+        # Cancelling a finished grpcio call does nothing; the point is that the finally always runs it.
+        stream = self._stream(2)
+        self.assertEqual(2, len(list(self._iter(_FakeClient(Mock()), stream))))
+        stream.cancel.assert_called_once_with()
+
+    def test_a_stream_without_cancel_is_fine(self):
+        # A mocked stub may return a plain iterator.
+        results = _FakeClient(Mock())._iter_stream(
+            Mock(return_value=iter([_response_with_field("someResult")])), Mock(), _FakeApiResult, "someResult", "s"
+        )
+        self.assertEqual(1, len(list(results)))
 
 
 def _watchdog_threads():

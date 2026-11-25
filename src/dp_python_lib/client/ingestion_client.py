@@ -503,7 +503,8 @@ class _UploadClock(_FeedListener):
 class _BidiIdleClock(_FeedListener):
     """
     The bidirectional ingest idle clock (#81 D3, R1): runs only while the caller is blocked waiting for a response
-    AND requests are outstanding (handed to grpcio but not yet answered).
+    AND the server owes one: a request is outstanding (handed to grpcio but not yet answered), or the feed is
+    exhausted, so all that remains is the server closing the stream.
 
     Either condition alone is wrong.  Outstanding alone counts the consumer's time: with ten requests sent and the
     caller spending a long time on the first ack, the other nine acks may already be buffered client-side.  Waiting
@@ -511,6 +512,11 @@ class _BidiIdleClock(_FeedListener):
     to wait for from the server.  The two change on different threads (handed_over on grpcio's request thread,
     waiting on the caller's), so both live under one lock and every transition re-evaluates.  The clock keeps its
     start while it stays running, so a new request handed over does not restart it for older unanswered ones.
+
+    Exhaustion counts as owing because, with every request answered, the caller is still in next() waiting for the
+    end of the stream: a server whose handler hangs after its last ack would otherwise hold the call open forever,
+    unbounded by default since a stream has no total deadline.  It mirrors _UploadClock, armed from exhaustion until
+    the summary.
     """
 
     def __init__(self, watchdog: _IdleWatchdog) -> None:
@@ -519,10 +525,11 @@ class _BidiIdleClock(_FeedListener):
         self._waiting = False
         self._sent = 0
         self._received = 0
+        self._exhausted = False
         self._running = False
 
     def _update(self) -> None:
-        should_run = self._waiting and self._sent > self._received
+        should_run = self._waiting and (self._sent > self._received or self._exhausted)
         if should_run and not self._running:
             self._watchdog.arm()
         elif not should_run and self._running:
@@ -532,6 +539,11 @@ class _BidiIdleClock(_FeedListener):
     def handed_over(self) -> None:
         with self._lock:
             self._sent += 1
+            self._update()
+
+    def exhausted(self) -> None:
+        with self._lock:
+            self._exhausted = True
             self._update()
 
     def start_waiting(self) -> None:
@@ -1024,7 +1036,7 @@ class IngestionClient(ServiceApiClientBase):
         the two apart.  The feed's own exception, if any, is re-raised instead.
 
         The idle watchdog runs on the _BidiIdleClock's terms: only while this generator waits for a response with
-        requests outstanding.
+        requests outstanding, or, once the feed is exhausted, for the end of the stream.
 
         :param feed: The request iterator.
         :param timeout: Resolved total deadline in seconds, or None for none.
@@ -1120,12 +1132,14 @@ class IngestionClient(ServiceApiClientBase):
 
         Reading to the end needs no close: the call has finished by then.
 
-        The idle timeout counts only time spent waiting here for a response while requests are outstanding: not
-        the time the caller spends on a result (later acks may already be buffered), nor the time the iterable
-        spends producing a request.  On expiry the call is cancelled and this raises RuntimeError.
+        The idle timeout counts only time spent waiting here for a response while requests are outstanding, and,
+        once the iterable is exhausted, for the server to close the stream: not the time the caller spends on a
+        result (later acks may already be buffered), nor the time the iterable spends producing a request.  On
+        expiry the call is cancelled and this raises RuntimeError.
 
         :param requests: The requests to send.
-        :param idle_timeout: Longest wait, in seconds, for a response to an outstanding request (see above).
+        :param idle_timeout: Longest wait, in seconds, for a response to an outstanding request, or for the end of
+            the stream after the last request (see above).
             Omitted: the client's default (DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS unless configured).  None: no bound.
         :param timeout: Optional total deadline, in seconds, for the whole call.  Omitted or None: none -- unlike
             the unary methods, since a long stream is legitimate and idle_timeout is the default bound.

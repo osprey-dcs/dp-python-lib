@@ -411,7 +411,9 @@ no stub call passed a `timeout` and channels had no keepalive, so a call the ser
   conveniences forward theirs; the pinned count covers client methods only).  `DEFAULT` is an enum member so mypy narrows on it; it is not exported, since callers
   only ever omit it.  Three cases: omitted is the client default, a positive number is that deadline, `None`
   is none.  A per-call value `<= 0` (or NaN/inf) raises `ValueError`, because grpcio reads `0` as already
-  expired while config reads it as disabled; a `bool` or non-number raises `TypeError`.  A disabled deadline
+  expired while config reads it as disabled; a `bool` or non-number raises `TypeError`.  Any other
+  `numbers.Real` counts (so `np.int64` works, which an `int | float` check rejected) and is normalized to a
+  Python `float` before it reaches grpcio.  A disabled deadline
   sends **no `timeout` keyword at all**, so an opted-out call is exactly the pre-#81 call.
   `await_request_statuses()` is the exception: its existing `timeout` stays the total wait, and each poll is
   bounded by `min(client default, remaining)` with a 1 s floor (`AWAIT_MIN_POLL_SECONDS`).
@@ -423,9 +425,13 @@ no stub call passed a `timeout` and channels had no keepalive, so a call the ser
 - **The idle clock counts only time spent waiting on the server**, never consumer or producer time.  One
   `_IdleWatchdog` per call, one daemon thread waiting on a `Condition` (not a `threading.Timer` per message,
   which would start thousands of threads), with `arm()` / `disarm()` / `expired` / `stop()`, always stopped in
-  the sender's `finally`.  Server streams arm it around each `next()`.  Bidi ingest (`_BidiIdleClock`) runs it
-  only while the caller is in `next()` **and** a request is unanswered; either condition alone is wrong (a
-  mutation test pins the outstanding-only form failing).  Client-streaming ingest (`_UploadClock`, over
+  the sender's `finally`.  Server streams arm it around each `next()`, and `_iter_stream()` cancels the call in
+  its `finally`, so closing the generator early does not wait on grpcio's cancel-on-garbage-collection.  Bidi
+  ingest (`_BidiIdleClock`) runs it only while the caller is in `next()` **and** the server owes a message: a
+  request is unanswered, or the feed is exhausted and only the end of the stream remains.  Either condition alone
+  is wrong (a mutation test pins the outstanding-only form failing), and the exhausted arm is not optional: without
+  it a server that acks everything and then never closes the stream hangs the call forever, since a stream has no
+  total deadline by default (`test_bidi_stream_left_open_after_every_ack_trips`).  Client-streaming ingest (`_UploadClock`, over
   `stub.ingestDataStream.future()`) runs it from the feed handing grpcio a request until grpcio pulls the next,
   and from exhaustion until the summary.  That catches an upload stall, because grpcio stops pulling once
   HTTP/2 flow control closes (measured in the plan's T1).  On expiry the call is cancelled and the sender reports

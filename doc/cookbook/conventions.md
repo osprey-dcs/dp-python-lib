@@ -371,7 +371,8 @@ cancelled.  Time your own code spends counts for nothing:
   `iter_sample_statuses_stream()`): the clock runs only while your loop is waiting for the next
   message.  Processing a page for ten minutes does not trip it.
 - **`iter_ingest_data_bidi_stream()`**: the clock runs only while your loop is waiting for a result
-  *and* a request is still unanswered.  The time your request generator spends producing the next
+  *and* the server owes one: a request is still unanswered, or your requests are exhausted and only
+  the end of the stream remains.  The time your request generator spends producing the next
   request does not count.
 - **`ingest_data_stream()`**: the clock runs while gRPC is sending a request, and after your
   requests are exhausted, until the summary arrives.  A server that stops reading stalls the upload,

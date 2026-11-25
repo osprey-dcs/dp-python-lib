@@ -159,8 +159,9 @@ class TestTimeoutsAgainstInProcessServer(unittest.TestCase):
 
 class _IngestionServicer(ingestion_pb2_grpc.DpIngestionServiceServicer):
     """
-    mode: "ok" (read promptly, answer promptly), "silent" (read everything, never answer), or "deaf" (never read
-    the request stream at all, so HTTP/2 flow control eventually stops the client's sends).
+    mode: "ok" (read promptly, answer promptly), "silent" (read everything, never answer), "deaf" (never read
+    the request stream at all, so HTTP/2 flow control eventually stops the client's sends), or "unclosed" (bidi
+    only: ack every request, then never close the stream).
     """
 
     def __init__(self):
@@ -192,7 +193,7 @@ class _IngestionServicer(ingestion_pb2_grpc.DpIngestionServiceServicer):
             response = ingestion_pb2.IngestDataResponse(clientRequestId=request.clientRequestId)
             response.ackResult.numRows = 1
             yield response
-        if self.mode == "silent":
+        if self.mode in ("silent", "unclosed"):
             self._hang(context)
 
 
@@ -285,6 +286,32 @@ class TestIngestionIdleTimeoutsAgainstInProcessServer(unittest.TestCase):
             str(ctx.exception),
         )
         self.assertLess(time.monotonic() - began, IDLE + 1.5)
+
+    def test_bidi_stream_left_open_after_every_ack_trips(self):
+        # Every request is acked, then the server never closes the stream.  Nothing is outstanding, but the caller
+        # is still in next() waiting for the end of the stream, so the clock runs once the feed is exhausted.
+        # The total deadline is only a backstop, so that without the fix this fails rather than hangs the suite.
+        self.servicer.mode = "unclosed"
+        received = []
+        began = time.monotonic()
+        with self.assertRaises(RuntimeError) as ctx:
+            for result in self.client.iter_ingest_data_bidi_stream(_requests(2), idle_timeout=IDLE, timeout=3):
+                received.append(result.client_request_id)
+        self.assertEqual(["r-0", "r-1"], received)
+        self.assertEqual(
+            "ingestDataBidiStream failed: gRPC error: stream idle timeout: no message from the server within 0.5 s",
+            str(ctx.exception),
+        )
+        self.assertLess(time.monotonic() - began, IDLE + 1.5)
+
+    def test_bidi_slow_consumer_after_the_last_request_does_not_trip(self):
+        # The exhausted-feed clock still counts only time waiting in next(): a caller slower than the bound on the
+        # last ack, after the iterable is done, is not waiting on the server.
+        received = []
+        for result in self.client.iter_ingest_data_bidi_stream(_requests(2), idle_timeout=IDLE):
+            received.append(result.client_request_id)
+            time.sleep(IDLE * 1.5)
+        self.assertEqual(["r-0", "r-1"], received)
 
     def test_bidi_slow_producer_does_not_trip(self):
         # Waiting in next() while the caller's own iterable builds the next request: nothing is outstanding.

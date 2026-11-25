@@ -757,6 +757,7 @@ class AnnotationsClient(ServiceApiClientBase):
         :return: An iterator over all matching Annotation records across all pages.
         :raises ValueError: if criteria contains more than one text criterion.
         :raises RuntimeError: if any page returns an error.
+        :raises ValueError: if timeout is zero or negative (on the first next()).
         """
         page_token: str | None = None
         while True:

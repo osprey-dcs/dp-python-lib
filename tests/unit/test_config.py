@@ -248,6 +248,18 @@ class TestChannelOptions(unittest.TestCase):
         for value in options.values():
             self.assertIs(type(value), int)
 
+    def test_numpy_values_are_accepted_and_become_python_ints(self):
+        # grpcio needs Python ints, and round() of a NumPy number returns a NumPy one.
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed (the [analysis] extra)")
+        options = dict(channel_options(keepalive_time_seconds=np.int64(45), keepalive_timeout_seconds=np.float64(2.5)))
+        self.assertEqual(options["grpc.keepalive_time_ms"], 45_000)
+        self.assertEqual(options["grpc.http2.ping_timeout_ms"], 2_500)
+        for value in options.values():
+            self.assertIs(type(value), int)
+
     def test_sub_millisecond_values_round_up_to_one_millisecond(self):
         # 0 ms would mean something else to grpc-core (or be rejected), not "very short".
         with self.assertLogs(_CONFIG_LOGGER, "WARNING"):
